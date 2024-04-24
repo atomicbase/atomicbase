@@ -5,13 +5,13 @@ import (
 	"strings"
 )
 
-type Table struct {
+type Relation struct {
 	name    string
 	alias   string
 	inner   bool
 	columns []column
-	joins   []*Table
-	parent  *Table
+	joins   []*Relation
+	parent  *Relation
 }
 
 type column struct {
@@ -19,40 +19,50 @@ type column struct {
 	alias string
 }
 
-func (schema SchemaCache) buildSelect(table Table) (string, string, error) {
+func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 	agg := ""
 	sel := ""
 	joins := ""
 
-	if table.columns == nil && table.joins == nil {
-		table.columns = []column{{"*", ""}}
+	if rel.columns == nil && rel.joins == nil {
+		rel.columns = []column{{"*", ""}}
 	}
 
-	for _, col := range table.columns {
+	tbl, err := schema.SearchTbls(rel.name)
+	if err != nil {
+		return "", "", err
+	}
+
+	for _, col := range rel.columns {
 		if col.name == "*" {
 			sel += "*, "
-			for name, t := range schema.Tables[table.name] {
-				if strings.ToLower(t) == "blob" {
+			for _, col := range tbl.Columns {
+				if strings.ToLower(col.Type) == "blob" {
 					continue
 				}
 
-				agg += fmt.Sprintf("'%s', [%s], ", name, name)
+				agg += fmt.Sprintf("'%s', [%s], ", col.Name, col.Name)
 			}
 
 			continue
 		}
 
-		if strings.ToLower(schema.Tables[table.name][col.name]) == "blob" {
+		column, err := tbl.SearchCols(col.name)
+		if err != nil {
+			return "", "", err
+		}
+
+		if strings.ToLower(column.Type) == "blob" {
 			continue
 		}
 
 		if col.name == "count" {
-			sel += fmt.Sprintf("COUNT([%s]) as [count], ", schema.Pks[table.name])
+			sel += fmt.Sprintf("COUNT([%s]) as [count], ", tbl.Pk)
 			agg += "'count', [count], "
 			continue
 		}
 
-		sel += fmt.Sprintf("[%s].[%s], ", table.name, col.name)
+		sel += fmt.Sprintf("[%s].[%s], ", rel.name, col.name)
 		if col.alias != "" {
 			agg += fmt.Sprintf("'%s', [%s], ", col.alias, col.name)
 		} else {
@@ -60,20 +70,21 @@ func (schema SchemaCache) buildSelect(table Table) (string, string, error) {
 		}
 	}
 
-	for _, tbl := range table.joins {
+	for _, tbl := range rel.joins {
 		if tbl.alias != "" {
 			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.alias, tbl.name)
 		} else {
 			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.name, tbl.name)
 		}
-		query, aggs, err := schema.buildSelCurr(*tbl, table.name)
+		query, aggs, err := schema.buildSelCurr(*tbl, rel.name)
 		if err != nil {
 			return "", "", err
 		}
 		var fk Fk
 		for _, key := range schema.Fks {
-			if key.References == table.name && key.Table == tbl.name {
+			if key.References == rel.name && key.Table == tbl.name {
 				fk = key
+				break
 			}
 		}
 
@@ -91,61 +102,76 @@ func (schema SchemaCache) buildSelect(table Table) (string, string, error) {
 		joins += fmt.Sprintf("JOIN (%s) AS [%s] ON [%s].[%s] = [%s].[%s] ", query, tbl.name, fk.References, fk.To, fk.Table, fk.From)
 	}
 
-	return "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", table.name) + joins, agg[:len(agg)-2], nil
+	return "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", rel.name) + joins, agg[:len(agg)-2], nil
 }
 
-func (schema SchemaCache) buildSelCurr(table Table, joinedOn string) (string, string, error) {
+func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, string, error) {
 	var sel string
 	var joins string
 	var agg string
 	includesFk := false
 	var fk Fk
 
-	if table.columns == nil && table.joins == nil {
-		table.columns = []column{{"*", ""}}
+	if rel.columns == nil && rel.joins == nil {
+		rel.columns = []column{{"*", ""}}
+	}
+
+	tbl, err := schema.SearchTbls(rel.name)
+	if err != nil {
+		return "", "", err
 	}
 
 	if joinedOn != "" {
 		for _, key := range schema.Fks {
-			if key.References == joinedOn && key.Table == table.name {
+			if key.References == joinedOn && key.Table == rel.name {
 				fk = key
+				break
 			}
 		}
 	}
 
-	for _, col := range table.columns {
-		if joinedOn != "" && fk.Table == table.name && fk.From == col.name {
+	for _, col := range rel.columns {
+		if joinedOn != "" && fk.Table == rel.name && fk.From == col.name {
 			includesFk = true
 		}
 
 		if col.name == "*" {
 			sel += "*, "
-			for name, t := range schema.Tables[table.name] {
-				if strings.ToLower(t) == "blob" {
+			for _, col := range tbl.Columns {
+				if strings.ToLower(col.Type) == "blob" {
 					continue
 				}
 
-				agg += fmt.Sprintf("'%s', [%s].[%s], ", name, table.name, name)
+				agg += fmt.Sprintf("'%s', [%s].[%s], ", col.Name, rel.name, col.Name)
 			}
 
 			continue
 		}
 
-		if strings.ToLower(schema.Tables[table.name][col.name]) == "blob" {
+		column, err := tbl.SearchCols(col.name)
+		if err != nil {
+			return "", "", err
+		}
+
+		if strings.ToLower(column.Type) == "blob" {
+			continue
+		}
+
+		if strings.ToLower(column.Type) == "blob" {
 			continue
 		}
 
 		if col.name == "count" {
-			sel += fmt.Sprintf("COUNT([%s]), ", schema.Pks[table.name])
+			sel += fmt.Sprintf("COUNT([%s]), ", tbl.Pk)
 			agg += "'count', count, "
 			continue
 		}
 
-		sel += fmt.Sprintf("[%s].[%s], ", table.name, col.name)
+		sel += fmt.Sprintf("[%s].[%s], ", rel.name, col.name)
 		if col.alias != "" {
-			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.alias, table.name, col.name)
+			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.alias, rel.name, col.name)
 		} else {
-			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.name, table.name, col.name)
+			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.name, rel.name, col.name)
 		}
 
 	}
@@ -154,24 +180,25 @@ func (schema SchemaCache) buildSelCurr(table Table, joinedOn string) (string, st
 		sel += fmt.Sprintf("[%s].[%s], ", fk.Table, fk.From)
 	}
 
-	for _, tbl := range table.joins {
+	for _, tbl := range rel.joins {
 		if tbl.alias != "" {
 			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.alias, tbl.name)
 		} else {
 			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.name, tbl.name)
 		}
-		query, aggs, err := schema.buildSelCurr(*tbl, table.name)
+		query, aggs, err := schema.buildSelCurr(*tbl, rel.name)
 		if err != nil {
 			return "", "", err
 		}
 		var fk Fk
 		for _, key := range schema.Fks {
-			if key.References == table.name && key.Table == tbl.name {
+			if key.References == rel.name && key.Table == tbl.name {
 				fk = key
+				break
 			}
 		}
 		if fk == (Fk{}) {
-			return "", "", fmt.Errorf("no relationship exists in the schema cache between %s and %s", table.name, tbl.name)
+			return "", "", fmt.Errorf("no relationship exists in the schema cache between %s and %s", rel.name, tbl.name)
 		}
 
 		sel += fmt.Sprintf("json_group_array(json_object(%s)) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, fk.Table, fk.From, tbl.name)
@@ -186,11 +213,11 @@ func (schema SchemaCache) buildSelCurr(table Table, joinedOn string) (string, st
 
 	}
 
-	return "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", table.name) + joins, agg[:len(agg)-2], nil
+	return "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", rel.name) + joins, agg[:len(agg)-2], nil
 }
 
-func (schema SchemaCache) parseSelect(param string, table string) (Table, error) {
-	tbl := Table{table, "", false, nil, nil, nil}
+func parseSelect(param string, table string) Relation {
+	tbl := Relation{table, "", false, nil, nil, nil}
 	currTbl := &tbl
 	currStr := ""
 	alias := ""
@@ -216,28 +243,18 @@ func (schema SchemaCache) parseSelect(param string, table string) (Table, error)
 		case '"':
 			quoted = !quoted
 		case '(':
-			err := schema.checkTbl(currStr)
-			if err != nil {
-				return Table{}, err
-			}
-			currTbl = &Table{currStr, alias, inner, nil, nil, currTbl}
+			currTbl = &Relation{currStr, alias, inner, nil, nil, currTbl}
 			currTbl.parent.joins = append(currTbl.parent.joins, currTbl)
 			currStr = ""
 			alias = ""
 			inner = false
 		case ')':
-			if currStr == "" {
-				continue
+			if currStr != "" {
+				currTbl.columns = append(currTbl.columns, column{currStr, alias})
 			}
-
-			err := schema.checkCol(currTbl.name, currStr)
-			if err != nil {
-				return Table{}, err
-			}
-			currTbl.columns = append(currTbl.columns, column{currStr, alias})
+			currTbl = currTbl.parent
 			currStr = ""
 			alias = ""
-			currTbl = currTbl.parent
 		case ':':
 			alias = currStr
 			currStr = ""
@@ -246,11 +263,6 @@ func (schema SchemaCache) parseSelect(param string, table string) (Table, error)
 		case ',':
 			if currStr == "" {
 				continue
-			}
-
-			err := schema.checkCol(currTbl.name, currStr)
-			if err != nil {
-				return Table{}, err
 			}
 			currTbl.columns = append(currTbl.columns, column{currStr, alias})
 			alias = ""
@@ -261,15 +273,10 @@ func (schema SchemaCache) parseSelect(param string, table string) (Table, error)
 	}
 
 	if currStr == "" {
-		return tbl, nil
-	}
-
-	err := schema.checkCol(currTbl.name, currStr)
-	if err != nil {
-		return Table{}, err
+		return tbl
 	}
 
 	currTbl.columns = append(currTbl.columns, column{currStr, alias})
 
-	return tbl, nil
+	return tbl
 }

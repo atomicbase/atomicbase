@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/gob"
+	"fmt"
 	"log"
 )
 
@@ -16,7 +17,7 @@ func schemaFks(db *sql.DB) ([]Fk, error) {
 		FROM sqlite_master m
 		JOIN pragma_foreign_key_list(m.name) p ON m.name != p."table"
 		WHERE m.type = 'table'
-		ORDER BY m.name;
+		ORDER BY "table" ASC, "references" ASC, "from" ASC;
 	`)
 	if err != nil {
 		return nil, err
@@ -35,21 +36,24 @@ func schemaFks(db *sql.DB) ([]Fk, error) {
 	return fks, err
 }
 
-func schemaCols(db *sql.DB) (TblMap, map[string]string, error) {
+func schemaCols(db *sql.DB) ([]Table, error) {
 
-	tblMap := make(TblMap)
-	pkMap := make(map[string]string)
+	var tbls []Table
 
 	rows, err := db.Query(`
 		SELECT m.name, l.name as col, l.type as colType, l.pk
 		FROM sqlite_master m
 		JOIN pragma_table_info(m.name) l
 		WHERE m.type = 'table'
+		ORDER BY m.name ASC, col ASC;
 	`)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer rows.Close()
+
+	var currTbl Table
+	firstRow := true
 
 	for rows.Next() {
 		var col sql.NullString
@@ -59,16 +63,26 @@ func schemaCols(db *sql.DB) (TblMap, map[string]string, error) {
 
 		rows.Scan(&name, &col, &colType, &pk)
 
-		if tblMap[name.String] == nil {
-			tblMap[name.String] = make(map[string]string)
+		if currTbl.Name != name.String {
+			if firstRow {
+				currTbl.Name = name.String
+				firstRow = false
+			} else {
+				tbls = append(tbls, currTbl)
+				currTbl = Table{name.String, "", nil}
+			}
 		}
-		tblMap[name.String][col.String] = colType.String
+
+		currTbl.Columns = append(currTbl.Columns, Col{col.String, colType.String})
+
 		if pk.Bool {
-			pkMap[name.String] = col.String
+			currTbl.Pk = col.String
 		}
 	}
 
-	return tblMap, pkMap, rows.Err()
+	tbls = append(tbls, currTbl)
+
+	return tbls, rows.Err()
 
 }
 
@@ -116,4 +130,62 @@ func loadSchema(data []byte) (SchemaCache, error) {
 
 	return schema, err
 
+}
+
+func (schema SchemaCache) SearchFks(table string, references string) int {
+	left, right := 0, len(schema.Fks)-1
+
+	for left <= right {
+		mid := (left + right) / 2
+		midValue := schema.Fks[mid]
+
+		if midValue.Table == table && midValue.References == references {
+			return mid
+		} else if midValue.Table < table {
+			left = mid + 1
+		} else if midValue.Table == table && midValue.References < references {
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+
+	return -1
+}
+
+func (schema SchemaCache) SearchTbls(table string) (Table, error) {
+	left, right := 0, len(schema.Tables)-1
+
+	for left <= right {
+		mid := (left + right) / 2
+		midValue := schema.Tables[mid].Name
+		if midValue == table {
+			return schema.Tables[mid], nil
+		} else if midValue < table {
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+
+	return Table{}, fmt.Errorf("table %s does not exist. Your schema cache may be stale", table)
+}
+
+func (tbl Table) SearchCols(col string) (Col, error) {
+
+	left, right := 0, len(tbl.Columns)-1
+
+	for left <= right {
+		mid := (left + right) / 2
+		midValue := tbl.Columns[mid].Name
+		if midValue == col {
+			return tbl.Columns[mid], nil
+		} else if midValue < col {
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+
+	return Col{}, fmt.Errorf("column %s does not exist on table %s. Your schema cache may be stale", col, tbl.Name)
 }

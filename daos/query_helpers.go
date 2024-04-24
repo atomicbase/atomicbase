@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func (schema SchemaCache) buildReturning(relation string, cols string) (string, error) {
+func (table Table) buildReturning(cols string) (string, error) {
 	if cols == "" || cols == "*" {
 		return "RETURNING * ", nil
 	}
@@ -39,7 +39,7 @@ func (schema SchemaCache) buildReturning(relation string, cols string) (string, 
 				continue
 			}
 
-			err := schema.checkCol(relation, currStr)
+			_, err := table.SearchCols(currStr)
 			if err != nil {
 				return "", err
 			}
@@ -56,7 +56,7 @@ func (schema SchemaCache) buildReturning(relation string, cols string) (string, 
 	}
 
 	if currStr != "" {
-		err := schema.checkCol(relation, currStr)
+		_, err := table.SearchCols(currStr)
 		if err != nil {
 			return "", err
 		}
@@ -70,7 +70,7 @@ func (schema SchemaCache) buildReturning(relation string, cols string) (string, 
 	return query[:len(query)-2] + " ", nil
 }
 
-func (schema SchemaCache) BuildWhere(relation string, params url.Values) (string, []any, error) {
+func (table Table) BuildWhere(params url.Values) (string, []any, error) {
 	query := "WHERE "
 	var args []any
 	hasWhere := false
@@ -89,14 +89,14 @@ func (schema SchemaCache) BuildWhere(relation string, params url.Values) (string
 					var col string
 
 					if len(orList[0]) < 2 {
-						tbl = relation
+						tbl = table.Name
 						col = or[0][0]
 					} else {
 						tbl = or[0][0]
 						col = or[0][1]
 					}
 
-					err := schema.checkCol(tbl, col)
+					_, err := table.SearchCols(col)
 					if err != nil {
 						return "", nil, err
 					}
@@ -119,14 +119,14 @@ func (schema SchemaCache) BuildWhere(relation string, params url.Values) (string
 		var col string
 		split := token(name)
 		if len(split) < 2 {
-			tbl = relation
+			tbl = table.Name
 			col = split[0]
 		} else {
 			tbl = split[0]
 			col = split[1]
 		}
 
-		err := schema.checkCol(tbl, col)
+		_, err := table.SearchCols(col)
 		if err != nil {
 			return "", nil, err
 		}
@@ -152,7 +152,7 @@ func (schema SchemaCache) BuildWhere(relation string, params url.Values) (string
 	return query, args, nil
 }
 
-func (schema SchemaCache) BuildOrder(relation, orderBy string) (string, error) {
+func (table Table) BuildOrder(orderBy string) (string, error) {
 	if orderBy == "" {
 		return "", nil
 	}
@@ -166,14 +166,14 @@ func (schema SchemaCache) BuildOrder(relation, orderBy string) (string, error) {
 		var tbl string
 		var col string
 		if len(order[0]) < 2 {
-			tbl = relation
+			tbl = table.Name
 			col = order[0][0]
 		} else {
 			tbl = order[0][0]
 			col = order[0][1]
 		}
 
-		err := schema.checkCol(tbl, col)
+		_, err := table.SearchCols(col)
 		if err != nil {
 			return "", err
 		}

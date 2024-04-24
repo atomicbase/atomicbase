@@ -181,7 +181,7 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 		return nil, err
 	}
 
-	cols, pks, err := schemaCols(newClient)
+	tbls, err := schemaCols(newClient)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +191,7 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 	}
 
 	var buf bytes.Buffer
-	schema := SchemaCache{cols, pks, fks}
+	schema := SchemaCache{tbls, fks}
 	enc := gob.NewEncoder(&buf)
 
 	err = enc.Encode(schema)

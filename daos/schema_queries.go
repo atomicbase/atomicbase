@@ -28,9 +28,26 @@ type NewColumn struct {
 	OnUpdate   string `json:"onUpdate"`
 }
 
+func (dao *Database) updateSchema() error {
+	cols, err := schemaCols(dao.Client)
+	if err != nil {
+		fmt.Println("cols")
+		return err
+	}
+	fks, err := schemaFks(dao.Client)
+	if err != nil {
+		fmt.Println("fks")
+		return err
+	}
+
+	dao.Schema = SchemaCache{cols, fks}
+
+	return nil
+}
+
 func (dao *Database) InvalidateSchema() error {
 
-	cols, pks, err := schemaCols(dao.Client)
+	cols, err := schemaCols(dao.Client)
 	if err != nil {
 		return err
 	}
@@ -39,16 +56,12 @@ func (dao *Database) InvalidateSchema() error {
 		return err
 	}
 
-	dao.Schema = SchemaCache{cols, pks, fks}
+	dao.Schema = SchemaCache{cols, fks}
 
 	return dao.saveSchema()
 }
 
 func (dao Database) GetTableSchema(table string) ([]byte, error) {
-	err := dao.Schema.checkTbl(table)
-	if err != nil {
-		return nil, err
-	}
 
 	type fKey struct {
 		Column     string `json:"column"`
@@ -56,15 +69,17 @@ func (dao Database) GetTableSchema(table string) ([]byte, error) {
 	}
 
 	type tableSchema struct {
-		Columns     map[string]string `json:"columns"`
-		PrimaryKey  string            `json:"primaryKey"`
-		ForeignKeys []fKey            `json:"foreignKeys"`
+		Columns     []Col  `json:"columns"`
+		PrimaryKey  string `json:"primaryKey"`
+		ForeignKeys []fKey `json:"foreignKeys"`
 	}
 
 	var buf bytes.Buffer
 
-	cols := dao.Schema.Tables[table]
-	primaryKey := dao.Schema.Pks[table]
+	tbl, err := dao.Schema.SearchTbls(table)
+	if err != nil {
+		return nil, err
+	}
 
 	var fks []fKey
 
@@ -74,7 +89,7 @@ func (dao Database) GetTableSchema(table string) ([]byte, error) {
 		}
 	}
 
-	err = json.NewEncoder(&buf).Encode(tableSchema{cols, primaryKey, fks})
+	err = json.NewEncoder(&buf).Encode(tableSchema{tbl.Columns, tbl.Pk, fks})
 
 	return buf.Bytes(), err
 }
@@ -87,7 +102,7 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 		DropColums    []string             `json:"dropColumns"`
 	}
 
-	err := dao.Schema.checkTbl(table)
+	tbl, err := dao.Schema.SearchTbls(table)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +117,7 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 
 	if changes.RenameColumns != nil {
 		for col, new := range changes.RenameColumns {
-			err = dao.Schema.checkCol(table, col)
+			_, err = tbl.SearchCols(col)
 			if err != nil {
 				return nil, err
 			}
@@ -113,7 +128,7 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 
 	if changes.DropColums != nil {
 		for _, col := range changes.DropColums {
-			err = dao.Schema.checkCol(table, col)
+			_, err = tbl.SearchCols(col)
 			if err != nil {
 				return nil, err
 			}
@@ -152,9 +167,12 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 					}
 					if col.References[i] == '.' && !quoted {
 						toTbl = col.References[:i]
+						toTable, err := dao.Schema.SearchTbls(toTbl)
+						if err != nil {
+							return nil, err
+						}
 						toCol = col.References[i+1:]
-
-						err = dao.Schema.checkCol(toTbl, toCol)
+						_, err = toTable.SearchCols(toCol)
 						if err != nil {
 							return nil, err
 						}
@@ -238,9 +256,12 @@ func (dao Database) CreateTable(table string, body io.ReadCloser) ([]byte, error
 				}
 				if col.References[i] == '.' && !quoted {
 					fk.toTbl = col.References[:i]
+					toTable, err := dao.Schema.SearchTbls(fk.toTbl)
+					if err != nil {
+						return nil, err
+					}
 					fk.toCol = col.References[i+1:]
-
-					err = dao.Schema.checkCol(fk.toTbl, fk.toCol)
+					_, err = toTable.SearchCols(fk.toCol)
 					if err != nil {
 						return nil, err
 					}
@@ -276,7 +297,7 @@ func (dao Database) CreateTable(table string, body io.ReadCloser) ([]byte, error
 
 func (dao Database) DropTable(table string) ([]byte, error) {
 
-	err := dao.Schema.checkTbl(table)
+	_, err := dao.Schema.SearchTbls(table)
 	if err != nil {
 		return nil, err
 	}

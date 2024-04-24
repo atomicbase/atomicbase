@@ -21,6 +21,11 @@ func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
 		return nil, errors.New("cannot query table databases")
 	}
 
+	table, err := dao.Schema.SearchTbls(relation)
+	if err != nil {
+		return nil, err
+	}
+
 	var sel string
 
 	if params.Has("select") {
@@ -30,24 +35,21 @@ func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
 		sel = "*"
 	}
 
-	tbls, err := dao.Schema.parseSelect(sel, relation)
-	if err != nil {
-		return nil, err
-	}
+	tbls := parseSelect(sel, relation)
 
 	query, agg, err := dao.Schema.buildSelect(tbls)
 	if err != nil {
 		return nil, err
 	}
 
-	where, args, err := dao.Schema.BuildWhere(relation, params)
+	where, args, err := table.BuildWhere(params)
 	if err != nil {
 		return nil, err
 	}
 	query += where
 
 	if params["order"] != nil {
-		order, err := dao.Schema.BuildOrder(relation, params["order"][0])
+		order, err := table.BuildOrder(params["order"][0])
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +76,7 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 		return nil, errors.New("cannot query table databases")
 	}
 
-	err := dao.Schema.checkTbl(relation)
+	table, err := dao.Schema.SearchTbls(relation)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +93,7 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 	colI := 0
 	for col, val := range cols {
 
-		err = dao.Schema.checkCol(relation, col)
+		_, err = table.SearchCols(col)
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +107,7 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 		colI++
 	}
 
-	where, whereArgs, err := dao.Schema.BuildWhere(relation, params)
+	where, whereArgs, err := table.BuildWhere(params)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +115,7 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 	args = append(args, whereArgs...)
 
 	if params["select"] != nil {
-		selQuery, err := dao.Schema.buildReturning(relation, params["select"][0])
+		selQuery, err := table.buildReturning(params["select"][0])
 		if err != nil {
 			return nil, err
 		}
@@ -135,9 +137,14 @@ func (dao Database) Insert(relation string, params url.Values, body io.ReadClose
 		return nil, errors.New("cannot query table databases")
 	}
 
+	table, err := dao.Schema.SearchTbls(relation)
+	if err != nil {
+		return nil, err
+	}
+
 	var cols map[string]any
 
-	err := json.NewDecoder(body).Decode(&cols)
+	err = json.NewDecoder(body).Decode(&cols)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +156,7 @@ func (dao Database) Insert(relation string, params url.Values, body io.ReadClose
 	values := ""
 
 	for col, val := range cols {
-		err = dao.Schema.checkCol(relation, col)
+		_, err = table.SearchCols(col)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +170,7 @@ func (dao Database) Insert(relation string, params url.Values, body io.ReadClose
 	query := fmt.Sprintf("INSERT INTO [%s] (%s) VALUES (%s) ", relation, columns[:len(columns)-2], values[:len(values)-2])
 
 	if params.Has("select") {
-		selQuery, err := dao.Schema.buildReturning(relation, params["select"][0])
+		selQuery, err := table.buildReturning(params["select"][0])
 		if err != nil {
 			return nil, err
 		}
@@ -183,9 +190,14 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 		return nil, errors.New("cannot query table databases")
 	}
 
+	table, err := dao.Schema.SearchTbls(relation)
+	if err != nil {
+		return nil, err
+	}
+
 	var colSlice []map[string]any
 
-	err := json.NewDecoder(body).Decode(&colSlice)
+	err = json.NewDecoder(body).Decode(&colSlice)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +208,7 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 
 	colI := 0
 	for col := range colSlice[0] {
-		err := dao.Schema.checkCol(relation, col)
+		_, err := table.SearchCols(col)
 		if err != nil {
 			return nil, err
 		}
@@ -222,12 +234,10 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 
 	}
 
-	pk := dao.Schema.Pks[relation]
-
-	if pk == "" {
+	if table.Pk == "" {
 		query = query[:len(query)-2] + " ON CONFLICT(rowid) DO UPDATE SET "
 	} else {
-		query = query[:len(query)-2] + fmt.Sprintf(" ON CONFLICT([%s]) DO UPDATE SET ", pk)
+		query = query[:len(query)-2] + fmt.Sprintf(" ON CONFLICT([%s]) DO UPDATE SET ", table.Pk)
 	}
 
 	for col := range colSlice[0] {
@@ -237,7 +247,7 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 	query = query[:len(query)-2] + " "
 
 	if params.Has("select") {
-		selQuery, err := dao.Schema.buildReturning(relation, params["select"][0])
+		selQuery, err := table.buildReturning(params["select"][0])
 		if err != nil {
 			return nil, err
 		}
@@ -259,7 +269,7 @@ func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
 		return nil, errors.New("cannot query table databases")
 	}
 
-	err := dao.Schema.checkTbl(relation)
+	table, err := dao.Schema.SearchTbls(relation)
 
 	if err != nil {
 		return nil, err
@@ -267,7 +277,7 @@ func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
 
 	query := fmt.Sprintf("DELETE FROM [%s] ", relation)
 
-	where, args, err := dao.Schema.BuildWhere(relation, params)
+	where, args, err := table.BuildWhere(params)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +288,7 @@ func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
 	query += where
 
 	if params["select"] != nil {
-		selQuery, err := dao.Schema.buildReturning(relation, params["select"][0])
+		selQuery, err := table.buildReturning(params["select"][0])
 		if err != nil {
 			return nil, err
 		}

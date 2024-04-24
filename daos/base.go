@@ -25,8 +25,7 @@ type Database struct {
 }
 
 type SchemaCache struct {
-	Tables TblMap
-	Pks    PkMap
+	Tables []Table
 	Fks    []Fk
 }
 
@@ -37,8 +36,16 @@ type Fk struct {
 	To         string
 }
 
-type TblMap map[string]map[string]string
-type PkMap map[string]string
+type Table struct {
+	Name    string
+	Pk      string
+	Columns []Col
+}
+
+type Col struct {
+	Name string
+	Type string
+}
 
 func init() {
 	err := os.MkdirAll("atomicdata", os.ModePerm)
@@ -58,19 +65,8 @@ func init() {
 		log.Fatal(err)
 	}
 
-	tbls := make(map[string]map[string]string)
-	tbls["databases"] = map[string]string{
-		"id":     "INTEGER",
-		"name":   "TEXT",
-		"token":  "TEXT",
-		"schema": "BLOB",
-	}
-
-	pks := make(map[string]string)
-	pks["databases"] = "id"
-
 	var buf bytes.Buffer
-	schema := SchemaCache{tbls, pks, nil}
+	schema := SchemaCache{nil, nil}
 	gob.NewEncoder(&buf).Encode(schema)
 
 	_, err = client.Exec(`
@@ -81,13 +77,21 @@ func init() {
 		token TEXT,
 		schema BLOB
 	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_databases_name ON databases (name);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_databases_name ON databases(name);
 	INSERT INTO databases (id, schema) values(1, ?) ON CONFLICT (id) DO NOTHING;
 	`, buf.Bytes())
 
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	dao := PrimaryDao{Database: Database{client, schema, 1}}
+
+	err = dao.updateSchema()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }
 
 func ConnPrimary() (PrimaryDao, error) {
