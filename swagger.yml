@@ -16,12 +16,11 @@ paths:
           required: false
       summary: Makes a SELECT query to a database based on the given query params.
       responses:
-        '200':    # status code
+        "200": # status code
           description: A JSON array with one object for each row returned from the query.
           content:
             application/json:
-              schema: 
+              schema:
                 type: array
-                items: 
+                items:
                   type: object
-    

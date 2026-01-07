@@ -15,14 +15,15 @@ func Run(app *http.ServeMux) {
 	app.HandleFunc("POST /schema", handleEditSchema())                  // done
 	app.HandleFunc("POST /schema/invalidate", handleInvalidateSchema()) // done
 
-	app.HandleFunc("GET /schema/table/{table}", handleGetTableSchema())
-	app.HandleFunc("POST /schema/table/{table}", handleCreateTable()) // done
-	app.HandleFunc("DELETE /schema/table/{table}", handleDropTable()) // done
-	app.HandleFunc("PATCH /schema/table/{table}", handleAlterTable()) // done
+	app.HandleFunc("GET /schema/table/{table}", handleGetTableSchema()) // mostly done
+	app.HandleFunc("POST /schema/table/{table}", handleCreateTable())   // done
+	app.HandleFunc("DELETE /schema/table/{table}", handleDropTable())   // done
+	app.HandleFunc("PATCH /schema/table/{table}", handleAlterTable())   // done
 
 	app.HandleFunc("GET /db", handleListDbs())            // done
 	app.HandleFunc("POST /db", handleCreateDb())          // done
 	app.HandleFunc("PATCH /db", handleRegisterDb())       // done
+	app.HandleFunc("PATCH /db/all", handleRegisterAll())  // done
 	app.HandleFunc("DELETE /db/{name}", handleDeleteDb()) // done
 
 }
@@ -102,14 +103,14 @@ func handleCreateDb() http.HandlerFunc {
 	})
 }
 
-// func handleRegisterAll() http.HandlerFunc {
-// 	return db.WithPrimary(func(dao db.Database, req *http.Request) ([]byte, error) {
+func handleRegisterAll() http.HandlerFunc {
+	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {
 
-// 		err := dao.RegisterAllDbs()
-// 		return nil, err
+		err := dao.RegisterAllDbs()
+		return nil, err
 
-// 	})
-// }
+	})
+}
 
 func handleRegisterDb() http.HandlerFunc {
 	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {

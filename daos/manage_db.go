@@ -14,116 +14,116 @@ import (
 )
 
 // gets all turso dbs within an organization and stores them
-// func (dao PrimaryDao) RegisterAllDbs() error {
-// 	type dbName struct {
-// 		Name string
-// 	}
+func (dao PrimaryDao) RegisterAllDbs() error {
+	type dbName struct {
+		Name string
+	}
 
-// 	type databases struct {
-// 		Databases []dbName `json:"databases"`
-// 	}
+	type databases struct {
+		Databases []dbName `json:"databases"`
+	}
 
-// 	org := os.Getenv("TURSO_ORGANIZATION")
-// 	if org == "" {
-// 		return errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
-// 	}
-// 	token := os.Getenv("TURSO_API_KEY")
-// 	if token == "" {
-// 		return errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
-// 	}
+	org := os.Getenv("TURSO_ORGANIZATION")
+	if org == "" {
+		return errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
+	}
+	token := os.Getenv("TURSO_API_KEY")
+	if token == "" {
+		return errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
+	}
 
-// 	var client http.Client
+	var client http.Client
 
-// 	req, err := http.NewRequest("GET", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases", org), nil)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	req.Header.Set("Authorization", "Bearer "+token)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases", org), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 
-// 	res, err := client.Do(req)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if res.StatusCode != 200 {
-// 		return errors.New(res.Status)
-// 	}
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != 200 {
+		return errors.New(res.Status)
+	}
 
-// 	dec := json.NewDecoder(res.Body)
+	dec := json.NewDecoder(res.Body)
 
-// 	var dbs databases
+	var dbs databases
 
-// 	err = dec.Decode(&dbs)
-// 	if err != nil {
-// 		return err
-// 	}
+	err = dec.Decode(&dbs)
+	if err != nil {
+		return err
+	}
 
-// 	rows, err := dao.Client.Query("SELECT name FROM databases")
-// 	if err != nil {
-// 		return err
-// 	}
+	rows, err := dao.Client.Query("SELECT name FROM databases")
+	if err != nil {
+		return err
+	}
 
-// 	var currDbs []string
+	var currDbs []string
 
-// 	for rows.Next() {
-// 		var name sql.NullString
+	for rows.Next() {
+		var name sql.NullString
 
-// 		rows.Scan(&name)
-// 		currDbs = append(currDbs, name.String)
-// 	}
+		rows.Scan(&name)
+		currDbs = append(currDbs, name.String)
+	}
 
-// 	for _, db := range dbs.Databases {
-// 		exists := false
-// 		for i := 0; i < len(currDbs) && !exists; i++ {
-// 			if db.Name == currDbs[i] {
-// 				exists = true
-// 			}
-// 		}
+	for _, db := range dbs.Databases {
+		exists := false
+		for i := 0; i < len(currDbs) && !exists; i++ {
+			if db.Name == currDbs[i] {
+				exists = true
+			}
+		}
 
-// 		if !exists {
-// 			dbToken, err := createDbToken(db.Name)
-// 			if err != nil {
-// 				return err
-// 			}
+		if !exists {
+			dbToken, err := createDBToken(db.Name)
+			if err != nil {
+				return err
+			}
 
-// 			newClient, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", db.Name, org, dbToken))
-// 			if err != nil {
-// 				return err
-// 			}
-// 			defer newClient.Close()
+			newClient, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", db.Name, org, dbToken))
+			if err != nil {
+				return err
+			}
+			defer newClient.Close()
 
-// 			err = newClient.Ping()
+			err = newClient.Ping()
 
-// 			if err != nil {
-// 				return err
-// 			}
+			if err != nil {
+				return err
+			}
 
-// 			cols, pks, err := schemaCols(newClient)
-// 			if err != nil {
-// 				return err
-// 			}
-// 			fks, err := schemaFks(newClient)
-// 			if err != nil {
-// 				return err
-// 			}
+			tbls, err := schemaCols(newClient)
+			if err != nil {
+				return err
+			}
+			fks, err := schemaFks(newClient)
+			if err != nil {
+				return err
+			}
 
-// 			var buf bytes.Buffer
-// 			schema := SchemaCache{cols, pks, fks}
-// 			enc := gob.NewEncoder(&buf)
+			var buf bytes.Buffer
+			schema := SchemaCache{tbls, fks}
+			enc := gob.NewEncoder(&buf)
 
-// 			err = enc.Encode(schema)
-// 			if err != nil {
-// 				return err
-// 			}
+			err = enc.Encode(schema)
+			if err != nil {
+				return err
+			}
 
-// 			_, err = dao.Client.Exec("INSERT INTO databases (name, token, schema) values (?, ?, ?)", db.Name, dbToken, buf.Bytes())
-// 			if err != nil {
-// 				return err
-// 			}
-// 		}
-// 	}
+			_, err = dao.Client.Exec("INSERT INTO databases (name, token, schema) values (?, ?, ?)", db.Name, dbToken, buf.Bytes())
+			if err != nil {
+				return err
+			}
+		}
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
 // creates a schema cache and stores it for an already existing turso db
 func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, error) {
