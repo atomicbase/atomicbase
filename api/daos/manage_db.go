@@ -123,9 +123,13 @@ func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			ftsTables, err := schemaFTS(newClient)
+			if err != nil {
+				return err
+			}
 
 			var buf bytes.Buffer
-			schema := SchemaCache{tbls, fks}
+			schema := SchemaCache{tbls, fks, ftsTables}
 			enc := gob.NewEncoder(&buf)
 
 			err = enc.Encode(schema)
@@ -223,9 +227,13 @@ func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToke
 	if err != nil {
 		return nil, err
 	}
+	ftsTables, err := schemaFTS(newClient)
+	if err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
-	schema := SchemaCache{tbls, fks}
+	schema := SchemaCache{tbls, fks, ftsTables}
 	enc := gob.NewEncoder(&buf)
 
 	err = enc.Encode(schema)

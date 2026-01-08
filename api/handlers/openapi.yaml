@@ -30,6 +30,7 @@ info:
     - `column=ilike.pattern` - Case-insensitive LIKE
     - `column=in.(a,b,c)` - In list
     - `column=is.null` / `column=is.true` / `column=is.false`
+    - `column=fts.search terms` - Full-text search (requires FTS index)
 
     ### Column Selection
     Use `select` parameter to choose columns and embed related tables:
@@ -618,6 +619,135 @@ paths:
       security:
         - bearerAuth: []
 
+  /schema/fts:
+    get:
+      tags:
+        - Schema
+      summary: List FTS indexes
+      description: |
+        List all tables that have FTS5 (Full-Text Search) indexes configured.
+
+        Returns information about each FTS index including the base table name, FTS table name, and indexed columns.
+      operationId: listFTSIndexes
+      parameters:
+        - $ref: '#/components/parameters/DBNameHeader'
+      responses:
+        '200':
+          description: List of FTS indexes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FTSIndexInfo'
+              example:
+                - table: articles
+                  ftsTable: articles_fts
+                  columns:
+                    - title
+                    - content
+                - table: products
+                  ftsTable: products_fts
+                  columns:
+                    - name
+                    - description
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /schema/fts/{table}:
+    post:
+      tags:
+        - Schema
+      summary: Create FTS index
+      description: |
+        Create an FTS5 (Full-Text Search) index on a table.
+
+        This creates:
+        - An FTS5 virtual table named `{table}_fts`
+        - Triggers to keep the FTS index synchronized with the source table
+
+        **Requirements:**
+        - All specified columns must be TEXT type
+        - The table must not already have an FTS index
+
+        After creating an FTS index, you can use the `fts` operator in queries:
+        ```
+        GET /query/articles?title=fts.search+terms
+        ```
+      operationId: createFTSIndex
+      parameters:
+        - $ref: '#/components/parameters/TablePath'
+        - $ref: '#/components/parameters/DBNameHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFTSIndexRequest'
+            example:
+              columns:
+                - title
+                - content
+      responses:
+        '200':
+          description: FTS index created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: FTS index created for table articles
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+    delete:
+      tags:
+        - Schema
+      summary: Drop FTS index
+      description: |
+        Remove an FTS5 index from a table.
+
+        This drops:
+        - The FTS5 virtual table `{table}_fts`
+        - Associated synchronization triggers
+
+        The source table data is not affected.
+      operationId: dropFTSIndex
+      parameters:
+        - $ref: '#/components/parameters/TablePath'
+        - $ref: '#/components/parameters/DBNameHeader'
+      responses:
+        '200':
+          description: FTS index dropped successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: FTS index dropped for table articles
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
   /db:
     get:
       tags:
@@ -1115,6 +1245,38 @@ components:
         name:
           type: string
           description: Name of the existing database to register
+
+    CreateFTSIndexRequest:
+      type: object
+      required:
+        - columns
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: |
+            List of TEXT columns to include in the FTS index.
+            All columns must be TEXT type.
+          example:
+            - title
+            - content
+
+    FTSIndexInfo:
+      type: object
+      properties:
+        table:
+          type: string
+          description: Name of the source table
+        ftsTable:
+          type: string
+          description: Name of the FTS5 virtual table (always {table}_fts)
+        columns:
+          type: array
+          items:
+            type: string
+          description: Columns included in the FTS index
 
   responses:
     BadRequest:

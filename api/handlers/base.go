@@ -24,6 +24,7 @@ var openapiSpec []byte
 //   - POST /schema - Execute raw schema SQL
 //   - POST /schema/invalidate - Refresh schema cache
 //   - GET/POST/DELETE/PATCH /schema/table/{table} - Table schema operations
+//   - GET/POST/DELETE /schema/fts/{table} - FTS (Full-Text Search) operations
 //   - GET/POST/PATCH/DELETE /db - Database management
 //
 // Use DB-Name header to target external Turso databases (default: primary).
@@ -50,6 +51,11 @@ func Run(app *http.ServeMux) {
 	app.HandleFunc("POST /schema/table/{table}", handleCreateTable())
 	app.HandleFunc("DELETE /schema/table/{table}", handleDropTable())
 	app.HandleFunc("PATCH /schema/table/{table}", handleAlterTable())
+
+	// FTS (Full-Text Search) operations
+	app.HandleFunc("GET /schema/fts", handleListFTSIndexes())
+	app.HandleFunc("POST /schema/fts/{table}", handleCreateFTSIndex())
+	app.HandleFunc("DELETE /schema/fts/{table}", handleDropFTSIndex())
 
 	// Database management
 	app.HandleFunc("GET /db", handleListDbs())
@@ -147,6 +153,24 @@ func handleDropTable() http.HandlerFunc {
 func handleAlterTable() http.HandlerFunc {
 	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
 		return dao.AlterTable(ctx, req.PathValue("table"), req.Body)
+	})
+}
+
+func handleListFTSIndexes() http.HandlerFunc {
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.ListFTSIndexes()
+	})
+}
+
+func handleCreateFTSIndex() http.HandlerFunc {
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.CreateFTSIndex(ctx, req.PathValue("table"), req.Body)
+	})
+}
+
+func handleDropFTSIndex() http.HandlerFunc {
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.DropFTSIndex(ctx, req.PathValue("table"))
 	})
 }
 

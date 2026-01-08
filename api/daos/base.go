@@ -31,8 +31,9 @@ type Database struct {
 
 // SchemaCache holds cached table and foreign key information for query validation.
 type SchemaCache struct {
-	Tables []Table // Sorted by table name for binary search
-	Fks    []Fk    // Sorted by table, then references for binary search
+	Tables    []Table  // Sorted by table name for binary search
+	Fks       []Fk     // Sorted by table, then references for binary search
+	FTSTables []string // Sorted list of tables that have FTS5 indexes (table names without _fts suffix)
 }
 
 // Fk represents a foreign key relationship between tables.

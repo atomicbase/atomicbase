@@ -29,6 +29,7 @@ var (
 	ErrInvalidCharacter    = errors.New("identifier contains invalid characters")
 	ErrNotDDLQuery         = errors.New("only DDL statements are allowed (CREATE, ALTER, DROP)")
 	ErrQueryTooDeep        = errors.New("query nesting exceeds maximum depth")
+	ErrNoFTSIndex          = errors.New("no FTS index exists for table")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.

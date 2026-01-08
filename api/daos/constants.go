@@ -42,6 +42,7 @@ const (
 	OpNot     = "not"
 	OpIn      = "in"
 	OpIs      = "is"
+	OpFts     = "fts"
 	OpAnd     = "and"
 	OpOr      = "or"
 )
@@ -60,8 +61,14 @@ const (
 	SqlNot     = "NOT"
 	SqlIn      = "IN"
 	SqlIs      = "IS"
+	SqlMatch   = "MATCH"
 	SqlAnd     = "AND"
 	SqlOr      = "OR"
+)
+
+// FTS5 full-text search constants.
+const (
+	FTSSuffix = "_fts" // Suffix for FTS5 virtual table names
 )
 
 // Foreign key referential actions.

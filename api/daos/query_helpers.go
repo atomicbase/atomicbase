@@ -91,12 +91,17 @@ func (table Table) buildReturning(cols string) (string, error) {
 }
 
 func (table Table) BuildWhere(params url.Values) (string, []any, error) {
+	return table.BuildWhereWithSchema(params, SchemaCache{})
+}
+
+// BuildWhereWithSchema builds WHERE clause with schema access for FTS support.
+func (table Table) BuildWhereWithSchema(params url.Values, schema SchemaCache) (string, []any, error) {
 	query := "WHERE "
 	var args []any
 	hasWhere := false
 
 	for name, val := range params {
-		if name == ParamOrder || name == ParamSelect || name == ParamLimit || name == ParamOffset {
+		if name == ParamOrder || name == ParamSelect || name == ParamLimit || name == ParamOffset || name == ParamCount {
 			continue
 		}
 
@@ -121,7 +126,10 @@ func (table Table) BuildWhere(params url.Values) (string, []any, error) {
 						return "", nil, err
 					}
 
-					where, whereArgs := buildFilter(tbl, col, or[1])
+					where, whereArgs, err := buildFilterWithSchema(tbl, col, or[1], schema)
+					if err != nil {
+						return "", nil, err
+					}
 					if hasWhere {
 						query += "OR "
 					} else {
@@ -152,7 +160,10 @@ func (table Table) BuildWhere(params url.Values) (string, []any, error) {
 		}
 
 		for _, v := range val {
-			where, whereArgs := buildFilter(tbl, col, token(v))
+			where, whereArgs, err := buildFilterWithSchema(tbl, col, token(v), schema)
+			if err != nil {
+				return "", nil, err
+			}
 
 			if hasWhere {
 				query += "AND "
@@ -231,4 +242,31 @@ func buildFilter(table string, column string, where []string) (string, []any) {
 	}
 
 	return query, args
+}
+
+// buildFilterWithSchema builds a filter clause with schema awareness for FTS support.
+func buildFilterWithSchema(table string, column string, where []string, schema SchemaCache) (string, []any, error) {
+	// Check for FTS operator
+	if len(where) > 0 && where[0] == OpFts {
+		// Verify FTS index exists for this table
+		if !schema.HasFTSIndex(table) {
+			return "", nil, fmt.Errorf("%w: %s", ErrNoFTSIndex, table)
+		}
+
+		// Build FTS subquery: rowid IN (SELECT rowid FROM {table}_fts WHERE {table}_fts MATCH ?)
+		ftsTable := table + FTSSuffix
+		query := fmt.Sprintf("rowid IN (SELECT rowid FROM [%s] WHERE [%s] MATCH ?) ", ftsTable, ftsTable)
+
+		var args []any
+		// Join remaining parts as the search query
+		if len(where) > 1 {
+			args = append(args, strings.Join(where[1:], " "))
+		}
+
+		return query, args, nil
+	}
+
+	// Fall back to regular filter
+	query, args := buildFilter(table, column, where)
+	return query, args, nil
 }

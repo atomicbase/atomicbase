@@ -40,6 +40,34 @@ func schemaFks(db *sql.DB) ([]Fk, error) {
 	return fks, err
 }
 
+// schemaFTS discovers FTS5 virtual tables and returns the base table names (without _fts suffix).
+func schemaFTS(db *sql.DB) ([]string, error) {
+	var ftsTables []string
+
+	rows, err := db.Query(`
+		SELECT name FROM sqlite_master
+		WHERE type = 'table' AND sql LIKE '%fts5%'
+		ORDER BY name ASC;
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		// Remove _fts suffix to get base table name
+		if len(name) > len(FTSSuffix) && name[len(name)-len(FTSSuffix):] == FTSSuffix {
+			ftsTables = append(ftsTables, name[:len(name)-len(FTSSuffix)])
+		}
+	}
+
+	return ftsTables, rows.Err()
+}
+
 func schemaCols(db *sql.DB) ([]Table, error) {
 
 	var tbls []Table
@@ -198,4 +226,23 @@ func (tbl Table) SearchCols(col string) (Col, error) {
 	}
 
 	return Col{}, ColumnNotFoundErr(tbl.Name, col)
+}
+
+// HasFTSIndex checks if a table has an FTS5 index using binary search.
+func (schema SchemaCache) HasFTSIndex(table string) bool {
+	left, right := 0, len(schema.FTSTables)-1
+
+	for left <= right {
+		mid := (left + right) / 2
+		midValue := schema.FTSTables[mid]
+		if midValue == table {
+			return true
+		} else if midValue < table {
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+
+	return false
 }

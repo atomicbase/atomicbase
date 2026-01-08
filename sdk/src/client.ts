@@ -13,12 +13,15 @@ export type FilterOperator =
   | "like"
   | "ilike"
   | "is"
-  | "in";
+  | "in"
+  | "fts";
 
 export type FilterValue<Op extends FilterOperator> = Op extends "in"
   ? (string | number | boolean)[]
   : Op extends "is"
   ? "null" | "true" | "false"
+  : Op extends "fts"
+  ? string
   : string | number | boolean;
 
 export type Filter<T = Record<string, unknown>> = {
@@ -248,6 +251,42 @@ export class AtomicbaseClient {
   }
 
   /**
+   * Create an FTS5 (Full-Text Search) index on a table
+   * @param table - The table to create the FTS index on
+   * @param columns - Array of TEXT columns to include in the FTS index
+   * @example await client.createFTSIndex("articles", ["title", "content"]);
+   */
+  async createFTSIndex(
+    table: string,
+    columns: string[]
+  ): Promise<Schemas["MessageResponse"]> {
+    return this.request<Schemas["MessageResponse"]>(
+      "POST",
+      `/schema/fts/${encodeURIComponent(table)}`,
+      { body: { columns } }
+    );
+  }
+
+  /**
+   * Drop an FTS5 index from a table
+   * @param table - The table to remove the FTS index from
+   */
+  async dropFTSIndex(table: string): Promise<Schemas["MessageResponse"]> {
+    return this.request<Schemas["MessageResponse"]>(
+      "DELETE",
+      `/schema/fts/${encodeURIComponent(table)}`
+    );
+  }
+
+  /**
+   * List all FTS indexes
+   * @returns Array of FTS index info (table, ftsTable, columns)
+   */
+  async listFTSIndexes(): Promise<Schemas["FTSIndexInfo"][]> {
+    return this.request<Schemas["FTSIndexInfo"][]>("GET", "/schema/fts");
+  }
+
+  /**
    * List registered databases
    */
   async listDatabases(): Promise<Schemas["DatabaseInfo"][]> {
@@ -341,6 +380,18 @@ export class TableQuery<T extends Record<string, unknown>> {
    */
   eq<K extends keyof T>(column: K, value: T[K]): this {
     const filter = { [column]: { eq: value } } as unknown as Filter<T>;
+    return this.filter(filter);
+  }
+
+  /**
+   * Full-text search filter (requires FTS index on the table)
+   * @param column - The column to search (must be in an FTS index)
+   * @param query - The search query string
+   * @example fts("title", "sqlite database")
+   * @example fts("content", "full text search")
+   */
+  fts<K extends keyof T>(column: K, query: string): this {
+    const filter = { [column]: { fts: query } } as unknown as Filter<T>;
     return this.filter(filter);
   }
 

@@ -38,8 +38,12 @@ func (dao *Database) updateSchema() error {
 	if err != nil {
 		return err
 	}
+	ftsTables, err := schemaFTS(dao.Client)
+	if err != nil {
+		return err
+	}
 
-	dao.Schema = SchemaCache{cols, fks}
+	dao.Schema = SchemaCache{cols, fks, ftsTables}
 
 	return nil
 }
@@ -54,8 +58,12 @@ func (dao *Database) InvalidateSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ftsTables, err := schemaFTS(dao.Client)
+	if err != nil {
+		return err
+	}
 
-	dao.Schema = SchemaCache{cols, fks}
+	dao.Schema = SchemaCache{cols, fks, ftsTables}
 
 	// Update the cached schema if this is the primary database
 	if dao.id == 1 {

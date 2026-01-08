@@ -62,7 +62,7 @@ func (dao *Database) SelectWithCount(ctx context.Context, relation string, param
 		return SelectResult{}, err
 	}
 
-	where, args, err := table.BuildWhere(params)
+	where, args, err := table.BuildWhereWithSchema(params, dao.Schema)
 	if err != nil {
 		return SelectResult{}, err
 	}
@@ -171,7 +171,7 @@ func (dao *Database) Update(ctx context.Context, relation string, params url.Val
 		colI++
 	}
 
-	where, whereArgs, err := table.BuildWhere(params)
+	where, whereArgs, err := table.BuildWhereWithSchema(params, dao.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func (dao *Database) Delete(ctx context.Context, relation string, params url.Val
 
 	query := fmt.Sprintf("DELETE FROM [%s] ", relation)
 
-	where, args, err := table.BuildWhere(params)
+	where, args, err := table.BuildWhereWithSchema(params, dao.Schema)
 	if err != nil {
 		return nil, err
 	}

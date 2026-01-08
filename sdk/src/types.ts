@@ -151,6 +151,71 @@ export interface paths {
         patch: operations["alterTable"];
         trace?: never;
     };
+    "/schema/fts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List FTS indexes
+         * @description List all tables that have FTS5 (Full-Text Search) indexes configured.
+         *
+         *     Returns information about each FTS index including the base table name, FTS table name, and indexed columns.
+         */
+        get: operations["listFTSIndexes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schema/fts/{table}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create FTS index
+         * @description Create an FTS5 (Full-Text Search) index on a table.
+         *
+         *     This creates:
+         *     - An FTS5 virtual table named `{table}_fts`
+         *     - Triggers to keep the FTS index synchronized with the source table
+         *
+         *     **Requirements:**
+         *     - All specified columns must be TEXT type
+         *     - The table must not already have an FTS index
+         *
+         *     After creating an FTS index, you can use the `fts` operator in queries:
+         *     ```
+         *     GET /query/articles?title=fts.search+terms
+         *     ```
+         */
+        post: operations["createFTSIndex"];
+        /**
+         * Drop FTS index
+         * @description Remove an FTS5 index from a table.
+         *
+         *     This drops:
+         *     - The FTS5 virtual table `{table}_fts`
+         *     - Associated synchronization triggers
+         *
+         *     The source table data is not affected.
+         */
+        delete: operations["dropFTSIndex"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/db": {
         parameters: {
             query?: never;
@@ -342,6 +407,25 @@ export interface components {
         RegisterDatabaseRequest: {
             /** @description Name of the existing database to register */
             name: string;
+        };
+        CreateFTSIndexRequest: {
+            /**
+             * @description List of TEXT columns to include in the FTS index.
+             *     All columns must be TEXT type.
+             * @example [
+             *       "title",
+             *       "content"
+             *     ]
+             */
+            columns: string[];
+        };
+        FTSIndexInfo: {
+            /** @description Name of the source table */
+            table?: string;
+            /** @description Name of the FTS5 virtual table (always {table}_fts) */
+            ftsTable?: string;
+            /** @description Columns included in the FTS index */
+            columns?: string[];
         };
     };
     responses: {
@@ -1003,6 +1087,133 @@ export interface operations {
                     /**
                      * @example {
                      *       "message": "table users altered"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listFTSIndexes: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target database name (default is primary database) */
+                "DB-Name"?: components["parameters"]["DBNameHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of FTS indexes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example [
+                     *       {
+                     *         "table": "articles",
+                     *         "ftsTable": "articles_fts",
+                     *         "columns": [
+                     *           "title",
+                     *           "content"
+                     *         ]
+                     *       },
+                     *       {
+                     *         "table": "products",
+                     *         "ftsTable": "products_fts",
+                     *         "columns": [
+                     *           "name",
+                     *           "description"
+                     *         ]
+                     *       }
+                     *     ]
+                     */
+                    "application/json": components["schemas"]["FTSIndexInfo"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createFTSIndex: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target database name (default is primary database) */
+                "DB-Name"?: components["parameters"]["DBNameHeader"];
+            };
+            path: {
+                /** @description Table name */
+                table: components["parameters"]["TablePath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "columns": [
+                 *         "title",
+                 *         "content"
+                 *       ]
+                 *     }
+                 */
+                "application/json": components["schemas"]["CreateFTSIndexRequest"];
+            };
+        };
+        responses: {
+            /** @description FTS index created successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "FTS index created for table articles"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    dropFTSIndex: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target database name (default is primary database) */
+                "DB-Name"?: components["parameters"]["DBNameHeader"];
+            };
+            path: {
+                /** @description Table name */
+                table: components["parameters"]["TablePath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description FTS index dropped successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "FTS index dropped for table articles"
                      *     }
                      */
                     "application/json": components["schemas"]["MessageResponse"];
