@@ -1,4 +1,26 @@
-atomicdata
-bin
+# Environment
 .env
+.env.local
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Claude
 .claude
+
+# Go
+api/atomicbase
+api/atomicdata
+api/bin
+*.exe
+
+# Node/TypeScript
+node_modules
+sdk/dist
+*.log
+
+# Test artifacts
+*.db
+test.db
