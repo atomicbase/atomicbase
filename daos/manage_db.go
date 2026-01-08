@@ -2,6 +2,7 @@ package daos
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/gob"
 	"encoding/json"
@@ -12,14 +13,27 @@ import (
 	"os"
 )
 
+// readAPIError reads the error message from a Turso API error response.
+func readAPIError(res *http.Response) error {
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("turso API error: %s", res.Status)
+	}
+	if len(body) > 0 {
+		return fmt.Errorf("turso API error: %s - %s", res.Status, string(body))
+	}
+	return fmt.Errorf("turso API error: %s", res.Status)
+}
+
 // gets all turso dbs within an organization and stores them
-func (dao PrimaryDao) RegisterAllDbs() error {
-	type dbName struct {
-		Name string
+func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
+	type dbInfo struct {
+		Name     string `json:"Name"`
+		Hostname string `json:"Hostname"`
 	}
 
 	type databases struct {
-		Databases []dbName `json:"databases"`
+		Databases []dbInfo `json:"databases"`
 	}
 
 	org := os.Getenv("TURSO_ORGANIZATION")
@@ -33,7 +47,7 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 
 	var client http.Client
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases", org), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases", org), nil)
 	if err != nil {
 		return err
 	}
@@ -46,19 +60,16 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return errors.New(res.Status)
+		return readAPIError(res)
 	}
 
-	dec := json.NewDecoder(res.Body)
-
 	var dbs databases
-
-	err = dec.Decode(&dbs)
+	err = json.NewDecoder(res.Body).Decode(&dbs)
 	if err != nil {
 		return err
 	}
 
-	rows, err := dao.Client.Query("SELECT name FROM databases")
+	rows, err := dao.Client.QueryContext(ctx, "SELECT name FROM databases")
 	if err != nil {
 		return err
 	}
@@ -85,18 +96,20 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 		}
 
 		if !exists {
-			dbToken, err := createDBToken(db.Name)
+			dbToken, err := createDBToken(ctx, db.Name)
 			if err != nil {
 				return err
 			}
 
-			newClient, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", db.Name, org, dbToken))
+			// Use Hostname from API response
+			connStr := fmt.Sprintf("libsql://%s?authToken=%s", db.Hostname, dbToken)
+			newClient, err := sql.Open("libsql", connStr)
 			if err != nil {
 				return err
 			}
 			defer newClient.Close()
 
-			err = newClient.Ping()
+			err = newClient.PingContext(ctx)
 
 			if err != nil {
 				return err
@@ -120,7 +133,7 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 				return err
 			}
 
-			_, err = dao.Client.Exec("INSERT INTO databases (name, token, schema) values (?, ?, ?)", db.Name, dbToken, buf.Bytes())
+			_, err = dao.Client.ExecContext(ctx, "INSERT INTO databases (name, token, schema) values (?, ?, ?)", db.Name, dbToken, buf.Bytes())
 			if err != nil {
 				return err
 			}
@@ -131,9 +144,15 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 }
 
 // creates a schema cache and stores it for an already existing turso db
-func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, error) {
+func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToken string) ([]byte, error) {
 	type reqBody struct {
 		Name string `json:"name"`
+	}
+
+	type dbResponse struct {
+		Database struct {
+			Hostname string `json:"Hostname"`
+		} `json:"database"`
 	}
 
 	var bod reqBody
@@ -144,7 +163,7 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 	}
 
 	if dbToken == "" {
-		dbToken, err = createDBToken(bod.Name)
+		dbToken, err = createDBToken(ctx, bod.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -160,7 +179,7 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 	}
 
 	client := &http.Client{}
-	request, err := http.NewRequest("GET", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s", org, bod.Name), nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s", org, bod.Name), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -174,16 +193,23 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return nil, errors.New(res.Status)
+		return nil, readAPIError(res)
 	}
 
-	newClient, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", bod.Name, org, dbToken))
+	var dbResp dbResponse
+	if err := json.NewDecoder(res.Body).Decode(&dbResp); err != nil {
+		return nil, err
+	}
+
+	// Use Hostname from API response
+	connStr := fmt.Sprintf("libsql://%s?authToken=%s", dbResp.Database.Hostname, dbToken)
+	newClient, err := sql.Open("libsql", connStr)
 	if err != nil {
 		return nil, err
 	}
 	defer newClient.Close()
 
-	err = newClient.Ping()
+	err = newClient.PingContext(ctx)
 
 	if err != nil {
 		return nil, err
@@ -207,13 +233,13 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 		return nil, err
 	}
 
-	_, err = dao.Client.Exec("INSERT INTO databases (name, token, schema) values (?, ?, ?)", bod.Name, dbToken, buf.Bytes())
+	_, err = dao.Client.ExecContext(ctx, "INSERT INTO databases (name, token, schema) values (?, ?, ?)", bod.Name, dbToken, buf.Bytes())
 
-	return []byte(fmt.Sprintf("database %s registered", bod.Name)), err
+	return []byte(fmt.Sprintf(`{"message":"database %s registered"}`, bod.Name)), err
 }
 
-func (dao PrimaryDao) ListDBs() ([]byte, error) {
-	row := dao.Client.QueryRow("SELECT json_group_array(json_object('name', name, 'id', id)) AS data FROM (SELECT name, id from databases ORDER BY id)")
+func (dao PrimaryDao) ListDBs(ctx context.Context) ([]byte, error) {
+	row := dao.Client.QueryRowContext(ctx, "SELECT json_group_array(json_object('name', name, 'id', id)) AS data FROM (SELECT name, id from databases ORDER BY id)")
 
 	if row.Err() != nil {
 		return nil, row.Err()
@@ -227,7 +253,7 @@ func (dao PrimaryDao) ListDBs() ([]byte, error) {
 }
 
 // for use with the primary database
-func (dao PrimaryDao) CreateDB(body io.ReadCloser) ([]byte, error) {
+func (dao PrimaryDao) CreateDB(ctx context.Context, body io.ReadCloser) ([]byte, error) {
 	type reqBody struct {
 		Name  string `json:"name"`
 		Group string `json:"group"`
@@ -260,7 +286,7 @@ func (dao PrimaryDao) CreateDB(body io.ReadCloser) ([]byte, error) {
 	}
 
 	client := &http.Client{}
-	request, err := http.NewRequest("POST", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases", org), &buf)
+	request, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases", org), &buf)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +301,7 @@ func (dao PrimaryDao) CreateDB(body io.ReadCloser) ([]byte, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return nil, errors.New(res.Status)
+		return nil, readAPIError(res)
 	}
 
 	buf.Reset()
@@ -287,23 +313,23 @@ func (dao PrimaryDao) CreateDB(body io.ReadCloser) ([]byte, error) {
 		return nil, err
 	}
 
-	newToken, err := createDBToken(bod.Name)
+	newToken, err := createDBToken(ctx, bod.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = dao.Client.Exec("INSERT INTO databases (name, token, schema) values (?, ?, ?)", bod.Name, newToken, buf.Bytes())
+	_, err = dao.Client.ExecContext(ctx, "INSERT INTO databases (name, token, schema) values (?, ?, ?)", bod.Name, newToken, buf.Bytes())
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte(fmt.Sprintf("database %s created", bod.Name)), nil
+	return []byte(fmt.Sprintf(`{"message":"database %s created"}`, bod.Name)), nil
 }
 
 // for use with the primary database
-func (dao PrimaryDao) DeleteDB(name string) ([]byte, error) {
+func (dao PrimaryDao) DeleteDB(ctx context.Context, name string) ([]byte, error) {
 
-	_, err := dao.Client.Exec("DELETE FROM databases WHERE name = ?", name)
+	_, err := dao.Client.ExecContext(ctx, "DELETE FROM databases WHERE name = ?", name)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +344,7 @@ func (dao PrimaryDao) DeleteDB(name string) ([]byte, error) {
 	}
 
 	client := &http.Client{}
-	request, err := http.NewRequest("DELETE", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s", org, name), nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s", org, name), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -333,14 +359,15 @@ func (dao PrimaryDao) DeleteDB(name string) ([]byte, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return nil, errors.New(res.Status)
+		return nil, readAPIError(res)
 	}
 
-	return []byte(fmt.Sprintf("database %s deleted", name)), nil
-
+	return []byte(fmt.Sprintf(`{"message":"database %s deleted"}`, name)), nil
 }
 
-func createDBToken(dbName string) (string, error) {
+// createDBToken creates a new auth token for a Turso database.
+// If TURSO_TOKEN_EXPIRATION is set (e.g., "7d", "30d", "never"), it will be used.
+func createDBToken(ctx context.Context, dbName string) (string, error) {
 	type jwtBody struct {
 		Jwt string `json:"jwt"`
 	}
@@ -354,8 +381,14 @@ func createDBToken(dbName string) (string, error) {
 		return "", errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
 	}
 
+	// Build URL with optional expiration parameter
+	url := fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s/auth/tokens", org, dbName)
+	if expiration := os.Getenv("TURSO_TOKEN_EXPIRATION"); expiration != "" {
+		url += "?expiration=" + expiration
+	}
+
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s/auth/tokens", org, dbName), nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -368,14 +401,13 @@ func createDBToken(dbName string) (string, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return "", errors.New(res.Status)
+		return "", readAPIError(res)
 	}
 
-	dec := json.NewDecoder(res.Body)
-	dec.DisallowUnknownFields()
-
 	var jwtBod jwtBody
-	err = dec.Decode(&jwtBod)
+	if err := json.NewDecoder(res.Body).Decode(&jwtBod); err != nil {
+		return "", err
+	}
 
-	return jwtBod.Jwt, err
+	return jwtBod.Jwt, nil
 }

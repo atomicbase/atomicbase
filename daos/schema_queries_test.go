@@ -2,18 +2,173 @@ package daos
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"testing"
 )
 
-func TestEditSchema(t *testing.T) {
+// setupPrimaryDB creates a connection to the primary database with cleanup.
+func setupPrimaryDB(t *testing.T) *Database {
+	t.Helper()
 	dao, err := ConnPrimary()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dao.Client.Close() })
+	return &dao.Database
+}
+
+// cleanupSchemaTestTables removes the test tables created for schema tests.
+func cleanupSchemaTestTables(t *testing.T, dao *Database) {
+	t.Helper()
+	t.Cleanup(func() {
+		dao.Client.Exec(`
+			DROP TABLE IF EXISTS [test_tires];
+			DROP TABLE IF EXISTS [test_cars];
+			DROP TABLE IF EXISTS [test_motorcycles];
+			DROP TABLE IF EXISTS [test_vehicles];
+			DROP TABLE IF EXISTS [test_users];
+			DROP TABLE IF EXISTS [test_users_renamed];
+		`)
+	})
+}
+
+// createSchemaTestTables creates the test tables needed for schema tests.
+func createSchemaTestTables(t *testing.T, dao *Database) {
+	t.Helper()
+
+	_, err := dao.Client.Exec(`
+		DROP TABLE IF EXISTS [test_tires];
+		DROP TABLE IF EXISTS [test_cars];
+		DROP TABLE IF EXISTS [test_motorcycles];
+		DROP TABLE IF EXISTS [test_vehicles];
+		DROP TABLE IF EXISTS [test_users];
+	`)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	defer dao.Client.Close()
+	type users struct {
+		Name     Column `json:"name"`
+		Username Column `json:"username"`
+		Id       Column `json:"id"`
+	}
+
+	name := Column{Type: "TEXT"}
+	username := Column{Type: "TEXT", Unique: true}
+	id := Column{Type: "INTEGER", PrimaryKey: true}
+	uTbl := users{name, username, id}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+
+	if err := enc.Encode(uTbl); err != nil {
+		t.Fatal(err)
+	}
+	body := io.NopCloser(&buf)
+
+	if _, err := dao.CreateTable(context.Background(), "test_users", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.InvalidateSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	type vehicles struct {
+		Id     Column `json:"id"`
+		UserId Column `json:"user_id"`
+	}
+
+	id = Column{Type: "integer", PrimaryKey: true}
+	userId := Column{Type: "Integer", References: "test_users.id"}
+	vTbl := vehicles{id, userId}
+
+	buf.Reset()
+	if err := enc.Encode(vTbl); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dao.CreateTable(context.Background(), "test_vehicles", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.InvalidateSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	type cars struct {
+		Id        Column `json:"id"`
+		Test      Column `json:"test"`
+		Test2     Column `json:"test2"`
+		VehicleId Column `json:"vehicle_id"`
+	}
+
+	id = Column{Type: "integer", PrimaryKey: true}
+	test := Column{Type: "Text"}
+	test2 := Column{Type: "Integer", NotNull: true}
+	vehicleId := Column{Type: "Integer", References: "test_vehicles.id"}
+	cTbl := cars{id, test, test2, vehicleId}
+
+	buf.Reset()
+	if err := enc.Encode(cTbl); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dao.CreateTable(context.Background(), "test_cars", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.InvalidateSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	type motorcycles struct {
+		Id        Column `json:"id"`
+		Brand     Column `json:"brand"`
+		VehicleId Column `json:"vehicle_id"`
+	}
+
+	id = Column{Type: "integer", PrimaryKey: true}
+	brand := Column{Type: "text"}
+	vehicleId = Column{Type: "integer", References: "test_vehicles.id"}
+	mTbl := motorcycles{id, brand, vehicleId}
+
+	buf.Reset()
+	if err := enc.Encode(mTbl); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dao.CreateTable(context.Background(), "test_motorcycles", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.InvalidateSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	type tires struct {
+		Id    Column `json:"id"`
+		Brand Column `json:"brand"`
+		CarId Column `json:"car_id"`
+	}
+
+	id = Column{Type: "integer", PrimaryKey: true}
+	carId := Column{Type: "integer", References: "test_cars.id"}
+	tTbl := tires{id, brand, carId}
+
+	buf.Reset()
+	if err := enc.Encode(tTbl); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dao.CreateTable(context.Background(), "test_tires", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.InvalidateSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEditSchema(t *testing.T) {
+	dao := setupPrimaryDB(t)
 
 	type changes struct {
 		Query string `json:"query"`
@@ -29,230 +184,35 @@ func TestEditSchema(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	err = json.NewEncoder(&buf).Encode(ch)
+	err := json.NewEncoder(&buf).Encode(ch)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	body := io.NopCloser(&buf)
 
-	_, err = dao.EditSchema(body)
+	_, err = dao.EditSchema(context.Background(), body)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 }
 
 func TestCreateTable(t *testing.T) {
+	dao := setupPrimaryDB(t)
+	cleanupSchemaTestTables(t, dao)
+	createSchemaTestTables(t, dao)
 
-	dao, err := ConnPrimary()
-	if err != nil {
-		t.Error(err)
-	}
-	defer dao.Client.Close()
-
-	_, err = dao.Client.Exec(`
-	DROP TABLE IF EXISTS [test_users];
-	DROP TABLE IF EXISTS [test_vehicles];
-	DROP TABLE IF EXISTS [test_cars];
-	DROP TABLE IF EXISTS [test_motorcycles];
-	DROP TABLE IF EXISTS [test_tires];
-	`)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	type users struct {
-		Name     Column `json:"name"`
-		Username Column `json:"username"`
-		Id       Column `json:"id"`
-	}
-
-	name := Column{}
-	name.Type = "TEXT"
-
-	username := Column{}
-	username.Type = "TEXT"
-	username.Unique = true
-
-	id := Column{}
-	id.Type = "INTEGER"
-	id.PrimaryKey = true
-
-	uTbl := users{name, username, id}
-
-	var buf bytes.Buffer
-
-	enc := json.NewEncoder(&buf)
-
-	err = enc.Encode(uTbl)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	body := io.NopCloser(&buf)
-
-	_, err = dao.CreateTable("test_users", body)
-	if err != nil {
-		t.Error(err)
-	}
-
-	err = dao.InvalidateSchema()
-	if err != nil {
-		t.Error(err)
-	}
-
-	type vehicles struct {
-		Id     Column `json:"id"`
-		UserId Column `json:"user_id"`
-	}
-
-	id = Column{}
-	id.Type = "integer"
-	id.PrimaryKey = true
-
-	userId := Column{}
-	userId.Type = "Integer"
-	userId.References = "test_users.id"
-
-	vTbl := vehicles{id, userId}
-
-	buf.Reset()
-
-	err = enc.Encode(vTbl)
-	if err != nil {
-		t.Error(err)
-	}
-
-	_, err = dao.CreateTable("test_vehicles", body)
-	if err != nil {
-		t.Error(err)
-	}
-
-	err = dao.InvalidateSchema()
-	if err != nil {
-		t.Error(err)
-	}
-
-	type cars struct {
-		Id        Column `json:"id"`
-		Test      Column `json:"test"`
-		Test2     Column `json:"test2"`
-		VehicleId Column `json:"vehicle_id"`
-	}
-
-	id = Column{}
-	id.Type = "integer"
-	id.PrimaryKey = true
-
-	test := Column{}
-	test.Type = "Text"
-
-	test2 := Column{}
-	test2.Type = "Integer"
-	test2.NotNull = true
-
-	vehicleId := Column{}
-	vehicleId.Type = "Integer"
-	vehicleId.References = "test_vehicles.id"
-
-	cTbl := cars{id, test, test2, vehicleId}
-
-	buf.Reset()
-
-	err = enc.Encode(cTbl)
-	if err != nil {
-		t.Error(err)
-	}
-
-	_, err = dao.CreateTable("test_cars", body)
-	if err != nil {
-		t.Error(err)
-	}
-
-	err = dao.InvalidateSchema()
-	if err != nil {
-		t.Error(err)
-	}
-
-	type motorcycles struct {
-		Id        Column `json:"id"`
-		Brand     Column `json:"brand"`
-		VehicleId Column `json:"vehicle_id"`
-	}
-
-	id = Column{}
-	id.Type = "integer"
-	id.PrimaryKey = true
-
-	brand := Column{}
-	brand.Type = "text"
-
-	vehicleId = Column{}
-	vehicleId.Type = "integer"
-	vehicleId.References = "test_vehicles.id"
-
-	mTbl := motorcycles{id, brand, vehicleId}
-
-	buf.Reset()
-
-	err = enc.Encode(mTbl)
-	if err != nil {
-		t.Error(err)
-	}
-
-	_, err = dao.CreateTable("test_motorcycles", body)
-	if err != nil {
-		t.Error(err)
-	}
-
-	err = dao.InvalidateSchema()
-	if err != nil {
-		t.Error(err)
-	}
-
-	type tires struct {
-		Id    Column `json:"id"`
-		Brand Column `json:"brand"`
-		CarId Column `json:"car_id"`
-	}
-
-	id = Column{}
-	id.Type = "integer"
-	id.PrimaryKey = true
-
-	carId := Column{}
-	carId.Type = "integer"
-	carId.References = "test_cars.id"
-
-	tTbl := tires{id, brand, carId}
-
-	buf.Reset()
-
-	err = enc.Encode(tTbl)
-	if err != nil {
-		t.Error(err)
-	}
-
-	_, err = dao.CreateTable("test_tires", body)
-	if err != nil {
-		t.Error(err)
-	}
-
-	err = dao.InvalidateSchema()
-	if err != nil {
-		t.Error(err)
+	// Verify all tables were created
+	for _, tbl := range []string{"test_users", "test_vehicles", "test_cars", "test_motorcycles", "test_tires"} {
+		if _, err := dao.Schema.SearchTbls(tbl); err != nil {
+			t.Errorf("Expected table %s to exist after creation", tbl)
+		}
 	}
 }
 
 func TestAlterTable(t *testing.T) {
-	TestCreateTable(t)
-
-	dao, err := ConnPrimary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer dao.Client.Close()
+	dao := setupPrimaryDB(t)
+	cleanupSchemaTestTables(t, dao)
+	createSchemaTestTables(t, dao)
 
 	// Test adding a new column
 	var buf bytes.Buffer
@@ -268,7 +228,7 @@ func TestAlterTable(t *testing.T) {
 	enc.Encode(alterReq)
 	body := io.NopCloser(&buf)
 
-	resp, err := dao.AlterTable("test_users", body)
+	resp, err := dao.AlterTable(context.Background(), "test_users", body)
 	if err != nil {
 		t.Errorf("AlterTable (add column) failed: %v", err)
 	}
@@ -276,7 +236,7 @@ func TestAlterTable(t *testing.T) {
 		t.Error("Expected response from AlterTable")
 	}
 
-	err = dao.InvalidateSchema()
+	err = dao.InvalidateSchema(context.Background())
 	if err != nil {
 		t.Errorf("InvalidateSchema failed: %v", err)
 	}
@@ -301,12 +261,12 @@ func TestAlterTable(t *testing.T) {
 	enc.Encode(renameReq)
 	body = io.NopCloser(&buf)
 
-	_, err = dao.AlterTable("test_users", body)
+	_, err = dao.AlterTable(context.Background(), "test_users", body)
 	if err != nil {
 		t.Errorf("AlterTable (rename column) failed: %v", err)
 	}
 
-	err = dao.InvalidateSchema()
+	err = dao.InvalidateSchema(context.Background())
 	if err != nil {
 		t.Errorf("InvalidateSchema failed: %v", err)
 	}
@@ -326,12 +286,12 @@ func TestAlterTable(t *testing.T) {
 	enc.Encode(dropReq)
 	body = io.NopCloser(&buf)
 
-	_, err = dao.AlterTable("test_users", body)
+	_, err = dao.AlterTable(context.Background(), "test_users", body)
 	if err != nil {
 		t.Errorf("AlterTable (drop column) failed: %v", err)
 	}
 
-	err = dao.InvalidateSchema()
+	err = dao.InvalidateSchema(context.Background())
 	if err != nil {
 		t.Errorf("InvalidateSchema failed: %v", err)
 	}
@@ -351,12 +311,12 @@ func TestAlterTable(t *testing.T) {
 	enc.Encode(renameTableReq)
 	body = io.NopCloser(&buf)
 
-	_, err = dao.AlterTable("test_users", body)
+	_, err = dao.AlterTable(context.Background(), "test_users", body)
 	if err != nil {
 		t.Errorf("AlterTable (rename table) failed: %v", err)
 	}
 
-	err = dao.InvalidateSchema()
+	err = dao.InvalidateSchema(context.Background())
 	if err != nil {
 		t.Errorf("InvalidateSchema failed: %v", err)
 	}
@@ -371,23 +331,23 @@ func TestAlterTable(t *testing.T) {
 	buf.Reset()
 	enc.Encode(map[string]any{"newName": "test_users"})
 	body = io.NopCloser(&buf)
-	dao.AlterTable("test_users_renamed", body)
-	dao.InvalidateSchema()
+	dao.AlterTable(context.Background(), "test_users_renamed", body)
+	dao.InvalidateSchema(context.Background())
 }
 
 func TestDropTable(t *testing.T) {
-	dao, err := ConnPrimary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer dao.Client.Close()
+	dao := setupPrimaryDB(t)
+	t.Cleanup(func() { dao.Client.Exec("DROP TABLE IF EXISTS test_drop_me") })
 
 	// Create a test table to drop
-	dao.Client.Exec(`
+	_, err := dao.Client.Exec(`
 		DROP TABLE IF EXISTS test_drop_me;
 		CREATE TABLE test_drop_me (id INTEGER PRIMARY KEY);
 	`)
-	dao.InvalidateSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dao.InvalidateSchema(context.Background())
 
 	// Verify table exists
 	_, err = dao.Schema.SearchTbls("test_drop_me")
@@ -396,7 +356,7 @@ func TestDropTable(t *testing.T) {
 	}
 
 	// Test dropping the table
-	resp, err := dao.DropTable("test_drop_me")
+	resp, err := dao.DropTable(context.Background(), "test_drop_me")
 	if err != nil {
 		t.Errorf("DropTable failed: %v", err)
 	}
@@ -405,7 +365,7 @@ func TestDropTable(t *testing.T) {
 	}
 
 	// Reload schema since DropTable uses a value receiver
-	err = dao.InvalidateSchema()
+	err = dao.InvalidateSchema(context.Background())
 	if err != nil {
 		t.Errorf("InvalidateSchema failed: %v", err)
 	}
@@ -417,7 +377,7 @@ func TestDropTable(t *testing.T) {
 	}
 
 	// Test dropping non-existent table (should error)
-	_, err = dao.DropTable("nonexistent_table_xyz")
+	_, err = dao.DropTable(context.Background(), "nonexistent_table_xyz")
 	if err == nil {
 		t.Error("Expected error when dropping non-existent table")
 	}

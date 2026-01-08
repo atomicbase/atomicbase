@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,12 +12,13 @@ import (
 	"github.com/joe-ervin05/atomicbase/daos"
 )
 
-type DbHandler func(db daos.Database, req *http.Request) ([]byte, error)
+type DbHandler func(ctx context.Context, db *daos.Database, req *http.Request) ([]byte, error)
 
-type PrimaryHandler func(db daos.PrimaryDao, req *http.Request) ([]byte, error)
+type PrimaryHandler func(ctx context.Context, db *daos.PrimaryDao, req *http.Request) ([]byte, error)
 
 func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
 		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
 		defer req.Body.Close()
 
@@ -27,7 +29,7 @@ func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 		}
 		defer dao.Client.Close()
 
-		data, err := handler(dao, req)
+		data, err := handler(ctx, &dao, req)
 		if err != nil {
 			respErr(wr, err)
 			return
@@ -43,6 +45,7 @@ func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 // withDB wraps handlers that can use either the primary or an external database.
 func withDB(handler DbHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
 		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
 		defer req.Body.Close()
 
@@ -53,7 +56,7 @@ func withDB(handler DbHandler) http.HandlerFunc {
 		}
 		defer dao.Client.Close()
 
-		data, err := handler(dao, req)
+		data, err := handler(ctx, &dao, req)
 		if err != nil {
 			respErr(wr, err)
 			return
@@ -77,7 +80,11 @@ func respErr(wr http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, daos.ErrInvalidOperator),
 		errors.Is(err, daos.ErrInvalidColumnType),
-		errors.Is(err, daos.ErrMissingWhereClause):
+		errors.Is(err, daos.ErrMissingWhereClause),
+		errors.Is(err, daos.ErrInvalidIdentifier),
+		errors.Is(err, daos.ErrEmptyIdentifier),
+		errors.Is(err, daos.ErrIdentifierTooLong),
+		errors.Is(err, daos.ErrInvalidCharacter):
 		status = http.StatusBadRequest
 	case errors.Is(err, daos.ErrReservedTable):
 		status = http.StatusForbidden

@@ -2,6 +2,7 @@ package daos
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -9,104 +10,28 @@ import (
 	"testing"
 )
 
-func TestSelect(t *testing.T) {
-	type motorcycles struct {
-		UserId int64  `json:"user_id"`
-		Brand  string `json:"brand"`
-		Year   int64  `json:"year"`
-		Id     int64  `json:"id"`
-	}
-
-	type tires struct {
-		Id    int64  `json:"id"`
-		CarId int64  `json:"car_id"`
-		Brand string `json:"brand"`
-	}
-
-	type cars struct {
-		Tires  []tires `json:"tires"`
-		Make   string  `json:"make"`
-		Model  string  `json:"model"`
-		Year   int64   `json:"year"`
-		Id     int64   `json:"id"`
-		UserId int64   `json:"user_id"`
-	}
-
-	type user struct {
-		Name        string        `json:"name"`
-		Username    string        `json:"username"`
-		Cars        []cars        `json:"cars"`
-		Motorcycles []motorcycles `json:"motorcycles"`
-	}
-
-	TestUpsert(t)
-
-	var val url.Values = map[string][]string{
-		"select": {"name,cars(*,tires()),motorcycles(),username"},
-		"order":  {"name:asc"},
-	}
-
-	schema := SchemaCache{}
+// setupTestDB creates a fresh test database with proper cleanup.
+func setupTestDB(t *testing.T) *Database {
+	t.Helper()
 	client, err := sql.Open("libsql", "file:test.db")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
+	t.Cleanup(func() { client.Close() })
 
-	db := Database{client, schema, 0}
-
-	db.updateSchema()
-
-	resp, err := db.Select("users", val)
-	if err != nil {
-		t.Error(err)
-	}
-
-	var usr []user
-
-	err = json.Unmarshal(resp, &usr)
-	if err != nil {
-		t.Error(err)
-	}
-
+	db := &Database{Client: client, Schema: SchemaCache{}, id: 0}
+	return db
 }
 
-func TestUpsert(t *testing.T) {
-	type user struct {
-		Name     string `json:"name"`
-		Username string `json:"username"`
-	}
+// setupTestDataForSelect creates the test tables and data needed for select/upsert tests.
+func setupTestDataForSelect(t *testing.T, db *Database) {
+	t.Helper()
 
-	type cars struct {
-		Make   string `json:"make"`
-		Model  string `json:"model"`
-		Year   int16  `json:"year"`
-		UserId int64  `json:"user_id"`
-	}
-
-	type tires struct {
-		CarId int64  `json:"car_id"`
-		Brand string `json:"brand"`
-	}
-
-	type motorcycles struct {
-		UserId int64  `json:"user_id"`
-		Brand  string `json:"brand"`
-		Year   int16  `json:"year"`
-	}
-
-	schema := SchemaCache{}
-	client, err := sql.Open("libsql", "file:test.db")
-	if err != nil {
-		t.Error(err)
-	}
-
-	db := Database{client, schema, 0}
-
-	db.Client.Exec(`
-		DROP TABLE IF EXISTS users;
-		DROP TABLE IF EXISTS cars;
-		DROP TABLE IF EXISTS tires;
+	_, err := db.Client.Exec(`
 		DROP TABLE IF EXISTS motorcycles;
+		DROP TABLE IF EXISTS tires;
+		DROP TABLE IF EXISTS cars;
+		DROP TABLE IF EXISTS users;
 		CREATE TABLE users (
 			name TEXT,
 			username TEXT UNIQUE
@@ -133,21 +58,154 @@ func TestUpsert(t *testing.T) {
 			FOREIGN KEY(user_id) REFERENCES users(rowid)
 		);
 	`)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	db.updateSchema()
+}
 
+func TestSelect(t *testing.T) {
+	type motorcycles struct {
+		UserId int64  `json:"user_id"`
+		Brand  string `json:"brand"`
+		Year   int64  `json:"year"`
+		Id     int64  `json:"id"`
+	}
+
+	type tires struct {
+		Id    int64  `json:"id"`
+		CarId int64  `json:"car_id"`
+		Brand string `json:"brand"`
+	}
+
+	type cars struct {
+		Tires  []tires `json:"tires"`
+		Make   string  `json:"make"`
+		Model  string  `json:"model"`
+		Year   int64   `json:"year"`
+		Id     int64   `json:"id"`
+		UserId int64   `json:"user_id"`
+	}
+
+	type userRow struct {
+		Name     string `json:"name"`
+		Username string `json:"username"`
+	}
+
+	type user struct {
+		Name        string        `json:"name"`
+		Username    string        `json:"username"`
+		Cars        []cars        `json:"cars"`
+		Motorcycles []motorcycles `json:"motorcycles"`
+	}
+
+	type carsInput struct {
+		Make   string `json:"make"`
+		Model  string `json:"model"`
+		Year   int16  `json:"year"`
+		UserId int64  `json:"user_id"`
+	}
+
+	type tiresInput struct {
+		CarId int64  `json:"car_id"`
+		Brand string `json:"brand"`
+	}
+
+	type motorcyclesInput struct {
+		UserId int64  `json:"user_id"`
+		Brand  string `json:"brand"`
+		Year   int16  `json:"year"`
+	}
+
+	db := setupTestDB(t)
+	setupTestDataForSelect(t, db)
+
+	// Insert test data
 	var buf bytes.Buffer
-
 	enc := json.NewEncoder(&buf)
 
-	enc.Encode([]user{{"joe", "joeshmoe"}, {"john", "johndoe"}, {"jimmy", "jimmyp"}})
+	enc.Encode([]userRow{{"joe", "joeshmoe"}, {"john", "johndoe"}, {"jimmy", "jimmyp"}})
+	body := io.NopCloser(&buf)
+	_, err := db.Upsert(context.Background(), "users", nil, body)
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	buf.Reset()
+	enc.Encode([]carsInput{{"Nissan", "Maxima", 2018, 1}, {"Toyota", "Camry", 2021, 2}, {"Tuscon", "Hyundai", 2022, 3}, {"Nissan", "Altima", 2012, 1}})
+	_, err = db.Upsert(context.Background(), "cars", nil, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf.Reset()
+	enc.Encode([]tiresInput{{1, "Michelan"}, {2, "Atlas"}, {3, "Tensor"}, {3, "Kirkland"}})
+	_, err = db.Upsert(context.Background(), "tires", nil, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf.Reset()
+	enc.Encode([]motorcyclesInput{{1, "Ninja", 2024}, {1, "Harley Davidson", 2008}, {1, "Toyota", 1992}, {2, "Kia", 2019}})
+	_, err = db.Upsert(context.Background(), "motorcycles", nil, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now test select with nested relations
+	var val url.Values = map[string][]string{
+		"select": {"name,cars(*,tires()),motorcycles(),username"},
+		"order":  {"name:asc"},
+	}
+
+	resp, err := db.Select(context.Background(), "users", val)
 	if err != nil {
 		t.Error(err)
 	}
+
+	var usr []user
+
+	err = json.Unmarshal(resp, &usr)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func TestUpsert(t *testing.T) {
+	type user struct {
+		Name     string `json:"name"`
+		Username string `json:"username"`
+	}
+
+	type cars struct {
+		Make   string `json:"make"`
+		Model  string `json:"model"`
+		Year   int16  `json:"year"`
+		UserId int64  `json:"user_id"`
+	}
+
+	type tires struct {
+		CarId int64  `json:"car_id"`
+		Brand string `json:"brand"`
+	}
+
+	type motorcycles struct {
+		UserId int64  `json:"user_id"`
+		Brand  string `json:"brand"`
+		Year   int16  `json:"year"`
+	}
+
+	db := setupTestDB(t)
+	setupTestDataForSelect(t, db)
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+
+	enc.Encode([]user{{"joe", "joeshmoe"}, {"john", "johndoe"}, {"jimmy", "jimmyp"}})
 	body := io.NopCloser(&buf)
 
-	_, err = db.Upsert("users", nil, body)
+	_, err := db.Upsert(context.Background(), "users", nil, body)
 	if err != nil {
 		t.Error(err)
 	}
@@ -156,7 +214,7 @@ func TestUpsert(t *testing.T) {
 
 	enc.Encode([]cars{{"Nissan", "Maxima", 2018, 1}, {"Toyota", "Camry", 2021, 2}, {"Tuscon", "Hyundai", 2022, 3}, {"Nissan", "Altima", 2012, 1}})
 
-	_, err = db.Upsert("cars", nil, body)
+	_, err = db.Upsert(context.Background(), "cars", nil, body)
 	if err != nil {
 		t.Error(err)
 	}
@@ -165,7 +223,7 @@ func TestUpsert(t *testing.T) {
 
 	enc.Encode([]tires{{1, "Michelan"}, {2, "Atlas"}, {3, "Tensor"}, {3, "Kirkland"}})
 
-	_, err = db.Upsert("tires", nil, body)
+	_, err = db.Upsert(context.Background(), "tires", nil, body)
 	if err != nil {
 		t.Error(err)
 	}
@@ -174,40 +232,46 @@ func TestUpsert(t *testing.T) {
 
 	enc.Encode([]motorcycles{{1, "Ninja", 2024}, {1, "Harley Davidson", 2008}, {1, "Toyota", 1992}, {2, "Kia", 2019}})
 
-	_, err = db.Upsert("motorcycles", nil, body)
+	_, err = db.Upsert(context.Background(), "motorcycles", nil, body)
 	if err != nil {
 		t.Error(err)
 	}
 }
 
 func TestUpdate(t *testing.T) {
-	// Setup: ensure data exists from TestUpsert
-	TestUpsert(t)
+	type userRow struct {
+		Name     string `json:"name"`
+		Username string `json:"username"`
+	}
 
-	client, err := sql.Open("libsql", "file:test.db")
+	db := setupTestDB(t)
+	setupTestDataForSelect(t, db)
+
+	// Insert test data
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.Encode([]userRow{{"joe", "joeshmoe"}, {"john", "johndoe"}, {"jimmy", "jimmyp"}})
+	body := io.NopCloser(&buf)
+
+	_, err := db.Upsert(context.Background(), "users", nil, body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
-
-	db := Database{client, SchemaCache{}, 0}
-	db.updateSchema()
 
 	// Test update with WHERE clause
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	buf.Reset()
 	enc.Encode(map[string]any{"name": "joseph"})
-	body := io.NopCloser(&buf)
+	body = io.NopCloser(&buf)
 
 	params := url.Values{"username": {"eq.joeshmoe"}}
-	_, err = db.Update("users", params, body)
+	_, err = db.Update(context.Background(), "users", params, body)
 	if err != nil {
 		t.Errorf("Update failed: %v", err)
 	}
 
 	// Verify the update
 	verifyParams := url.Values{"username": {"eq.joeshmoe"}}
-	resp, err := db.Select("users", verifyParams)
+	resp, err := db.Select(context.Background(), "users", verifyParams)
 	if err != nil {
 		t.Errorf("Select after update failed: %v", err)
 	}
@@ -224,7 +288,7 @@ func TestUpdate(t *testing.T) {
 	body = io.NopCloser(&buf)
 
 	params = url.Values{"username": {"eq.joeshmoe"}, "select": {"name,username"}}
-	resp, err = db.Update("users", params, body)
+	resp, err = db.Update(context.Background(), "users", params, body)
 	if err != nil {
 		t.Errorf("Update with RETURNING failed: %v", err)
 	}
@@ -237,23 +301,17 @@ func TestUpdate(t *testing.T) {
 	enc.Encode(map[string]any{"nonexistent": "value"})
 	body = io.NopCloser(&buf)
 
-	_, err = db.Update("users", url.Values{}, body)
+	_, err = db.Update(context.Background(), "users", url.Values{}, body)
 	if err == nil {
 		t.Error("Expected error for non-existent column")
 	}
 }
 
 func TestInsert(t *testing.T) {
-	client, err := sql.Open("libsql", "file:test.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-
-	db := Database{client, SchemaCache{}, 0}
+	db := setupTestDB(t)
 
 	// Setup test table
-	db.Client.Exec(`
+	_, err := db.Client.Exec(`
 		DROP TABLE IF EXISTS test_insert;
 		CREATE TABLE test_insert (
 			id INTEGER PRIMARY KEY,
@@ -261,7 +319,11 @@ func TestInsert(t *testing.T) {
 			value INTEGER
 		);
 	`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	db.updateSchema()
+	t.Cleanup(func() { db.Client.Exec("DROP TABLE IF EXISTS test_insert") })
 
 	// Test basic insert
 	var buf bytes.Buffer
@@ -269,7 +331,7 @@ func TestInsert(t *testing.T) {
 	enc.Encode(map[string]any{"name": "test", "value": 42})
 	body := io.NopCloser(&buf)
 
-	resp, err := db.Insert("test_insert", url.Values{}, body)
+	resp, err := db.Insert(context.Background(), "test_insert", url.Values{}, body)
 	if err != nil {
 		t.Errorf("Insert failed: %v", err)
 	}
@@ -287,7 +349,7 @@ func TestInsert(t *testing.T) {
 	body = io.NopCloser(&buf)
 
 	params := url.Values{"select": {"name,value"}}
-	resp, err = db.Insert("test_insert", params, body)
+	resp, err = db.Insert(context.Background(), "test_insert", params, body)
 	if err != nil {
 		t.Errorf("Insert with RETURNING failed: %v", err)
 	}
@@ -300,7 +362,7 @@ func TestInsert(t *testing.T) {
 	enc.Encode(map[string]any{"name": "test"})
 	body = io.NopCloser(&buf)
 
-	_, err = db.Insert("nonexistent_table", url.Values{}, body)
+	_, err = db.Insert(context.Background(), "nonexistent_table", url.Values{}, body)
 	if err == nil {
 		t.Error("Expected error for non-existent table")
 	}
@@ -310,26 +372,17 @@ func TestInsert(t *testing.T) {
 	enc.Encode(map[string]any{"invalid_column": "value"})
 	body = io.NopCloser(&buf)
 
-	_, err = db.Insert("test_insert", url.Values{}, body)
+	_, err = db.Insert(context.Background(), "test_insert", url.Values{}, body)
 	if err == nil {
 		t.Error("Expected error for invalid column")
 	}
-
-	// Cleanup
-	db.Client.Exec("DROP TABLE IF EXISTS test_insert")
 }
 
 func TestDelete(t *testing.T) {
-	client, err := sql.Open("libsql", "file:test.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-
-	db := Database{client, SchemaCache{}, 0}
+	db := setupTestDB(t)
 
 	// Setup test table with data
-	db.Client.Exec(`
+	_, err := db.Client.Exec(`
 		DROP TABLE IF EXISTS test_delete;
 		CREATE TABLE test_delete (
 			id INTEGER PRIMARY KEY,
@@ -337,17 +390,21 @@ func TestDelete(t *testing.T) {
 		);
 		INSERT INTO test_delete (name) VALUES ('one'), ('two'), ('three');
 	`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	db.updateSchema()
+	t.Cleanup(func() { db.Client.Exec("DROP TABLE IF EXISTS test_delete") })
 
 	// Test delete without WHERE (should error)
-	_, err = db.Delete("test_delete", url.Values{})
+	_, err = db.Delete(context.Background(), "test_delete", url.Values{})
 	if err == nil {
 		t.Error("Expected error for DELETE without WHERE clause")
 	}
 
 	// Test delete with WHERE clause
 	params := url.Values{"name": {"eq.one"}}
-	resp, err := db.Delete("test_delete", params)
+	resp, err := db.Delete(context.Background(), "test_delete", params)
 	if err != nil {
 		t.Errorf("Delete failed: %v", err)
 	}
@@ -361,7 +418,7 @@ func TestDelete(t *testing.T) {
 
 	// Verify deletion
 	verifyParams := url.Values{}
-	selectResp, _ := db.Select("test_delete", verifyParams)
+	selectResp, _ := db.Select(context.Background(), "test_delete", verifyParams)
 	var rows []map[string]any
 	json.Unmarshal(selectResp, &rows)
 	if len(rows) != 2 {
@@ -370,14 +427,11 @@ func TestDelete(t *testing.T) {
 
 	// Test delete with RETURNING clause
 	params = url.Values{"name": {"eq.two"}, "select": {"name"}}
-	resp, err = db.Delete("test_delete", params)
+	resp, err = db.Delete(context.Background(), "test_delete", params)
 	if err != nil {
 		t.Errorf("Delete with RETURNING failed: %v", err)
 	}
 	if resp == nil {
 		t.Error("Expected RETURNING to return data")
 	}
-
-	// Cleanup
-	db.Client.Exec("DROP TABLE IF EXISTS test_delete")
 }

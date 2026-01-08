@@ -2,6 +2,7 @@ package daos
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/gob"
 	"encoding/json"
@@ -184,8 +185,8 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 }
 
 // QueryMap executes a query and returns results as a slice of maps.
-func (dao *Database) QueryMap(query string, args ...any) ([]interface{}, error) {
-	rows, err := dao.Client.Query(query, args...)
+func (dao *Database) QueryMap(ctx context.Context, query string, args ...any) ([]interface{}, error) {
+	rows, err := dao.Client.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -267,8 +268,8 @@ func (dao *Database) QueryMap(query string, args ...any) ([]interface{}, error) 
 }
 
 // QueryJSON executes a query and returns results as JSON bytes.
-func (dao *Database) QueryJSON(query string, args ...any) ([]byte, error) {
-	m, err := dao.QueryMap(query, args...)
+func (dao *Database) QueryJSON(ctx context.Context, query string, args ...any) ([]byte, error) {
+	m, err := dao.QueryMap(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/joe-ervin05/atomicbase/daos"
@@ -42,104 +43,96 @@ func Run(app *http.ServeMux) {
 }
 
 func handleSelectRows() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-
-		return dao.Select(req.PathValue("table"), req.URL.Query())
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.Select(ctx, req.PathValue("table"), req.URL.Query())
 	})
 }
 
 func handleInsertRows() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
 		if req.Header.Get("Prefer") == "resolution=merge-duplicates" {
-			return dao.Upsert(req.PathValue("table"), req.URL.Query(), req.Body)
+			return dao.Upsert(ctx, req.PathValue("table"), req.URL.Query(), req.Body)
 		}
 
-		return dao.Insert(req.PathValue("table"), req.URL.Query(), req.Body)
+		return dao.Insert(ctx, req.PathValue("table"), req.URL.Query(), req.Body)
 	})
 }
 
 func handleUpdateRows() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-
-		return dao.Update(req.PathValue("table"), req.URL.Query(), req.Body)
-
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.Update(ctx, req.PathValue("table"), req.URL.Query(), req.Body)
 	})
 }
 
 func handleDeleteRows() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-
-		return dao.Delete(req.PathValue("table"), req.URL.Query())
-
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.Delete(ctx, req.PathValue("table"), req.URL.Query())
 	})
 }
 
 func handleEditSchema() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-		return dao.EditSchema(req.Body)
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.EditSchema(ctx, req.Body)
 	})
 }
 
 func handleInvalidateSchema() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-		return []byte("schema invalidated"), dao.InvalidateSchema()
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return []byte(`{"message":"schema invalidated"}`), dao.InvalidateSchema(ctx)
 	})
 }
 
 func handleGetTableSchema() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
 		return dao.GetTableSchema(req.PathValue("table"))
 	})
 }
 
 func handleCreateTable() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-		return dao.CreateTable(req.PathValue("table"), req.Body)
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.CreateTable(ctx, req.PathValue("table"), req.Body)
 	})
 }
 
 func handleDropTable() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-		return dao.DropTable(req.PathValue("table"))
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.DropTable(ctx, req.PathValue("table"))
 	})
 }
 
 func handleAlterTable() http.HandlerFunc {
-	return withDB(func(dao daos.Database, req *http.Request) ([]byte, error) {
-		return dao.AlterTable(req.PathValue("table"), req.Body)
+	return withDB(func(ctx context.Context, dao *daos.Database, req *http.Request) ([]byte, error) {
+		return dao.AlterTable(ctx, req.PathValue("table"), req.Body)
 	})
 }
 
 func handleCreateDb() http.HandlerFunc {
-	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {
-		return dao.CreateDB(req.Body)
+	return withPrimary(func(ctx context.Context, dao *daos.PrimaryDao, req *http.Request) ([]byte, error) {
+		return dao.CreateDB(ctx, req.Body)
 	})
 }
 
 func handleRegisterAll() http.HandlerFunc {
-	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {
-
-		err := dao.RegisterAllDbs()
+	return withPrimary(func(ctx context.Context, dao *daos.PrimaryDao, req *http.Request) ([]byte, error) {
+		err := dao.RegisterAllDbs(ctx)
 		return nil, err
-
 	})
 }
 
 func handleRegisterDb() http.HandlerFunc {
-	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {
-		return dao.RegisterDB(req.Body, req.Header.Get("DB-Token"))
+	return withPrimary(func(ctx context.Context, dao *daos.PrimaryDao, req *http.Request) ([]byte, error) {
+		return dao.RegisterDB(ctx, req.Body, req.Header.Get("DB-Token"))
 	})
 }
 
 func handleListDbs() http.HandlerFunc {
-	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {
-		return dao.ListDBs()
+	return withPrimary(func(ctx context.Context, dao *daos.PrimaryDao, req *http.Request) ([]byte, error) {
+		return dao.ListDBs(ctx)
 	})
 }
 
 func handleDeleteDb() http.HandlerFunc {
-	return withPrimary(func(dao daos.PrimaryDao, req *http.Request) ([]byte, error) {
-
-		return dao.DeleteDB(req.PathValue("name"))
+	return withPrimary(func(ctx context.Context, dao *daos.PrimaryDao, req *http.Request) ([]byte, error) {
+		return dao.DeleteDB(ctx, req.PathValue("name"))
 	})
 }

@@ -1,6 +1,7 @@
 package daos
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,20 +9,14 @@ import (
 	"net/url"
 )
 
-// Queries defines the interface for database CRUD operations.
-type Queries interface {
-	Select(string, url.Values) ([]byte, error)
-	Update(string, url.Values, io.ReadCloser) ([]byte, error)
-	InsertSingle(string, url.Values, io.ReadCloser) ([]byte, error)
-	Upsert(string, url.Values, io.ReadCloser) ([]byte, error)
-	Delete(string, url.Values) ([]byte, error)
-}
-
 // Select queries rows from a table with optional filtering, ordering, and nested relations.
 // Use the "select" param for column selection (e.g., "name,cars(make,model)").
 // Use the "order" param for sorting (e.g., "name:asc").
 // Other params become WHERE conditions (e.g., "id=eq.1").
-func (dao *Database) Select(relation string, params url.Values) ([]byte, error) {
+func (dao *Database) Select(ctx context.Context, relation string, params url.Values) ([]byte, error) {
+	if err := ValidateTableName(relation); err != nil {
+		return nil, err
+	}
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -61,7 +56,7 @@ func (dao *Database) Select(relation string, params url.Values) ([]byte, error) 
 		query += order
 	}
 
-	row := dao.Client.QueryRow(fmt.Sprintf("SELECT json_group_array(json_object(%s)) AS data FROM (%s)", agg, query), args...)
+	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(json_object(%s)) AS data FROM (%s)", agg, query), args...)
 	if row.Err() != nil {
 		return nil, row.Err()
 	}
@@ -76,7 +71,10 @@ func (dao *Database) Select(relation string, params url.Values) ([]byte, error) 
 // Update modifies rows matching the WHERE conditions from query params.
 // Body should be JSON with column:value pairs to update.
 // Use "select" param to return modified rows.
-func (dao *Database) Update(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) Update(ctx context.Context, relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+	if err := ValidateTableName(relation); err != nil {
+		return nil, err
+	}
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -127,10 +125,10 @@ func (dao *Database) Update(relation string, params url.Values, body io.ReadClos
 
 		query += selQuery
 
-		return dao.QueryJSON(query, args...)
+		return dao.QueryJSON(ctx, query, args...)
 	}
 
-	result, err := dao.Client.Exec(query, args...)
+	result, err := dao.Client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +140,10 @@ func (dao *Database) Update(relation string, params url.Values, body io.ReadClos
 // Insert adds a single row to the table.
 // Body should be JSON with column:value pairs.
 // Use "select" param to return the inserted row.
-func (dao *Database) Insert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) Insert(ctx context.Context, relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+	if err := ValidateTableName(relation); err != nil {
+		return nil, err
+	}
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -187,10 +188,10 @@ func (dao *Database) Insert(relation string, params url.Values, body io.ReadClos
 
 		query += selQuery
 
-		return dao.QueryJSON(query, args...)
+		return dao.QueryJSON(ctx, query, args...)
 	}
 
-	result, err := dao.Client.Exec(query, args...)
+	result, err := dao.Client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +203,10 @@ func (dao *Database) Insert(relation string, params url.Values, body io.ReadClos
 // Upsert inserts multiple rows, updating on primary key conflict.
 // Body should be a JSON array of objects with column:value pairs.
 // Use "select" param to return the upserted rows.
-func (dao *Database) Upsert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) Upsert(ctx context.Context, relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+	if err := ValidateTableName(relation); err != nil {
+		return nil, err
+	}
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -279,10 +283,10 @@ func (dao *Database) Upsert(relation string, params url.Values, body io.ReadClos
 
 		query += selQuery
 
-		return dao.QueryJSON(query, args...)
+		return dao.QueryJSON(ctx, query, args...)
 	}
 
-	result, err := dao.Client.Exec(query, args...)
+	result, err := dao.Client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +298,10 @@ func (dao *Database) Upsert(relation string, params url.Values, body io.ReadClos
 // Delete removes rows matching the WHERE conditions from query params.
 // A WHERE clause is required (no mass deletes without conditions).
 // Use "select" param to return deleted rows.
-func (dao *Database) Delete(relation string, params url.Values) ([]byte, error) {
+func (dao *Database) Delete(ctx context.Context, relation string, params url.Values) ([]byte, error) {
+	if err := ValidateTableName(relation); err != nil {
+		return nil, err
+	}
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -325,10 +332,10 @@ func (dao *Database) Delete(relation string, params url.Values) ([]byte, error) 
 
 		query += selQuery
 
-		return dao.QueryJSON(query, args...)
+		return dao.QueryJSON(ctx, query, args...)
 	}
 
-	result, err := dao.Client.Exec(query, args...)
+	result, err := dao.Client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package daos
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,7 +44,7 @@ func (dao *Database) updateSchema() error {
 	return nil
 }
 
-func (dao *Database) InvalidateSchema() error {
+func (dao *Database) InvalidateSchema(ctx context.Context) error {
 
 	cols, err := schemaCols(dao.Client)
 	if err != nil {
@@ -60,6 +61,9 @@ func (dao *Database) InvalidateSchema() error {
 }
 
 func (dao *Database) GetTableSchema(table string) ([]byte, error) {
+	if err := ValidateTableName(table); err != nil {
+		return nil, err
+	}
 
 	type fKey struct {
 		Column     string `json:"column"`
@@ -92,7 +96,11 @@ func (dao *Database) GetTableSchema(table string) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-func (dao *Database) AlterTable(table string, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) AlterTable(ctx context.Context, table string, body io.ReadCloser) ([]byte, error) {
+	if err := ValidateTableName(table); err != nil {
+		return nil, err
+	}
+
 	type tblChanges struct {
 		NewName       string               `json:"newName"`
 		RenameColumns map[string]string    `json:"renameColumns"`
@@ -115,6 +123,9 @@ func (dao *Database) AlterTable(table string, body io.ReadCloser) ([]byte, error
 
 	if changes.RenameColumns != nil {
 		for col, new := range changes.RenameColumns {
+			if err := ValidateColumnName(new); err != nil {
+				return nil, err
+			}
 			_, err = tbl.SearchCols(col)
 			if err != nil {
 				return nil, err
@@ -137,6 +148,9 @@ func (dao *Database) AlterTable(table string, body io.ReadCloser) ([]byte, error
 
 	if changes.NewColumns != nil {
 		for name, col := range changes.NewColumns {
+			if err := ValidateColumnName(name); err != nil {
+				return nil, err
+			}
 			if mapColType(col.Type) == "" {
 				return nil, InvalidTypeErr(name, col.Type)
 			}
@@ -191,18 +205,25 @@ func (dao *Database) AlterTable(table string, body io.ReadCloser) ([]byte, error
 	}
 
 	if changes.NewName != "" {
+		if err := ValidateTableName(changes.NewName); err != nil {
+			return nil, err
+		}
 		query += "ALTER TABLE [" + table + "] RENAME TO [" + changes.NewName + "]; "
 	}
 
-	_, err = dao.Client.Exec(query)
+	_, err = dao.Client.ExecContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte(fmt.Sprintf("table %s altered", table)), dao.InvalidateSchema()
+	return []byte(fmt.Sprintf(`{"message":"table %s altered"}`, table)), dao.InvalidateSchema(ctx)
 }
 
-func (dao *Database) CreateTable(table string, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) CreateTable(ctx context.Context, table string, body io.ReadCloser) ([]byte, error) {
+	if err := ValidateTableName(table); err != nil {
+		return nil, err
+	}
+
 	query := fmt.Sprintf("CREATE TABLE [%s] (", table)
 
 	var cols map[string]Column
@@ -221,6 +242,9 @@ func (dao *Database) CreateTable(table string, body io.ReadCloser) ([]byte, erro
 	var fKeys []fKey
 
 	for n, col := range cols {
+		if err := ValidateColumnName(n); err != nil {
+			return nil, err
+		}
 		if mapColType(col.Type) == "" {
 			return nil, InvalidTypeErr(n, col.Type)
 		}
@@ -283,30 +307,33 @@ func (dao *Database) CreateTable(table string, body io.ReadCloser) ([]byte, erro
 
 	query = query[:len(query)-2] + ")"
 
-	_, err = dao.Client.Exec(query)
+	_, err = dao.Client.ExecContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte(fmt.Sprintf("table %s created", table)), dao.InvalidateSchema()
+	return []byte(fmt.Sprintf(`{"message":"table %s created"}`, table)), dao.InvalidateSchema(ctx)
 }
 
-func (dao *Database) DropTable(table string) ([]byte, error) {
+func (dao *Database) DropTable(ctx context.Context, table string) ([]byte, error) {
+	if err := ValidateTableName(table); err != nil {
+		return nil, err
+	}
 
 	_, err := dao.Schema.SearchTbls(table)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = dao.Client.Exec(fmt.Sprintf("DROP TABLE [%s]", table))
+	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf("DROP TABLE [%s]", table))
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte(fmt.Sprintf("table %s dropped", table)), dao.InvalidateSchema()
+	return []byte(fmt.Sprintf(`{"message":"table %s dropped"}`, table)), dao.InvalidateSchema(ctx)
 }
 
-func (dao *Database) EditSchema(body io.ReadCloser) ([]byte, error) {
+func (dao *Database) EditSchema(ctx context.Context, body io.ReadCloser) ([]byte, error) {
 	type reqBody struct {
 		Query string `json:"query"`
 		Args  []any  `json:"args"`
@@ -319,12 +346,12 @@ func (dao *Database) EditSchema(body io.ReadCloser) ([]byte, error) {
 		return nil, err
 	}
 
-	_, err = dao.Client.Exec(bod.Query, bod.Args...)
+	_, err = dao.Client.ExecContext(ctx, bod.Query, bod.Args...)
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte("schema edited"), dao.InvalidateSchema()
+	return []byte(`{"message":"schema edited"}`), dao.InvalidateSchema(ctx)
 }
 
 // mapColType validates and normalizes a column type string.
