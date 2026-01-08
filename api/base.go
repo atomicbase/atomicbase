@@ -6,26 +6,39 @@ import (
 	"github.com/joe-ervin05/atomicbase/daos"
 )
 
+// Run registers all API routes on the provided ServeMux.
+//
+// Routes:
+//   - GET/POST/PATCH/DELETE /query/{table} - CRUD operations on table rows
+//   - POST /schema - Execute raw schema SQL
+//   - POST /schema/invalidate - Refresh schema cache
+//   - GET/POST/DELETE/PATCH /schema/table/{table} - Table schema operations
+//   - GET/POST/PATCH/DELETE /db - Database management
+//
+// Use DB-Name header to target external Turso databases (default: primary).
 func Run(app *http.ServeMux) {
-	app.HandleFunc("GET /query/{table}", handleSelectRows())    // done
-	app.HandleFunc("POST /query/{table}", handleInsertRows())   // done
-	app.HandleFunc("PATCH /query/{table}", handleUpdateRows())  // done
-	app.HandleFunc("DELETE /query/{table}", handleDeleteRows()) // done
+	// Row operations
+	app.HandleFunc("GET /query/{table}", handleSelectRows())
+	app.HandleFunc("POST /query/{table}", handleInsertRows())
+	app.HandleFunc("PATCH /query/{table}", handleUpdateRows())
+	app.HandleFunc("DELETE /query/{table}", handleDeleteRows())
 
-	app.HandleFunc("POST /schema", handleEditSchema())                  // done
-	app.HandleFunc("POST /schema/invalidate", handleInvalidateSchema()) // done
+	// Schema operations
+	app.HandleFunc("POST /schema", handleEditSchema())
+	app.HandleFunc("POST /schema/invalidate", handleInvalidateSchema())
 
-	app.HandleFunc("GET /schema/table/{table}", handleGetTableSchema()) // mostly done
-	app.HandleFunc("POST /schema/table/{table}", handleCreateTable())   // done
-	app.HandleFunc("DELETE /schema/table/{table}", handleDropTable())   // done
-	app.HandleFunc("PATCH /schema/table/{table}", handleAlterTable())   // done
+	// Table schema operations
+	app.HandleFunc("GET /schema/table/{table}", handleGetTableSchema())
+	app.HandleFunc("POST /schema/table/{table}", handleCreateTable())
+	app.HandleFunc("DELETE /schema/table/{table}", handleDropTable())
+	app.HandleFunc("PATCH /schema/table/{table}", handleAlterTable())
 
-	app.HandleFunc("GET /db", handleListDbs())            // done
-	app.HandleFunc("POST /db", handleCreateDb())          // done
-	app.HandleFunc("PATCH /db", handleRegisterDb())       // done
-	app.HandleFunc("PATCH /db/all", handleRegisterAll())  // done
-	app.HandleFunc("DELETE /db/{name}", handleDeleteDb()) // done
-
+	// Database management
+	app.HandleFunc("GET /db", handleListDbs())
+	app.HandleFunc("POST /db", handleCreateDb())
+	app.HandleFunc("PATCH /db", handleRegisterDb())
+	app.HandleFunc("PATCH /db/all", handleRegisterAll())
+	app.HandleFunc("DELETE /db/{name}", handleDeleteDb())
 }
 
 func handleSelectRows() http.HandlerFunc {

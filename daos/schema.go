@@ -5,7 +5,8 @@ import (
 	"database/sql"
 	"encoding/gob"
 	"fmt"
-	"log"
+
+	"github.com/joe-ervin05/atomicbase/config"
 )
 
 func schemaFks(db *sql.DB) ([]Fk, error) {
@@ -27,7 +28,10 @@ func schemaFks(db *sql.DB) ([]Fk, error) {
 	for rows.Next() {
 		var from, to, references, table sql.NullString
 
-		rows.Scan(&table, &references, &from, &to)
+		err := rows.Scan(&table, &references, &from, &to)
+		if err != nil {
+			return nil, err
+		}
 
 		fks = append(fks, Fk{table.String, references.String, from.String, to.String})
 
@@ -61,7 +65,10 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 		var name sql.NullString
 		var pk sql.NullBool
 
-		rows.Scan(&name, &col, &colType, &pk)
+		err := rows.Scan(&name, &col, &colType, &pk)
+		if err != nil {
+			return nil, err
+		}
 
 		if currTbl.Name != name.String {
 			if firstRow {
@@ -93,18 +100,16 @@ func (dao Database) saveSchema() error {
 	if dao.id == 1 {
 		client = dao.Client
 	} else {
-		client, err = sql.Open("libsql", "file:atomicdata/primary.db")
+		client, err = sql.Open("libsql", "file:"+config.Cfg.PrimaryDBPath)
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("failed to open primary database for schema save: %w", err)
 		}
-
 		defer client.Close()
 	}
 
 	err = client.Ping()
-
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to ping database for schema save: %w", err)
 	}
 
 	var buf bytes.Buffer
@@ -116,7 +121,6 @@ func (dao Database) saveSchema() error {
 	}
 
 	_, err = client.Exec("UPDATE databases SET schema = ? WHERE id = ?", buf.Bytes(), dao.id)
-
 	return err
 }
 
@@ -132,6 +136,8 @@ func loadSchema(data []byte) (SchemaCache, error) {
 
 }
 
+// SearchFks performs binary search for a foreign key by table and references.
+// Returns the index in schema.Fks or -1 if not found.
 func (schema SchemaCache) SearchFks(table string, references string) int {
 	left, right := 0, len(schema.Fks)-1
 
@@ -153,6 +159,8 @@ func (schema SchemaCache) SearchFks(table string, references string) int {
 	return -1
 }
 
+// SearchTbls performs binary search for a table by name.
+// Returns the Table or ErrTableNotFound if not found.
 func (schema SchemaCache) SearchTbls(table string) (Table, error) {
 	left, right := 0, len(schema.Tables)-1
 
@@ -168,9 +176,11 @@ func (schema SchemaCache) SearchTbls(table string) (Table, error) {
 		}
 	}
 
-	return Table{}, fmt.Errorf("table %s does not exist. Your schema cache may be stale", table)
+	return Table{}, TableNotFoundErr(table)
 }
 
+// SearchCols performs binary search for a column by name.
+// Returns the Col or ErrColumnNotFound if not found.
 func (tbl Table) SearchCols(col string) (Col, error) {
 
 	left, right := 0, len(tbl.Columns)-1
@@ -187,5 +197,5 @@ func (tbl Table) SearchCols(col string) (Col, error) {
 		}
 	}
 
-	return Col{}, fmt.Errorf("column %s does not exist on table %s. Your schema cache may be stale", col, tbl.Name)
+	return Col{}, ColumnNotFoundErr(tbl.Name, col)
 }

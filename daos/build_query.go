@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// Relation represents a table with optional column selections and joins.
 type Relation struct {
 	name    string
 	alias   string
@@ -19,6 +20,16 @@ type column struct {
 	alias string
 }
 
+// findForeignKey searches for a foreign key relationship between two tables using binary search.
+func (schema SchemaCache) findForeignKey(table, references string) Fk {
+	idx := schema.SearchFks(table, references)
+	if idx == -1 {
+		return Fk{}
+	}
+	return schema.Fks[idx]
+}
+
+// buildSelect constructs a SELECT query with JSON aggregation for the root relation.
 func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 	agg := ""
 	sel := ""
@@ -37,13 +48,11 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 		if col.name == "*" {
 			sel += "*, "
 			for _, col := range tbl.Columns {
-				if strings.ToLower(col.Type) == "blob" {
+				if strings.EqualFold(col.Type, ColTypeBlob) {
 					continue
 				}
-
 				agg += fmt.Sprintf("'%s', [%s], ", col.Name, col.Name)
 			}
-
 			continue
 		}
 
@@ -52,7 +61,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			return "", "", err
 		}
 
-		if strings.ToLower(column.Type) == "blob" {
+		if strings.EqualFold(column.Type, ColTypeBlob) {
 			continue
 		}
 
@@ -80,17 +89,12 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 		if err != nil {
 			return "", "", err
 		}
-		var fk Fk
-		for _, key := range schema.Fks {
-			if key.References == rel.name && key.Table == tbl.name {
-				fk = key
-				break
-			}
+
+		fk := schema.findForeignKey(tbl.name, rel.name)
+		if fk == (Fk{}) {
+			return "", "", NoRelationshipErr(rel.name, tbl.name)
 		}
 
-		if fk == (Fk{}) {
-			return "", "", err
-		}
 		sel += fmt.Sprintf("json_group_array(json_object(%s)) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, fk.Table, fk.From, tbl.name)
 
 		if tbl.inner {
@@ -105,6 +109,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 	return "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", rel.name) + joins, agg[:len(agg)-2], nil
 }
 
+// buildSelCurr constructs a SELECT query for a nested/joined relation.
 func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, string, error) {
 	var sel string
 	var joins string
@@ -122,12 +127,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 	}
 
 	if joinedOn != "" {
-		for _, key := range schema.Fks {
-			if key.References == joinedOn && key.Table == rel.name {
-				fk = key
-				break
-			}
-		}
+		fk = schema.findForeignKey(rel.name, joinedOn)
 	}
 
 	for _, col := range rel.columns {
@@ -138,13 +138,11 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 		if col.name == "*" {
 			sel += "*, "
 			for _, col := range tbl.Columns {
-				if strings.ToLower(col.Type) == "blob" {
+				if strings.EqualFold(col.Type, ColTypeBlob) {
 					continue
 				}
-
 				agg += fmt.Sprintf("'%s', [%s].[%s], ", col.Name, rel.name, col.Name)
 			}
-
 			continue
 		}
 
@@ -153,11 +151,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 			return "", "", err
 		}
 
-		if strings.ToLower(column.Type) == "blob" {
-			continue
-		}
-
-		if strings.ToLower(column.Type) == "blob" {
+		if strings.EqualFold(column.Type, ColTypeBlob) {
 			continue
 		}
 
@@ -173,7 +167,6 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 		} else {
 			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.name, rel.name, col.name)
 		}
-
 	}
 
 	if !includesFk {
@@ -190,18 +183,13 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 		if err != nil {
 			return "", "", err
 		}
-		var fk Fk
-		for _, key := range schema.Fks {
-			if key.References == rel.name && key.Table == tbl.name {
-				fk = key
-				break
-			}
-		}
-		if fk == (Fk{}) {
-			return "", "", fmt.Errorf("no relationship exists in the schema cache between %s and %s", rel.name, tbl.name)
+
+		nestedFk := schema.findForeignKey(tbl.name, rel.name)
+		if nestedFk == (Fk{}) {
+			return "", "", NoRelationshipErr(rel.name, tbl.name)
 		}
 
-		sel += fmt.Sprintf("json_group_array(json_object(%s)) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, fk.Table, fk.From, tbl.name)
+		sel += fmt.Sprintf("json_group_array(json_object(%s)) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, nestedFk.Table, nestedFk.From, tbl.name)
 
 		if tbl.inner {
 			joins += "INNER "
@@ -209,13 +197,19 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 			joins += "LEFT "
 		}
 
-		joins += fmt.Sprintf("JOIN (%s) AS [%s] ON [%s].[%s] = [%s].[%s] ", query, tbl.name, fk.References, fk.To, fk.Table, fk.From)
-
+		joins += fmt.Sprintf("JOIN (%s) AS [%s] ON [%s].[%s] = [%s].[%s] ", query, tbl.name, nestedFk.References, nestedFk.To, nestedFk.Table, nestedFk.From)
 	}
 
 	return "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", rel.name) + joins, agg[:len(agg)-2], nil
 }
 
+// parseSelect parses a select parameter string into a Relation tree.
+// Syntax: "col1,col2,related_table(col1,col2),other_table(!)"
+//   - Parentheses denote related tables (joins)
+//   - ! marks an inner join
+//   - : provides an alias (e.g., "alias:column" or "alias:table()")
+//   - Quotes allow special characters in names
+//   - Backslash escapes the next character
 func parseSelect(param string, table string) Relation {
 	tbl := Relation{table, "", false, nil, nil, nil}
 	currTbl := &tbl

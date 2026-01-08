@@ -76,11 +76,11 @@ func (table Table) BuildWhere(params url.Values) (string, []any, error) {
 	hasWhere := false
 
 	for name, val := range params {
-		if name == "order" || name == "select" {
+		if name == ParamOrder || name == ParamSelect {
 			continue
 		}
 
-		if name == "or" {
+		if name == ParamOr {
 			for _, v := range val {
 				orList := tokenKeyValList(v)
 
@@ -162,7 +162,6 @@ func (table Table) BuildOrder(orderBy string) (string, error) {
 	orderList := tokenKeyValList(orderBy)
 
 	for _, order := range orderList {
-
 		var tbl string
 		var col string
 		if len(order[0]) < 2 {
@@ -181,9 +180,9 @@ func (table Table) BuildOrder(orderBy string) (string, error) {
 		query += fmt.Sprintf("[%s].[%s] ", tbl, col)
 		if order[1] != nil {
 			switch strings.ToLower(order[1][0]) {
-			case "asc":
+			case OrderAsc:
 				query += "ASC"
-			case "desc":
+			case OrderDesc:
 				query += "DESC"
 			default:
 				return "", fmt.Errorf("unknown keyword %s", order[1][0])
@@ -191,7 +190,6 @@ func (table Table) BuildOrder(orderBy string) (string, error) {
 		}
 
 		query += ", "
-
 	}
 
 	return query[:len(query)-2] + " ", nil

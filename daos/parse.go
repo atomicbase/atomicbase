@@ -129,36 +129,38 @@ func token(s string) []string {
 	return list
 }
 
+// mapOperator converts a filter operator string to its SQL equivalent.
+// Returns empty string if the operator is not recognized.
 func mapOperator(str string) string {
 	switch str {
-	case "eq":
-		return "="
-	case "lt":
-		return "<"
-	case "gt":
-		return ">"
-	case "lte":
-		return "<="
-	case "gte":
-		return ">="
-	case "neq":
-		return "!="
-	case "like":
-		return "LIKE"
-	case "glob":
-		return "GLOB"
-	case "between":
-		return "BETWEEN"
-	case "not":
-		return "NOT"
-	case "in":
-		return "IN"
-	case "is":
-		return "IS"
-	case "and":
-		return "AND"
-	case "or":
-		return "OR"
+	case OpEq:
+		return SqlEq
+	case OpLt:
+		return SqlLt
+	case OpGt:
+		return SqlGt
+	case OpLte:
+		return SqlLte
+	case OpGte:
+		return SqlGte
+	case OpNeq:
+		return SqlNeq
+	case OpLike:
+		return SqlLike
+	case OpGlob:
+		return SqlGlob
+	case OpBetween:
+		return SqlBetween
+	case OpNot:
+		return SqlNot
+	case OpIn:
+		return SqlIn
+	case OpIs:
+		return SqlIs
+	case OpAnd:
+		return SqlAnd
+	case OpOr:
+		return SqlOr
 	default:
 		return ""
 	}

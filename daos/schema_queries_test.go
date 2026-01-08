@@ -250,11 +250,175 @@ func TestAlterTable(t *testing.T) {
 
 	dao, err := ConnPrimary()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	defer dao.Client.Close()
+
+	// Test adding a new column
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+
+	alterReq := map[string]any{
+		"newColumns": map[string]any{
+			"email": map[string]any{
+				"type": "TEXT",
+			},
+		},
+	}
+	enc.Encode(alterReq)
+	body := io.NopCloser(&buf)
+
+	resp, err := dao.AlterTable("test_users", body)
+	if err != nil {
+		t.Errorf("AlterTable (add column) failed: %v", err)
+	}
+	if resp == nil {
+		t.Error("Expected response from AlterTable")
+	}
+
+	err = dao.InvalidateSchema()
+	if err != nil {
+		t.Errorf("InvalidateSchema failed: %v", err)
+	}
+
+	// Verify column was added
+	tbl, err := dao.Schema.SearchTbls("test_users")
+	if err != nil {
+		t.Errorf("SearchTbls failed: %v", err)
+	}
+	_, err = tbl.SearchCols("email")
+	if err != nil {
+		t.Error("Expected 'email' column to exist after ALTER")
+	}
+
+	// Test renaming a column
+	buf.Reset()
+	renameReq := map[string]any{
+		"renameColumns": map[string]string{
+			"email": "email_address",
+		},
+	}
+	enc.Encode(renameReq)
+	body = io.NopCloser(&buf)
+
+	_, err = dao.AlterTable("test_users", body)
+	if err != nil {
+		t.Errorf("AlterTable (rename column) failed: %v", err)
+	}
+
+	err = dao.InvalidateSchema()
+	if err != nil {
+		t.Errorf("InvalidateSchema failed: %v", err)
+	}
+
+	// Verify column was renamed
+	tbl, _ = dao.Schema.SearchTbls("test_users")
+	_, err = tbl.SearchCols("email_address")
+	if err != nil {
+		t.Error("Expected 'email_address' column to exist after rename")
+	}
+
+	// Test dropping a column
+	buf.Reset()
+	dropReq := map[string]any{
+		"dropColumns": []string{"email_address"},
+	}
+	enc.Encode(dropReq)
+	body = io.NopCloser(&buf)
+
+	_, err = dao.AlterTable("test_users", body)
+	if err != nil {
+		t.Errorf("AlterTable (drop column) failed: %v", err)
+	}
+
+	err = dao.InvalidateSchema()
+	if err != nil {
+		t.Errorf("InvalidateSchema failed: %v", err)
+	}
+
+	// Verify column was dropped
+	tbl, _ = dao.Schema.SearchTbls("test_users")
+	_, err = tbl.SearchCols("email_address")
+	if err == nil {
+		t.Error("Expected 'email_address' column to NOT exist after drop")
+	}
+
+	// Test renaming table
+	buf.Reset()
+	renameTableReq := map[string]any{
+		"newName": "test_users_renamed",
+	}
+	enc.Encode(renameTableReq)
+	body = io.NopCloser(&buf)
+
+	_, err = dao.AlterTable("test_users", body)
+	if err != nil {
+		t.Errorf("AlterTable (rename table) failed: %v", err)
+	}
+
+	err = dao.InvalidateSchema()
+	if err != nil {
+		t.Errorf("InvalidateSchema failed: %v", err)
+	}
+
+	// Verify table was renamed
+	_, err = dao.Schema.SearchTbls("test_users_renamed")
+	if err != nil {
+		t.Error("Expected 'test_users_renamed' table to exist after rename")
+	}
+
+	// Rename back for cleanup
+	buf.Reset()
+	enc.Encode(map[string]any{"newName": "test_users"})
+	body = io.NopCloser(&buf)
+	dao.AlterTable("test_users_renamed", body)
+	dao.InvalidateSchema()
 }
 
 func TestDropTable(t *testing.T) {
+	dao, err := ConnPrimary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dao.Client.Close()
 
+	// Create a test table to drop
+	dao.Client.Exec(`
+		DROP TABLE IF EXISTS test_drop_me;
+		CREATE TABLE test_drop_me (id INTEGER PRIMARY KEY);
+	`)
+	dao.InvalidateSchema()
+
+	// Verify table exists
+	_, err = dao.Schema.SearchTbls("test_drop_me")
+	if err != nil {
+		t.Error("Expected test_drop_me table to exist before drop")
+	}
+
+	// Test dropping the table
+	resp, err := dao.DropTable("test_drop_me")
+	if err != nil {
+		t.Errorf("DropTable failed: %v", err)
+	}
+	if resp == nil {
+		t.Error("Expected response from DropTable")
+	}
+
+	// Reload schema since DropTable uses a value receiver
+	err = dao.InvalidateSchema()
+	if err != nil {
+		t.Errorf("InvalidateSchema failed: %v", err)
+	}
+
+	// Verify table was dropped
+	_, err = dao.Schema.SearchTbls("test_drop_me")
+	if err == nil {
+		t.Error("Expected test_drop_me table to NOT exist after drop")
+	}
+
+	// Test dropping non-existent table (should error)
+	_, err = dao.DropTable("nonexistent_table_xyz")
+	if err == nil {
+		t.Error("Expected error when dropping non-existent table")
+	}
 }

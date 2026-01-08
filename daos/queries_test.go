@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/url"
 	"testing"
@@ -137,8 +136,6 @@ func TestUpsert(t *testing.T) {
 
 	db.updateSchema()
 
-	fmt.Println(db.Schema.Tables)
-
 	var buf bytes.Buffer
 
 	enc := json.NewEncoder(&buf)
@@ -184,13 +181,195 @@ func TestUpsert(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
+	// Setup: ensure data exists from TestUpsert
+	TestUpsert(t)
 
+	client, err := sql.Open("libsql", "file:test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	db := Database{client, SchemaCache{}, 0}
+	db.updateSchema()
+
+	// Test update with WHERE clause
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.Encode(map[string]any{"name": "joseph"})
+	body := io.NopCloser(&buf)
+
+	params := url.Values{"username": {"eq.joeshmoe"}}
+	_, err = db.Update("users", params, body)
+	if err != nil {
+		t.Errorf("Update failed: %v", err)
+	}
+
+	// Verify the update
+	verifyParams := url.Values{"username": {"eq.joeshmoe"}}
+	resp, err := db.Select("users", verifyParams)
+	if err != nil {
+		t.Errorf("Select after update failed: %v", err)
+	}
+
+	var users []map[string]any
+	json.Unmarshal(resp, &users)
+	if len(users) == 0 || users[0]["name"] != "joseph" {
+		t.Errorf("Update did not change name: got %v", users)
+	}
+
+	// Test update with RETURNING clause
+	buf.Reset()
+	enc.Encode(map[string]any{"name": "joe"})
+	body = io.NopCloser(&buf)
+
+	params = url.Values{"username": {"eq.joeshmoe"}, "select": {"name,username"}}
+	resp, err = db.Update("users", params, body)
+	if err != nil {
+		t.Errorf("Update with RETURNING failed: %v", err)
+	}
+	if resp == nil {
+		t.Error("Expected RETURNING to return data")
+	}
+
+	// Test update non-existent column (should error)
+	buf.Reset()
+	enc.Encode(map[string]any{"nonexistent": "value"})
+	body = io.NopCloser(&buf)
+
+	_, err = db.Update("users", url.Values{}, body)
+	if err == nil {
+		t.Error("Expected error for non-existent column")
+	}
 }
 
 func TestInsert(t *testing.T) {
+	client, err := sql.Open("libsql", "file:test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
 
+	db := Database{client, SchemaCache{}, 0}
+
+	// Setup test table
+	db.Client.Exec(`
+		DROP TABLE IF EXISTS test_insert;
+		CREATE TABLE test_insert (
+			id INTEGER PRIMARY KEY,
+			name TEXT,
+			value INTEGER
+		);
+	`)
+	db.updateSchema()
+
+	// Test basic insert
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.Encode(map[string]any{"name": "test", "value": 42})
+	body := io.NopCloser(&buf)
+
+	resp, err := db.Insert("test_insert", url.Values{}, body)
+	if err != nil {
+		t.Errorf("Insert failed: %v", err)
+	}
+	if string(resp) != "inserted row" {
+		t.Errorf("Expected 'inserted row', got %s", resp)
+	}
+
+	// Test insert with RETURNING clause
+	buf.Reset()
+	enc.Encode(map[string]any{"name": "test2", "value": 100})
+	body = io.NopCloser(&buf)
+
+	params := url.Values{"select": {"name,value"}}
+	resp, err = db.Insert("test_insert", params, body)
+	if err != nil {
+		t.Errorf("Insert with RETURNING failed: %v", err)
+	}
+	if resp == nil {
+		t.Error("Expected RETURNING to return data")
+	}
+
+	// Test insert into non-existent table (should error)
+	buf.Reset()
+	enc.Encode(map[string]any{"name": "test"})
+	body = io.NopCloser(&buf)
+
+	_, err = db.Insert("nonexistent_table", url.Values{}, body)
+	if err == nil {
+		t.Error("Expected error for non-existent table")
+	}
+
+	// Test insert with invalid column (should error)
+	buf.Reset()
+	enc.Encode(map[string]any{"invalid_column": "value"})
+	body = io.NopCloser(&buf)
+
+	_, err = db.Insert("test_insert", url.Values{}, body)
+	if err == nil {
+		t.Error("Expected error for invalid column")
+	}
+
+	// Cleanup
+	db.Client.Exec("DROP TABLE IF EXISTS test_insert")
 }
 
 func TestDelete(t *testing.T) {
+	client, err := sql.Open("libsql", "file:test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
 
+	db := Database{client, SchemaCache{}, 0}
+
+	// Setup test table with data
+	db.Client.Exec(`
+		DROP TABLE IF EXISTS test_delete;
+		CREATE TABLE test_delete (
+			id INTEGER PRIMARY KEY,
+			name TEXT
+		);
+		INSERT INTO test_delete (name) VALUES ('one'), ('two'), ('three');
+	`)
+	db.updateSchema()
+
+	// Test delete without WHERE (should error)
+	_, err = db.Delete("test_delete", url.Values{})
+	if err == nil {
+		t.Error("Expected error for DELETE without WHERE clause")
+	}
+
+	// Test delete with WHERE clause
+	params := url.Values{"name": {"eq.one"}}
+	resp, err := db.Delete("test_delete", params)
+	if err != nil {
+		t.Errorf("Delete failed: %v", err)
+	}
+	if string(resp) != "deleted" {
+		t.Errorf("Expected 'deleted', got %s", resp)
+	}
+
+	// Verify deletion
+	verifyParams := url.Values{}
+	selectResp, _ := db.Select("test_delete", verifyParams)
+	var rows []map[string]any
+	json.Unmarshal(selectResp, &rows)
+	if len(rows) != 2 {
+		t.Errorf("Expected 2 rows after delete, got %d", len(rows))
+	}
+
+	// Test delete with RETURNING clause
+	params = url.Values{"name": {"eq.two"}, "select": {"name"}}
+	resp, err = db.Delete("test_delete", params)
+	if err != nil {
+		t.Errorf("Delete with RETURNING failed: %v", err)
+	}
+	if resp == nil {
+		t.Error("Expected RETURNING to return data")
+	}
+
+	// Cleanup
+	db.Client.Exec("DROP TABLE IF EXISTS test_delete")
 }

@@ -8,6 +8,7 @@ import (
 	"net/url"
 )
 
+// Queries defines the interface for database CRUD operations.
 type Queries interface {
 	Select(string, url.Values) ([]byte, error)
 	Update(string, url.Values, io.ReadCloser) ([]byte, error)
@@ -16,9 +17,13 @@ type Queries interface {
 	Delete(string, url.Values) ([]byte, error)
 }
 
+// Select queries rows from a table with optional filtering, ordering, and nested relations.
+// Use the "select" param for column selection (e.g., "name,cars(make,model)").
+// Use the "order" param for sorting (e.g., "name:asc").
+// Other params become WHERE conditions (e.g., "id=eq.1").
 func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
-	if dao.id == 1 && relation == "databases" {
-		return nil, errors.New("cannot query table databases")
+	if dao.id == 1 && relation == ReservedTableDatabases {
+		return nil, ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -28,9 +33,8 @@ func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
 
 	var sel string
 
-	if params.Has("select") {
-		sel = params["select"][0]
-		params.Del("select")
+	if params.Has(ParamSelect) {
+		sel = params.Get(ParamSelect)
 	} else {
 		sel = "*"
 	}
@@ -48,16 +52,14 @@ func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
 	}
 	query += where
 
-	if params["order"] != nil {
-		order, err := table.BuildOrder(params["order"][0])
+	if params[ParamOrder] != nil {
+		order, err := table.BuildOrder(params[ParamOrder][0])
 		if err != nil {
 			return nil, err
 		}
 
 		query += order
 	}
-
-	fmt.Println(query)
 
 	row := dao.Client.QueryRow(fmt.Sprintf("SELECT json_group_array(json_object(%s)) AS data FROM (%s)", agg, query), args...)
 	if row.Err() != nil {
@@ -71,9 +73,12 @@ func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
 	return res, nil
 }
 
+// Update modifies rows matching the WHERE conditions from query params.
+// Body should be JSON with column:value pairs to update.
+// Use "select" param to return modified rows.
 func (dao Database) Update(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
-	if dao.id == 1 && relation == "databases" {
-		return nil, errors.New("cannot query table databases")
+	if dao.id == 1 && relation == ReservedTableDatabases {
+		return nil, ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -114,15 +119,13 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 	query += where
 	args = append(args, whereArgs...)
 
-	if params["select"] != nil {
-		selQuery, err := table.buildReturning(params["select"][0])
+	if params[ParamSelect] != nil {
+		selQuery, err := table.buildReturning(params[ParamSelect][0])
 		if err != nil {
 			return nil, err
 		}
 
 		query += selQuery
-
-		fmt.Println(query)
 
 		return dao.QueryJSON(query, args...)
 	}
@@ -132,9 +135,12 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 	return nil, err
 }
 
+// Insert adds a single row to the table.
+// Body should be JSON with column:value pairs.
+// Use "select" param to return the inserted row.
 func (dao Database) Insert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
-	if dao.id == 1 && relation == "databases" {
-		return nil, errors.New("cannot query table databases")
+	if dao.id == 1 && relation == ReservedTableDatabases {
+		return nil, ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -169,8 +175,8 @@ func (dao Database) Insert(relation string, params url.Values, body io.ReadClose
 
 	query := fmt.Sprintf("INSERT INTO [%s] (%s) VALUES (%s) ", relation, columns[:len(columns)-2], values[:len(values)-2])
 
-	if params.Has("select") {
-		selQuery, err := table.buildReturning(params["select"][0])
+	if params.Has(ParamSelect) {
+		selQuery, err := table.buildReturning(params[ParamSelect][0])
 		if err != nil {
 			return nil, err
 		}
@@ -185,9 +191,12 @@ func (dao Database) Insert(relation string, params url.Values, body io.ReadClose
 	return []byte("inserted row"), err
 }
 
+// Upsert inserts multiple rows, updating on primary key conflict.
+// Body should be a JSON array of objects with column:value pairs.
+// Use "select" param to return the upserted rows.
 func (dao Database) Upsert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
-	if dao.id == 1 && relation == "databases" {
-		return nil, errors.New("cannot query table databases")
+	if dao.id == 1 && relation == ReservedTableDatabases {
+		return nil, ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -200,6 +209,14 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 	err = json.NewDecoder(body).Decode(&colSlice)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(colSlice) == 0 {
+		return nil, errors.New("upsert requires at least one row")
+	}
+
+	if len(colSlice[0]) == 0 {
+		return nil, errors.New("upsert rows must have at least one column")
 	}
 
 	query := fmt.Sprintf("INSERT INTO [%s] ( ", relation)
@@ -246,8 +263,8 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 
 	query = query[:len(query)-2] + " "
 
-	if params.Has("select") {
-		selQuery, err := table.buildReturning(params["select"][0])
+	if params.Has(ParamSelect) {
+		selQuery, err := table.buildReturning(params[ParamSelect][0])
 		if err != nil {
 			return nil, err
 		}
@@ -257,16 +274,17 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 		return dao.QueryJSON(query, args...)
 	}
 
-	fmt.Println(query)
-
 	_, err = dao.Client.Exec(query, args...)
 
 	return []byte("inserted rows"), err
 }
 
+// Delete removes rows matching the WHERE conditions from query params.
+// A WHERE clause is required (no mass deletes without conditions).
+// Use "select" param to return deleted rows.
 func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
-	if dao.id == 1 && relation == "databases" {
-		return nil, errors.New("cannot query table databases")
+	if dao.id == 1 && relation == ReservedTableDatabases {
+		return nil, ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -283,12 +301,12 @@ func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
 	}
 
 	if where == "" {
-		return nil, errors.New("all DELETEs require a where clause")
+		return nil, ErrMissingWhereClause
 	}
 	query += where
 
-	if params["select"] != nil {
-		selQuery, err := table.buildReturning(params["select"][0])
+	if params[ParamSelect] != nil {
+		selQuery, err := table.buildReturning(params[ParamSelect][0])
 		if err != nil {
 			return nil, err
 		}

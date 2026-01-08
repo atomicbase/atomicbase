@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/joe-ervin05/atomicbase/api"
+	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joho/godotenv"
 )
 
@@ -18,7 +19,7 @@ func main() {
 
 	api.Run(app)
 
-	fmt.Println("Listening on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", app))
+	fmt.Printf("Listening on port %s\n", config.Cfg.Port)
+	log.Fatal(http.ListenAndServe(config.Cfg.Port, app))
 
 }

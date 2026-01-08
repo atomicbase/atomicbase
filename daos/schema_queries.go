@@ -31,12 +31,10 @@ type NewColumn struct {
 func (dao *Database) updateSchema() error {
 	cols, err := schemaCols(dao.Client)
 	if err != nil {
-		fmt.Println("cols")
 		return err
 	}
 	fks, err := schemaFks(dao.Client)
 	if err != nil {
-		fmt.Println("fks")
 		return err
 	}
 
@@ -196,8 +194,6 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 		query += "ALTER TABLE [" + table + "] RENAME TO [" + changes.NewName + "]; "
 	}
 
-	fmt.Println(query)
-
 	_, err = dao.Client.Exec(query)
 	if err != nil {
 		return nil, err
@@ -302,7 +298,7 @@ func (dao Database) DropTable(table string) ([]byte, error) {
 		return nil, err
 	}
 
-	_, err = dao.Client.Exec("DROP TABLE " + table)
+	_, err = dao.Client.Exec(fmt.Sprintf("DROP TABLE [%s]", table))
 	if err != nil {
 		return nil, err
 	}
@@ -331,36 +327,37 @@ func (dao Database) EditSchema(body io.ReadCloser) ([]byte, error) {
 	return []byte("schema edited"), dao.InvalidateSchema()
 }
 
-// map functions guarantee the input is an expected expression
-// to limit vulnerabilities and prevent unexpected query affects
-
+// mapColType validates and normalizes a column type string.
+// Returns empty string if the type is not valid.
 func mapColType(str string) string {
 	switch strings.ToLower(str) {
 	case "text":
-		return "TEXT"
+		return ColTypeText
 	case "integer":
-		return "INTEGER"
+		return ColTypeInteger
 	case "real":
-		return "REAL"
+		return ColTypeReal
 	case "blob":
-		return "BLOB"
+		return ColTypeBlob
 	default:
 		return ""
 	}
 }
 
+// mapOnAction validates and normalizes a foreign key action string.
+// Returns empty string if the action is not valid.
 func mapOnAction(str string) string {
 	switch strings.ToLower(str) {
 	case "no action":
-		return "NO ACTION"
+		return FkNoAction
 	case "restrict":
-		return "RESTRICT"
+		return FkRestrict
 	case "set null":
-		return "SET NULL"
+		return FkSetNull
 	case "set default":
-		return "SET DEFAULT"
+		return FkSetDefault
 	case "cascade":
-		return "CASCADE"
+		return FkCascade
 	default:
 		return ""
 	}

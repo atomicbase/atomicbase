@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joe-ervin05/atomicbase/daos"
 )
 
@@ -16,13 +17,15 @@ type PrimaryHandler func(db daos.PrimaryDao, req *http.Request) ([]byte, error)
 
 func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
-		dao, err := daos.ConnPrimary()
+		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
+		defer req.Body.Close()
 
-		req.Body = http.MaxBytesReader(wr, req.Body, 1048576)
+		dao, err := daos.ConnPrimary()
 		if err != nil {
 			respErr(wr, err)
 			return
 		}
+		defer dao.Client.Close()
 
 		data, err := handler(dao, req)
 		if err != nil {
@@ -31,22 +34,21 @@ func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 		}
 
 		wr.Write(data)
-		defer dao.Client.Close()
-		defer req.Body.Close()
-
 	}
 }
 
-// for endpoints that can use either the primary or an external database
+// withDB wraps handlers that can use either the primary or an external database.
 func withDB(handler DbHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
-		dao, err := connDb(req)
+		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
+		defer req.Body.Close()
 
-		req.Body = http.MaxBytesReader(wr, req.Body, 1048576)
+		dao, err := connDb(req)
 		if err != nil {
 			respErr(wr, err)
 			return
 		}
+		defer dao.Client.Close()
 
 		data, err := handler(dao, req)
 		if err != nil {
@@ -55,9 +57,6 @@ func withDB(handler DbHandler) http.HandlerFunc {
 		}
 
 		wr.Write(data)
-		defer dao.Client.Close()
-		defer req.Body.Close()
-
 	}
 }
 
