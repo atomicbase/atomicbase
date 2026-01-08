@@ -33,6 +33,9 @@ func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 			return
 		}
 
+		if data != nil {
+			wr.Header().Set("Content-Type", "application/json")
+		}
 		wr.Write(data)
 	}
 }
@@ -56,13 +59,33 @@ func withDB(handler DbHandler) http.HandlerFunc {
 			return
 		}
 
+		if data != nil {
+			wr.Header().Set("Content-Type", "application/json")
+		}
 		wr.Write(data)
 	}
 }
 
 func respErr(wr http.ResponseWriter, err error) {
-	wr.WriteHeader(http.StatusInternalServerError)
-	wr.Write([]byte(err.Error()))
+	status := http.StatusInternalServerError
+
+	switch {
+	case errors.Is(err, daos.ErrTableNotFound),
+		errors.Is(err, daos.ErrColumnNotFound),
+		errors.Is(err, daos.ErrDatabaseNotFound),
+		errors.Is(err, daos.ErrNoRelationship):
+		status = http.StatusNotFound
+	case errors.Is(err, daos.ErrInvalidOperator),
+		errors.Is(err, daos.ErrInvalidColumnType),
+		errors.Is(err, daos.ErrMissingWhereClause):
+		status = http.StatusBadRequest
+	case errors.Is(err, daos.ErrReservedTable):
+		status = http.StatusForbidden
+	}
+
+	wr.Header().Set("Content-Type", "application/json")
+	wr.WriteHeader(status)
+	json.NewEncoder(wr).Encode(map[string]string{"error": err.Error()})
 }
 
 func connDb(req *http.Request) (daos.Database, error) {

@@ -21,7 +21,7 @@ type Queries interface {
 // Use the "select" param for column selection (e.g., "name,cars(make,model)").
 // Use the "order" param for sorting (e.g., "name:asc").
 // Other params become WHERE conditions (e.g., "id=eq.1").
-func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
+func (dao *Database) Select(relation string, params url.Values) ([]byte, error) {
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -76,7 +76,7 @@ func (dao Database) Select(relation string, params url.Values) ([]byte, error) {
 // Update modifies rows matching the WHERE conditions from query params.
 // Body should be JSON with column:value pairs to update.
 // Use "select" param to return modified rows.
-func (dao Database) Update(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) Update(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -130,15 +130,19 @@ func (dao Database) Update(relation string, params url.Values, body io.ReadClose
 		return dao.QueryJSON(query, args...)
 	}
 
-	_, err = dao.Client.Exec(query, args...)
+	result, err := dao.Client.Exec(query, args...)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil, err
+	rowsAffected, _ := result.RowsAffected()
+	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }
 
 // Insert adds a single row to the table.
 // Body should be JSON with column:value pairs.
 // Use "select" param to return the inserted row.
-func (dao Database) Insert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) Insert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -186,15 +190,19 @@ func (dao Database) Insert(relation string, params url.Values, body io.ReadClose
 		return dao.QueryJSON(query, args...)
 	}
 
-	_, err = dao.Client.Exec(query, args...)
+	result, err := dao.Client.Exec(query, args...)
+	if err != nil {
+		return nil, err
+	}
 
-	return []byte("inserted row"), err
+	lastInsertId, _ := result.LastInsertId()
+	return json.Marshal(map[string]any{"last_insert_id": lastInsertId})
 }
 
 // Upsert inserts multiple rows, updating on primary key conflict.
 // Body should be a JSON array of objects with column:value pairs.
 // Use "select" param to return the upserted rows.
-func (dao Database) Upsert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) Upsert(relation string, params url.Values, body io.ReadCloser) ([]byte, error) {
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -274,15 +282,19 @@ func (dao Database) Upsert(relation string, params url.Values, body io.ReadClose
 		return dao.QueryJSON(query, args...)
 	}
 
-	_, err = dao.Client.Exec(query, args...)
+	result, err := dao.Client.Exec(query, args...)
+	if err != nil {
+		return nil, err
+	}
 
-	return []byte("inserted rows"), err
+	rowsAffected, _ := result.RowsAffected()
+	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }
 
 // Delete removes rows matching the WHERE conditions from query params.
 // A WHERE clause is required (no mass deletes without conditions).
 // Use "select" param to return deleted rows.
-func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
+func (dao *Database) Delete(relation string, params url.Values) ([]byte, error) {
 	if dao.id == 1 && relation == ReservedTableDatabases {
 		return nil, ErrReservedTable
 	}
@@ -316,7 +328,11 @@ func (dao Database) Delete(relation string, params url.Values) ([]byte, error) {
 		return dao.QueryJSON(query, args...)
 	}
 
-	_, err = dao.Client.Exec(query, args...)
+	result, err := dao.Client.Exec(query, args...)
+	if err != nil {
+		return nil, err
+	}
 
-	return []byte("deleted"), err
+	rowsAffected, _ := result.RowsAffected()
+	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }

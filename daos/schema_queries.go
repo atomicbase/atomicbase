@@ -59,7 +59,7 @@ func (dao *Database) InvalidateSchema() error {
 	return dao.saveSchema()
 }
 
-func (dao Database) GetTableSchema(table string) ([]byte, error) {
+func (dao *Database) GetTableSchema(table string) ([]byte, error) {
 
 	type fKey struct {
 		Column     string `json:"column"`
@@ -92,12 +92,12 @@ func (dao Database) GetTableSchema(table string) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) AlterTable(table string, body io.ReadCloser) ([]byte, error) {
 	type tblChanges struct {
 		NewName       string               `json:"newName"`
 		RenameColumns map[string]string    `json:"renameColumns"`
 		NewColumns    map[string]NewColumn `json:"newColumns"`
-		DropColums    []string             `json:"dropColumns"`
+		DropColumns   []string             `json:"dropColumns"`
 	}
 
 	tbl, err := dao.Schema.SearchTbls(table)
@@ -124,8 +124,8 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 		}
 	}
 
-	if changes.DropColums != nil {
-		for _, col := range changes.DropColums {
+	if changes.DropColumns != nil {
+		for _, col := range changes.DropColumns {
 			_, err = tbl.SearchCols(col)
 			if err != nil {
 				return nil, err
@@ -202,7 +202,7 @@ func (dao Database) AlterTable(table string, body io.ReadCloser) ([]byte, error)
 	return []byte(fmt.Sprintf("table %s altered", table)), dao.InvalidateSchema()
 }
 
-func (dao Database) CreateTable(table string, body io.ReadCloser) ([]byte, error) {
+func (dao *Database) CreateTable(table string, body io.ReadCloser) ([]byte, error) {
 	query := fmt.Sprintf("CREATE TABLE [%s] (", table)
 
 	var cols map[string]Column
@@ -291,7 +291,7 @@ func (dao Database) CreateTable(table string, body io.ReadCloser) ([]byte, error
 	return []byte(fmt.Sprintf("table %s created", table)), dao.InvalidateSchema()
 }
 
-func (dao Database) DropTable(table string) ([]byte, error) {
+func (dao *Database) DropTable(table string) ([]byte, error) {
 
 	_, err := dao.Schema.SearchTbls(table)
 	if err != nil {
@@ -306,7 +306,7 @@ func (dao Database) DropTable(table string) ([]byte, error) {
 	return []byte(fmt.Sprintf("table %s dropped", table)), dao.InvalidateSchema()
 }
 
-func (dao Database) EditSchema(body io.ReadCloser) ([]byte, error) {
+func (dao *Database) EditSchema(body io.ReadCloser) ([]byte, error) {
 	type reqBody struct {
 		Query string `json:"query"`
 		Args  []any  `json:"args"`

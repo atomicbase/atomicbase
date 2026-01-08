@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 )
@@ -44,6 +43,8 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 	if err != nil {
 		return err
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		return errors.New(res.Status)
 	}
@@ -61,13 +62,17 @@ func (dao PrimaryDao) RegisterAllDbs() error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
 	var currDbs []string
 
 	for rows.Next() {
 		var name sql.NullString
 
-		rows.Scan(&name)
+		err := rows.Scan(&name)
+		if err != nil {
+			return err
+		}
 		currDbs = append(currDbs, name.String)
 	}
 
@@ -133,9 +138,10 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 
 	var bod reqBody
 
-	json.NewDecoder(body).Decode(&bod)
-
-	var err error
+	err := json.NewDecoder(body).Decode(&bod)
+	if err != nil {
+		return nil, err
+	}
 
 	if dbToken == "" {
 		dbToken, err = createDBToken(bod.Name)
@@ -165,6 +171,8 @@ func (dao PrimaryDao) RegisterDB(body io.ReadCloser, dbToken string) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		return nil, errors.New(res.Status)
 	}
@@ -239,7 +247,7 @@ func (dao PrimaryDao) CreateDB(body io.ReadCloser) ([]byte, error) {
 	var buf bytes.Buffer
 	err = json.NewEncoder(&buf).Encode(bod)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	org := os.Getenv("TURSO_ORGANIZATION")
@@ -264,6 +272,8 @@ func (dao PrimaryDao) CreateDB(body io.ReadCloser) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		return nil, errors.New(res.Status)
 	}
@@ -320,6 +330,8 @@ func (dao PrimaryDao) DeleteDB(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		return nil, errors.New(res.Status)
 	}
@@ -353,6 +365,8 @@ func createDBToken(dbName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer res.Body.Close()
+
 	if res.StatusCode != 200 {
 		return "", errors.New(res.Status)
 	}

@@ -184,7 +184,7 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 }
 
 // QueryMap executes a query and returns results as a slice of maps.
-func (dao Database) QueryMap(query string, args ...any) ([]interface{}, error) {
+func (dao *Database) QueryMap(query string, args ...any) ([]interface{}, error) {
 	rows, err := dao.Client.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -267,7 +267,7 @@ func (dao Database) QueryMap(query string, args ...any) ([]interface{}, error) {
 }
 
 // QueryJSON executes a query and returns results as JSON bytes.
-func (dao Database) QueryJSON(query string, args ...any) ([]byte, error) {
+func (dao *Database) QueryJSON(query string, args ...any) ([]byte, error) {
 	m, err := dao.QueryMap(query, args...)
 	if err != nil {
 		return nil, err

@@ -273,8 +273,12 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Errorf("Insert failed: %v", err)
 	}
-	if string(resp) != "inserted row" {
-		t.Errorf("Expected 'inserted row', got %s", resp)
+	var insertResp map[string]any
+	if err := json.Unmarshal(resp, &insertResp); err != nil {
+		t.Errorf("Expected JSON response, got %s", resp)
+	}
+	if _, ok := insertResp["last_insert_id"]; !ok {
+		t.Errorf("Expected 'last_insert_id' in response, got %v", insertResp)
 	}
 
 	// Test insert with RETURNING clause
@@ -347,8 +351,12 @@ func TestDelete(t *testing.T) {
 	if err != nil {
 		t.Errorf("Delete failed: %v", err)
 	}
-	if string(resp) != "deleted" {
-		t.Errorf("Expected 'deleted', got %s", resp)
+	var deleteResp map[string]any
+	if err := json.Unmarshal(resp, &deleteResp); err != nil {
+		t.Errorf("Expected JSON response, got %s", resp)
+	}
+	if deleteResp["rows_affected"] != float64(1) {
+		t.Errorf("Expected 1 row affected, got %v", deleteResp["rows_affected"])
 	}
 
 	// Verify deletion

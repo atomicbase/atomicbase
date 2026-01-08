@@ -93,7 +93,7 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 
 }
 
-func (dao Database) saveSchema() error {
+func (dao *Database) saveSchema() error {
 	var client *sql.DB
 	var err error
 
