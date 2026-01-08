@@ -3,7 +3,22 @@ package daos
 import (
 	"fmt"
 	"strings"
+
+	"github.com/joe-ervin05/atomicbase/config"
 )
+
+// sanitizeJSONKey validates and escapes a string for use as a JSON object key in SQL.
+// Returns an error if the key contains invalid characters.
+func sanitizeJSONKey(key string) (string, error) {
+	if key == "" {
+		return "", nil
+	}
+	if err := ValidateIdentifier(key); err != nil {
+		return "", fmt.Errorf("invalid alias: %w", err)
+	}
+	// Escape single quotes for SQL string literal safety
+	return strings.ReplaceAll(key, "'", "''"), nil
+}
 
 // Relation represents a table with optional column selections and joins.
 type Relation struct {
@@ -29,8 +44,27 @@ func (schema SchemaCache) findForeignKey(table, references string) Fk {
 	return schema.Fks[idx]
 }
 
+// relationDepth calculates the maximum nesting depth of a Relation tree.
+func relationDepth(rel *Relation) int {
+	if rel == nil || len(rel.joins) == 0 {
+		return 1
+	}
+	maxChild := 0
+	for _, join := range rel.joins {
+		if d := relationDepth(join); d > maxChild {
+			maxChild = d
+		}
+	}
+	return 1 + maxChild
+}
+
 // buildSelect constructs a SELECT query with JSON aggregation for the root relation.
 func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
+	// Check query depth limit
+	if depth := relationDepth(&rel); depth > config.Cfg.MaxQueryDepth {
+		return "", "", fmt.Errorf("%w: depth %d exceeds limit %d", ErrQueryTooDeep, depth, config.Cfg.MaxQueryDepth)
+	}
+
 	agg := ""
 	sel := ""
 	joins := ""
@@ -73,7 +107,11 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 
 		sel += fmt.Sprintf("[%s].[%s], ", rel.name, col.name)
 		if col.alias != "" {
-			agg += fmt.Sprintf("'%s', [%s], ", col.alias, col.name)
+			sanitized, err := sanitizeJSONKey(col.alias)
+			if err != nil {
+				return "", "", err
+			}
+			agg += fmt.Sprintf("'%s', [%s], ", sanitized, col.name)
 		} else {
 			agg += fmt.Sprintf("'%s', [%s], ", col.name, col.name)
 		}
@@ -81,7 +119,11 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 
 	for _, tbl := range rel.joins {
 		if tbl.alias != "" {
-			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.alias, tbl.name)
+			sanitized, err := sanitizeJSONKey(tbl.alias)
+			if err != nil {
+				return "", "", err
+			}
+			agg += fmt.Sprintf("'%s', json([%s]), ", sanitized, tbl.name)
 		} else {
 			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.name, tbl.name)
 		}
@@ -163,7 +205,11 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 
 		sel += fmt.Sprintf("[%s].[%s], ", rel.name, col.name)
 		if col.alias != "" {
-			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.alias, rel.name, col.name)
+			sanitized, err := sanitizeJSONKey(col.alias)
+			if err != nil {
+				return "", "", err
+			}
+			agg += fmt.Sprintf("'%s', [%s].[%s], ", sanitized, rel.name, col.name)
 		} else {
 			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.name, rel.name, col.name)
 		}
@@ -175,7 +221,11 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 
 	for _, tbl := range rel.joins {
 		if tbl.alias != "" {
-			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.alias, tbl.name)
+			sanitized, err := sanitizeJSONKey(tbl.alias)
+			if err != nil {
+				return "", "", err
+			}
+			agg += fmt.Sprintf("'%s', json([%s]), ", sanitized, tbl.name)
 		} else {
 			agg += fmt.Sprintf("'%s', json([%s]), ", tbl.name, tbl.name)
 		}

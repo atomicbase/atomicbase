@@ -24,9 +24,15 @@ func main() {
 
 	api.Run(app)
 
+	// Apply middleware chain: timeout -> cors -> rate limit -> auth -> handler
+	handler := api.TimeoutMiddleware(
+		api.CORSMiddleware(
+			api.RateLimitMiddleware(
+				api.AuthMiddleware(app))))
+
 	server := &http.Server{
 		Addr:    config.Cfg.Port,
-		Handler: app,
+		Handler: handler,
 	}
 
 	// Start server in goroutine

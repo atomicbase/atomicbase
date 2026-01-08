@@ -6,6 +6,18 @@ import (
 	"strings"
 )
 
+// sanitizeAlias validates and sanitizes an alias for use in SQL.
+// Returns an error if the alias contains invalid characters.
+func sanitizeAlias(alias string) (string, error) {
+	if alias == "" {
+		return "", nil
+	}
+	if err := ValidateIdentifier(alias); err != nil {
+		return "", fmt.Errorf("invalid alias: %w", err)
+	}
+	return "[" + alias + "]", nil
+}
+
 func (table Table) buildReturning(cols string) (string, error) {
 	if cols == "" || cols == "*" {
 		return "RETURNING * ", nil
@@ -45,7 +57,11 @@ func (table Table) buildReturning(cols string) (string, error) {
 			}
 			query += fmt.Sprintf("[%s]", currStr)
 			if alias != "" {
-				query += " AS " + alias
+				sanitized, err := sanitizeAlias(alias)
+				if err != nil {
+					return "", err
+				}
+				query += " AS " + sanitized
 			}
 			query += ", "
 			alias = ""
@@ -62,7 +78,11 @@ func (table Table) buildReturning(cols string) (string, error) {
 		}
 		query += fmt.Sprintf("[%s]", currStr)
 		if alias != "" {
-			query += " AS " + alias
+			sanitized, err := sanitizeAlias(alias)
+			if err != nil {
+				return "", err
+			}
+			query += " AS " + sanitized
 		}
 		query += ", "
 	}

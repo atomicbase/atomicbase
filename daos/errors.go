@@ -4,6 +4,7 @@ package daos
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"unicode"
 )
 
@@ -26,6 +27,8 @@ var (
 	ErrEmptyIdentifier     = errors.New("identifier cannot be empty")
 	ErrIdentifierTooLong   = errors.New("identifier exceeds maximum length")
 	ErrInvalidCharacter    = errors.New("identifier contains invalid characters")
+	ErrNotDDLQuery         = errors.New("only DDL statements are allowed (CREATE, ALTER, DROP)")
+	ErrQueryTooDeep        = errors.New("query nesting exceeds maximum depth")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.
@@ -87,4 +90,26 @@ func ValidateColumnName(name string) error {
 		return fmt.Errorf("invalid column name %q: %w", name, err)
 	}
 	return nil
+}
+
+// ValidateDDLQuery validates that a SQL query is a DDL statement.
+// Only CREATE, ALTER, and DROP statements are allowed.
+// This prevents arbitrary SQL execution through the schema editing endpoint.
+func ValidateDDLQuery(query string) error {
+	// Trim whitespace and get the first word
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return ErrNotDDLQuery
+	}
+
+	// Get the first keyword (case-insensitive)
+	firstWord := strings.ToUpper(strings.Fields(trimmed)[0])
+
+	// Only allow DDL statements
+	switch firstWord {
+	case "CREATE", "ALTER", "DROP":
+		return nil
+	default:
+		return fmt.Errorf("%w: got %s", ErrNotDDLQuery, firstWord)
+	}
 }

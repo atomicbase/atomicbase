@@ -346,6 +346,11 @@ func (dao *Database) EditSchema(ctx context.Context, body io.ReadCloser) ([]byte
 		return nil, err
 	}
 
+	// Validate that the query is a DDL statement (schema modification only)
+	if err := ValidateDDLQuery(bod.Query); err != nil {
+		return nil, err
+	}
+
 	_, err = dao.Client.ExecContext(ctx, bod.Query, bod.Args...)
 	if err != nil {
 		return nil, err
