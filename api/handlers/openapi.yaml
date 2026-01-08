@@ -32,6 +32,14 @@ info:
     - `column=is.null` / `column=is.true` / `column=is.false`
     - `column=fts.search terms` - Full-text search (requires FTS index)
 
+    ### Negation (NOT operator)
+    Prefix any operator with `not.` to negate it:
+    - `column=not.eq.value` - Not equal to
+    - `column=not.like.pattern` - Not like
+    - `column=not.in.(a,b,c)` - Not in list
+    - `column=not.is.null` - Is not null
+    - `column=not.gt.value` - Not greater than
+
     ### Column Selection
     Use `select` parameter to choose columns and embed related tables:
     - `select=id,name` - Select specific columns

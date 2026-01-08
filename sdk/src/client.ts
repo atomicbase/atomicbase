@@ -16,6 +16,9 @@ export type FilterOperator =
   | "in"
   | "fts";
 
+// Operators that can be negated with "not."
+export type NegatableOperator = Exclude<FilterOperator, "neq" | "fts">;
+
 export type FilterValue<Op extends FilterOperator> = Op extends "in"
   ? (string | number | boolean)[]
   : Op extends "is"
@@ -61,14 +64,17 @@ export class AtomicbaseError extends Error {
   }
 }
 
-function buildFilterParams(filter: Filter): URLSearchParams {
+function buildFilterParams(
+  filter: Record<string, Record<string, unknown> | undefined>
+): URLSearchParams {
   const params = new URLSearchParams();
   for (const [column, operators] of Object.entries(filter)) {
     if (!operators) continue;
     for (const [op, value] of Object.entries(operators)) {
       if (value === undefined) continue;
-      if (op === "in" && Array.isArray(value)) {
-        params.set(column, `in.(${value.join(",")})`);
+      // Handle "in" and "not.in" with array values
+      if ((op === "in" || op === "not.in") && Array.isArray(value)) {
+        params.set(column, `${op}.(${value.join(",")})`);
       } else {
         params.set(column, `${op}.${value}`);
       }
@@ -393,6 +399,28 @@ export class TableQuery<T extends Record<string, unknown>> {
   fts<K extends keyof T>(column: K, query: string): this {
     const filter = { [column]: { fts: query } } as unknown as Filter<T>;
     return this.filter(filter);
+  }
+
+  /**
+   * Negated filter - prefix any operator with NOT
+   * @param column - The column to filter on
+   * @param op - The operator to negate (eq, like, in, is, gt, gte, lt, lte)
+   * @param value - The filter value
+   * @example not("status", "eq", "active") // status != 'active'
+   * @example not("email", "is", "null") // email IS NOT NULL
+   * @example not("role", "in", ["admin", "moderator"]) // role NOT IN ('admin', 'moderator')
+   * @example not("name", "like", "%test%") // name NOT LIKE '%test%'
+   */
+  not<K extends keyof T, Op extends NegatableOperator>(
+    column: K,
+    op: Op,
+    value: FilterValue<Op>
+  ): this {
+    const negatedOp = `not.${op}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const filter = { [column]: { [negatedOp]: value } } as any;
+    this.options.filter = { ...this.options.filter, ...filter };
+    return this;
   }
 
   /**

@@ -237,6 +237,110 @@ func TestAutoAggAlias(t *testing.T) {
 	}
 }
 
+func TestBuildFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		table     string
+		column    string
+		where     []string
+		wantQuery string
+		wantArgs  int
+	}{
+		{
+			name:      "simple eq",
+			table:     "users",
+			column:    "name",
+			where:     []string{"eq", "john"},
+			wantQuery: "[users].[name] = ? ",
+			wantArgs:  1,
+		},
+		{
+			name:      "not eq",
+			table:     "users",
+			column:    "name",
+			where:     []string{"not", "eq", "john"},
+			wantQuery: "[users].[name] NOT = ? ",
+			wantArgs:  1,
+		},
+		{
+			name:      "not like",
+			table:     "users",
+			column:    "name",
+			where:     []string{"not", "like", "%test%"},
+			wantQuery: "[users].[name] NOT LIKE ? ",
+			wantArgs:  1,
+		},
+		{
+			name:      "not is null",
+			table:     "users",
+			column:    "email",
+			where:     []string{"not", "is", "null"},
+			wantQuery: "[users].[email] IS NOT NULL ",
+			wantArgs:  0,
+		},
+		{
+			name:      "not is true",
+			table:     "users",
+			column:    "active",
+			where:     []string{"not", "is", "true"},
+			wantQuery: "[users].[active] IS NOT TRUE ",
+			wantArgs:  0,
+		},
+		{
+			name:      "not is false",
+			table:     "users",
+			column:    "active",
+			where:     []string{"not", "is", "false"},
+			wantQuery: "[users].[active] IS NOT FALSE ",
+			wantArgs:  0,
+		},
+		{
+			name:      "not in",
+			table:     "users",
+			column:    "status",
+			where:     []string{"not", "in", "(a,b,c)"},
+			wantQuery: "[users].[status] NOT IN (a,b,c) ",
+			wantArgs:  0,
+		},
+		{
+			name:      "is null",
+			table:     "users",
+			column:    "email",
+			where:     []string{"is", "null"},
+			wantQuery: "[users].[email] IS ? ",
+			wantArgs:  1,
+		},
+		{
+			name:      "gt",
+			table:     "users",
+			column:    "age",
+			where:     []string{"gt", "18"},
+			wantQuery: "[users].[age] > ? ",
+			wantArgs:  1,
+		},
+		{
+			name:      "not gt",
+			table:     "users",
+			column:    "age",
+			where:     []string{"not", "gt", "18"},
+			wantQuery: "[users].[age] NOT > ? ",
+			wantArgs:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query, args := buildFilter(tt.table, tt.column, tt.where)
+			if query != tt.wantQuery {
+				t.Errorf("buildFilter() query = %q, want %q", query, tt.wantQuery)
+			}
+			if len(args) != tt.wantArgs {
+				t.Errorf("buildFilter() args count = %d, want %d", len(args), tt.wantArgs)
+			}
+		})
+	}
+}
+
 func TestParseSelectWithAggregates(t *testing.T) {
 	tests := []struct {
 		name      string

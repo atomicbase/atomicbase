@@ -231,6 +231,37 @@ func buildFilter(table string, column string, where []string) (string, []any) {
 	query := fmt.Sprintf("[%s].[%s] ", table, column)
 	var args []any
 
+	// Check for NOT prefix and handle special cases
+	hasNot := len(where) > 0 && where[0] == OpNot
+	if hasNot {
+		where = where[1:] // Remove the "not" prefix for processing
+	}
+
+	// Special handling for IS NOT NULL / IS NOT TRUE / IS NOT FALSE
+	if hasNot && len(where) >= 2 && where[0] == OpIs {
+		query += "IS NOT "
+		// Add the value (null, true, false)
+		if len(where) > 1 {
+			query += strings.ToUpper(where[1]) + " "
+		}
+		return query, args
+	}
+
+	// Special handling for NOT IN
+	if hasNot && len(where) >= 1 && where[0] == OpIn {
+		query += "NOT IN "
+		// Handle the values list
+		if len(where) > 1 {
+			query += where[1] + " "
+		}
+		return query, args
+	}
+
+	// For other NOT cases (not.eq, not.like, not.gt, etc.), prepend NOT
+	if hasNot {
+		query += "NOT "
+	}
+
 	for _, op := range where {
 		if mapOperator(op) != "" {
 			query += mapOperator(op) + " "
