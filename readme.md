@@ -1,16 +1,15 @@
 # Atomicbase
 
-> [!IMPORTANT]
-> **Atomicbase is in early stages of development.** APIs may change.
+> [!IMPORTANT] > **Atomicbase is in early stages of development.** APIs may change.
 
 Atomicbase is a REST API for SQLite and Turso databases, designed for efficient multi-tenancy.
 
 ## Structure
 
-| Directory | Description |
-|-----------|-------------|
+| Directory    | Description        |
+| ------------ | ------------------ |
 | [api](./api) | Go REST API server |
-| [sdk](./sdk) | TypeScript SDK |
+| [sdk](./sdk) | TypeScript SDK     |
 
 ## Quick Start
 
@@ -86,7 +85,7 @@ pnpm build
 
 ## Contributing
 
-Atomicbase is open source under the MIT license.
+Atomicbase is open source under the Apache-2.0 license.
 
 - [Report issues](https://github.com/joe-ervin05/atomicbase/issues)
 - [Contribute code](https://github.com/joe-ervin05/atomicbase)
