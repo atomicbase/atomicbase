@@ -10,15 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joe-ervin05/atomicbase/handlers"
+	"github.com/joe-ervin05/atomicbase/admin"
+	"github.com/joe-ervin05/atomicbase/auth"
 	"github.com/joe-ervin05/atomicbase/config"
-	"github.com/joe-ervin05/atomicbase/daos"
-	"github.com/joho/godotenv"
+	"github.com/joe-ervin05/atomicbase/database"
+	"github.com/joe-ervin05/atomicbase/storage"
 )
-
-func init() {
-	godotenv.Load()
-}
 
 func logStartupInfo() {
 	fmt.Println("=== Atomicbase ===")
@@ -61,14 +58,18 @@ func main() {
 
 	app := http.NewServeMux()
 
-	handlers.Run(app)
+	// Register routes from each module
+	database.RegisterRoutes(app)
+	auth.RegisterRoutes(app)
+	storage.RegisterRoutes(app)
+	admin.RegisterRoutes(app)
 
 	// Apply middleware chain: logging -> timeout -> cors -> rate limit -> auth -> handler
-	handler := handlers.LoggingMiddleware(
-		handlers.TimeoutMiddleware(
-			handlers.CORSMiddleware(
-				handlers.RateLimitMiddleware(
-					handlers.AuthMiddleware(app)))))
+	handler := database.LoggingMiddleware(
+		database.TimeoutMiddleware(
+			database.CORSMiddleware(
+				database.RateLimitMiddleware(
+					database.AuthMiddleware(app)))))
 
 	server := &http.Server{
 		Addr:    config.Cfg.Port,
@@ -99,7 +100,7 @@ func main() {
 	}
 
 	// Close the database connection
-	if err := daos.ClosePrimaryDB(); err != nil {
+	if err := database.ClosePrimaryDB(); err != nil {
 		log.Printf("Error closing database: %v", err)
 	}
 

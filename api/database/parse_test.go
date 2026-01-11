@@ -1,4 +1,4 @@
-package daos
+package database
 
 import (
 	"testing"

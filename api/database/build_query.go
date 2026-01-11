@@ -1,4 +1,4 @@
-package daos
+package database
 
 import (
 	"fmt"
@@ -388,8 +388,8 @@ func parseSelect(param string, table string) Relation {
 	inner := false
 	quoted := false
 	escaped := false
-	parenDepth := 0       // Track nested parentheses for aggregate functions
-	inAggregate := false  // Whether we're inside an aggregate function
+	parenDepth := 0      // Track nested parentheses for aggregate functions
+	inAggregate := false // Whether we're inside an aggregate function
 
 	for _, v := range param {
 		if escaped {

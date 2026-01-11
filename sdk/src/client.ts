@@ -2,6 +2,12 @@ import type { components } from "./types.js";
 
 export type Schemas = components["schemas"];
 
+// Result type - similar to Supabase's pattern
+export type Result<T> = {
+  data: T | null;
+  error: AtomicbaseError | null;
+};
+
 // Filter operators supported by Atomicbase
 export type FilterOperator =
   | "eq"
@@ -58,7 +64,12 @@ export interface AtomicbaseConfig {
 }
 
 export class AtomicbaseError extends Error {
-  constructor(message: string, public status: number, public body?: unknown) {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+    public details?: unknown
+  ) {
     super(message);
     this.name = "AtomicbaseError";
   }
@@ -104,13 +115,60 @@ export class AtomicbaseClient {
       body?: unknown;
       headers?: Record<string, string>;
     } = {}
-  ): Promise<T> {
-    const response = await this.rawRequest(method, path, options);
+  ): Promise<Result<T>> {
+    try {
+      const url = new URL(path, this.baseUrl);
+      if (options.params) {
+        options.params.forEach((value, key) => url.searchParams.set(key, value));
+      }
 
-    // Handle empty responses
-    const text = await response.text();
-    if (!text) return undefined as T;
-    return JSON.parse(text) as T;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...options.headers,
+      };
+
+      if (this.apiKey) {
+        headers["Authorization"] = `Bearer ${this.apiKey}`;
+      }
+
+      if (this.dbName) {
+        headers["DB-Name"] = this.dbName;
+      }
+
+      const response = await this.fetchFn(url.toString(), {
+        method,
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        return {
+          data: null,
+          error: new AtomicbaseError(
+            body?.error ?? `Request failed with status ${response.status}`,
+            response.status,
+            body?.code,
+            body
+          ),
+        };
+      }
+
+      // Handle empty responses
+      const text = await response.text();
+      if (!text) {
+        return { data: null, error: null };
+      }
+
+      return { data: JSON.parse(text) as T, error: null };
+    } catch (err) {
+      // Network or parsing errors
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return {
+        data: null,
+        error: new AtomicbaseError(message, 0, "NETWORK_ERROR"),
+      };
+    }
   }
 
   private async rawRequest(
@@ -121,41 +179,53 @@ export class AtomicbaseClient {
       body?: unknown;
       headers?: Record<string, string>;
     } = {}
-  ): Promise<Response> {
-    const url = new URL(path, this.baseUrl);
-    if (options.params) {
-      options.params.forEach((value, key) => url.searchParams.set(key, value));
+  ): Promise<Result<Response>> {
+    try {
+      const url = new URL(path, this.baseUrl);
+      if (options.params) {
+        options.params.forEach((value, key) => url.searchParams.set(key, value));
+      }
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...options.headers,
+      };
+
+      if (this.apiKey) {
+        headers["Authorization"] = `Bearer ${this.apiKey}`;
+      }
+
+      if (this.dbName) {
+        headers["DB-Name"] = this.dbName;
+      }
+
+      const response = await this.fetchFn(url.toString(), {
+        method,
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        return {
+          data: null,
+          error: new AtomicbaseError(
+            body?.error ?? `Request failed with status ${response.status}`,
+            response.status,
+            body?.code,
+            body
+          ),
+        };
+      }
+
+      return { data: response, error: null };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return {
+        data: null,
+        error: new AtomicbaseError(message, 0, "NETWORK_ERROR"),
+      };
     }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
-
-    if (this.apiKey) {
-      headers["Authorization"] = `Bearer ${this.apiKey}`;
-    }
-
-    if (this.dbName) {
-      headers["DB-Name"] = this.dbName;
-    }
-
-    const response = await this.fetchFn(url.toString(), {
-      method,
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => undefined);
-      throw new AtomicbaseError(
-        body?.error ?? `Request failed with status ${response.status}`,
-        response.status,
-        body
-      );
-    }
-
-    return response;
   }
 
   /**
@@ -182,7 +252,7 @@ export class AtomicbaseClient {
   /**
    * Health check
    */
-  async health(): Promise<Schemas["HealthResponse"]> {
+  async health(): Promise<Result<Schemas["HealthResponse"]>> {
     return this.request<Schemas["HealthResponse"]>("GET", "/health");
   }
 
@@ -192,7 +262,7 @@ export class AtomicbaseClient {
   async executeSchema(
     query: string,
     args?: unknown[]
-  ): Promise<Schemas["MessageResponse"]> {
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>("POST", "/schema", {
       body: { query, args },
     });
@@ -201,7 +271,7 @@ export class AtomicbaseClient {
   /**
    * Invalidate schema cache
    */
-  async invalidateSchema(): Promise<Schemas["MessageResponse"]> {
+  async invalidateSchema(): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "POST",
       "/schema/invalidate"
@@ -209,9 +279,19 @@ export class AtomicbaseClient {
   }
 
   /**
+   * Get all tables in the schema
+   * @returns Array of tables with their columns and primary keys
+   */
+  async getSchema(): Promise<Result<Schemas["Table"][]>> {
+    return this.request<Schemas["Table"][]>("GET", "/schema");
+  }
+
+  /**
    * Get table schema
    */
-  async getTableSchema(table: string): Promise<Schemas["TableSchemaResponse"]> {
+  async getTableSchema(
+    table: string
+  ): Promise<Result<Schemas["TableSchemaResponse"]>> {
     return this.request<Schemas["TableSchemaResponse"]>(
       "GET",
       `/schema/table/${encodeURIComponent(table)}`
@@ -224,7 +304,7 @@ export class AtomicbaseClient {
   async createTable(
     table: string,
     columns: Schemas["CreateTableRequest"]
-  ): Promise<Schemas["MessageResponse"]> {
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "POST",
       `/schema/table/${encodeURIComponent(table)}`,
@@ -238,7 +318,7 @@ export class AtomicbaseClient {
   async alterTable(
     table: string,
     changes: Schemas["AlterTableRequest"]
-  ): Promise<Schemas["MessageResponse"]> {
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "PATCH",
       `/schema/table/${encodeURIComponent(table)}`,
@@ -249,7 +329,7 @@ export class AtomicbaseClient {
   /**
    * Drop a table
    */
-  async dropTable(table: string): Promise<Schemas["MessageResponse"]> {
+  async dropTable(table: string): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "DELETE",
       `/schema/table/${encodeURIComponent(table)}`
@@ -260,12 +340,12 @@ export class AtomicbaseClient {
    * Create an FTS5 (Full-Text Search) index on a table
    * @param table - The table to create the FTS index on
    * @param columns - Array of TEXT columns to include in the FTS index
-   * @example await client.createFTSIndex("articles", ["title", "content"]);
+   * @example const { data, error } = await client.createFTSIndex("articles", ["title", "content"]);
    */
   async createFTSIndex(
     table: string,
     columns: string[]
-  ): Promise<Schemas["MessageResponse"]> {
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "POST",
       `/schema/fts/${encodeURIComponent(table)}`,
@@ -277,7 +357,9 @@ export class AtomicbaseClient {
    * Drop an FTS5 index from a table
    * @param table - The table to remove the FTS index from
    */
-  async dropFTSIndex(table: string): Promise<Schemas["MessageResponse"]> {
+  async dropFTSIndex(
+    table: string
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "DELETE",
       `/schema/fts/${encodeURIComponent(table)}`
@@ -288,14 +370,14 @@ export class AtomicbaseClient {
    * List all FTS indexes
    * @returns Array of FTS index info (table, ftsTable, columns)
    */
-  async listFTSIndexes(): Promise<Schemas["FTSIndexInfo"][]> {
+  async listFTSIndexes(): Promise<Result<Schemas["FTSIndexInfo"][]>> {
     return this.request<Schemas["FTSIndexInfo"][]>("GET", "/schema/fts");
   }
 
   /**
    * List registered databases
    */
-  async listDatabases(): Promise<Schemas["DatabaseInfo"][]> {
+  async listDatabases(): Promise<Result<Schemas["DatabaseInfo"][]>> {
     return this.request<Schemas["DatabaseInfo"][]>("GET", "/db");
   }
 
@@ -305,7 +387,7 @@ export class AtomicbaseClient {
   async createDatabase(
     name: string,
     group?: string
-  ): Promise<Schemas["MessageResponse"]> {
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>("POST", "/db", {
       body: { name, group },
     });
@@ -317,7 +399,7 @@ export class AtomicbaseClient {
   async registerDatabase(
     name: string,
     token?: string
-  ): Promise<Schemas["MessageResponse"]> {
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     const headers: Record<string, string> = {};
     if (token) headers["DB-Token"] = token;
     return this.request<Schemas["MessageResponse"]>("PATCH", "/db", {
@@ -329,17 +411,173 @@ export class AtomicbaseClient {
   /**
    * Register all Turso databases in organization
    */
-  async registerAllDatabases(): Promise<void> {
+  async registerAllDatabases(): Promise<Result<void>> {
     return this.request<void>("PATCH", "/db/all");
   }
 
   /**
    * Delete a database
    */
-  async deleteDatabase(name: string): Promise<Schemas["MessageResponse"]> {
+  async deleteDatabase(
+    name: string
+  ): Promise<Result<Schemas["MessageResponse"]>> {
     return this.request<Schemas["MessageResponse"]>(
       "DELETE",
       `/db/${encodeURIComponent(name)}`
+    );
+  }
+
+  // ==================== Schema Templates ====================
+
+  /**
+   * List all schema templates
+   * @returns Array of schema templates
+   */
+  async listTemplates(): Promise<Result<Schemas["SchemaTemplate"][]>> {
+    return this.request<Schemas["SchemaTemplate"][]>("GET", "/templates");
+  }
+
+  /**
+   * Get a schema template by name
+   * @param name - Template name
+   */
+  async getTemplate(name: string): Promise<Result<Schemas["SchemaTemplate"]>> {
+    return this.request<Schemas["SchemaTemplate"]>(
+      "GET",
+      `/templates/${encodeURIComponent(name)}`
+    );
+  }
+
+  /**
+   * Create a new schema template
+   * @param name - Template name
+   * @param tables - Array of table definitions
+   */
+  async createTemplate(
+    name: string,
+    tables: Schemas["Table"][]
+  ): Promise<Result<Schemas["SchemaTemplate"]>> {
+    return this.request<Schemas["SchemaTemplate"]>("POST", "/templates", {
+      body: { name, tables },
+    });
+  }
+
+  /**
+   * Update an existing schema template
+   * @param name - Template name
+   * @param tables - New array of table definitions
+   */
+  async updateTemplate(
+    name: string,
+    tables: Schemas["Table"][]
+  ): Promise<Result<Schemas["SchemaTemplate"]>> {
+    return this.request<Schemas["SchemaTemplate"]>(
+      "PUT",
+      `/templates/${encodeURIComponent(name)}`,
+      { body: { tables } }
+    );
+  }
+
+  /**
+   * Delete a schema template
+   * @param name - Template name
+   */
+  async deleteTemplate(
+    name: string
+  ): Promise<Result<Schemas["MessageResponse"]>> {
+    return this.request<Schemas["MessageResponse"]>(
+      "DELETE",
+      `/templates/${encodeURIComponent(name)}`
+    );
+  }
+
+  /**
+   * Sync a template to all associated databases
+   * @param name - Template name
+   * @param dropExtra - If true, drop tables not in the template
+   */
+  async syncTemplate(
+    name: string,
+    dropExtra = false
+  ): Promise<Result<Schemas["SyncResult"][]>> {
+    const params = new URLSearchParams();
+    if (dropExtra) params.set("dropExtra", "true");
+    return this.request<Schemas["SyncResult"][]>(
+      "POST",
+      `/templates/${encodeURIComponent(name)}/sync`,
+      { params }
+    );
+  }
+
+  /**
+   * List databases associated with a template
+   * @param name - Template name
+   */
+  async listTemplateDatabases(name: string): Promise<Result<string[]>> {
+    return this.request<string[]>(
+      "GET",
+      `/templates/${encodeURIComponent(name)}/databases`
+    );
+  }
+
+  /**
+   * Get the template associated with a database
+   * @param dbName - Database name
+   * @returns Template or null if no template is associated
+   */
+  async getDatabaseTemplate(
+    dbName: string
+  ): Promise<Result<Schemas["SchemaTemplate"] | null>> {
+    return this.request<Schemas["SchemaTemplate"] | null>(
+      "GET",
+      `/db/${encodeURIComponent(dbName)}/template`
+    );
+  }
+
+  /**
+   * Associate a database with a template
+   * @param dbName - Database name
+   * @param templateName - Template name
+   */
+  async setDatabaseTemplate(
+    dbName: string,
+    templateName: string
+  ): Promise<Result<Schemas["MessageResponse"]>> {
+    return this.request<Schemas["MessageResponse"]>(
+      "PUT",
+      `/db/${encodeURIComponent(dbName)}/template`,
+      { body: { templateName } }
+    );
+  }
+
+  /**
+   * Remove the template association from a database
+   * @param dbName - Database name
+   */
+  async removeDatabaseTemplate(
+    dbName: string
+  ): Promise<Result<Schemas["MessageResponse"]>> {
+    return this.request<Schemas["MessageResponse"]>(
+      "DELETE",
+      `/db/${encodeURIComponent(dbName)}/template`
+    );
+  }
+
+  /**
+   * Sync a database to its associated template
+   * @param dbName - Database name
+   * @param dropExtra - If true, drop tables not in the template
+   */
+  async syncDatabaseToTemplate(
+    dbName: string,
+    dropExtra = false
+  ): Promise<Result<Schemas["DatabaseSyncResult"]>> {
+    const params = new URLSearchParams();
+    if (dropExtra) params.set("dropExtra", "true");
+    return this.request<Schemas["DatabaseSyncResult"]>(
+      "POST",
+      `/db/${encodeURIComponent(dbName)}/sync`,
+      { params }
     );
   }
 
@@ -473,8 +711,9 @@ export class TableQuery<T extends Record<string, unknown>> {
 
   /**
    * Execute SELECT query
+   * @example const { data, error } = await client.from("users").get();
    */
-  async get(): Promise<T[]> {
+  async get(): Promise<Result<T[]>> {
     const path = `/query/${encodeURIComponent(this.table)}`;
     return this.client._request<T[]>("GET", path, {
       params: this.buildParams(),
@@ -484,68 +723,114 @@ export class TableQuery<T extends Record<string, unknown>> {
   /**
    * Execute SELECT query and include total count (ignoring limit/offset)
    * Returns both data and count via X-Total-Count header
-   * @example const { data, count } = await client.from("users").getWithCount();
+   * @example const { data, error } = await client.from("users").getWithCount();
    */
-  async getWithCount(): Promise<CountResult<T>> {
+  async getWithCount(): Promise<Result<CountResult<T>>> {
     const path = `/query/${encodeURIComponent(this.table)}`;
-    const response = await this.client._rawRequest("GET", path, {
-      params: this.buildParams(),
-      headers: { Prefer: "count=exact" },
-    });
+    const { data: response, error } = await this.client._rawRequest(
+      "GET",
+      path,
+      {
+        params: this.buildParams(),
+        headers: { Prefer: "count=exact" },
+      }
+    );
+
+    if (error || !response) {
+      return { data: null, error };
+    }
 
     const countHeader = response.headers.get("X-Total-Count");
     const count = countHeader ? parseInt(countHeader, 10) : 0;
 
-    const text = await response.text();
-    const data = text ? (JSON.parse(text) as T[]) : [];
-
-    return { data, count };
+    try {
+      const text = await response.text();
+      const data = text ? (JSON.parse(text) as T[]) : [];
+      return { data: { data, count }, error: null };
+    } catch (err) {
+      return {
+        data: null,
+        error: new AtomicbaseError("Failed to parse response", 0, "PARSE_ERROR"),
+      };
+    }
   }
 
   /**
    * Get only the count of matching rows (no data returned)
-   * @example const count = await client.from("users").count();
+   * @example const { data: count, error } = await client.from("users").count();
    */
-  async count(): Promise<number> {
+  async count(): Promise<Result<number>> {
     const params = this.buildParams();
     params.set("count", "only");
 
     const path = `/query/${encodeURIComponent(this.table)}`;
-    const result = await this.client._request<{ count: number }>("GET", path, {
-      params,
-    });
-    return result.count;
+    const { data, error } = await this.client._request<{ count: number }>(
+      "GET",
+      path,
+      { params }
+    );
+
+    if (error || !data) {
+      return { data: null, error };
+    }
+
+    return { data: data.count, error: null };
   }
 
   /**
-   * Get a single row (throws if not found or multiple)
+   * Get a single row (returns error if not found or multiple)
+   * @example const { data: user, error } = await client.from("users").eq("id", 1).single();
    */
-  async single(): Promise<T> {
-    const results = await this.limit(2).get();
-    if (results.length === 0) {
-      throw new AtomicbaseError("No rows returned", 404);
+  async single(): Promise<Result<T>> {
+    const { data: results, error } = await this.limit(2).get();
+
+    if (error) {
+      return { data: null, error };
     }
+
+    if (!results || results.length === 0) {
+      return {
+        data: null,
+        error: new AtomicbaseError("No rows returned", 404, "NOT_FOUND"),
+      };
+    }
+
     if (results.length > 1) {
-      throw new AtomicbaseError("Multiple rows returned", 400);
+      return {
+        data: null,
+        error: new AtomicbaseError(
+          "Multiple rows returned",
+          400,
+          "MULTIPLE_ROWS"
+        ),
+      };
     }
-    return results[0]!;
+
+    return { data: results[0]!, error: null };
   }
 
   /**
-   * Get first row or null
+   * Get first row or null (no error if not found)
+   * @example const { data: user, error } = await client.from("users").maybeSingle();
    */
-  async maybeSingle(): Promise<T | null> {
-    const results = await this.limit(1).get();
-    return results[0] ?? null;
+  async maybeSingle(): Promise<Result<T | null>> {
+    const { data: results, error } = await this.limit(1).get();
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    return { data: results?.[0] ?? null, error: null };
   }
 
   /**
    * Insert a row
+   * @example const { data, error } = await client.from("users").insert({ name: "John" });
    */
   async insert(
     data: Partial<T>,
     options?: { returning?: string }
-  ): Promise<Schemas["InsertResponse"] | T[]> {
+  ): Promise<Result<Schemas["InsertResponse"] | T[]>> {
     const params = new URLSearchParams();
     if (options?.returning) params.set("select", options.returning);
 
@@ -561,11 +846,12 @@ export class TableQuery<T extends Record<string, unknown>> {
 
   /**
    * Upsert rows (insert or update on conflict)
+   * @example const { data, error } = await client.from("users").upsert([{ id: 1, name: "John" }]);
    */
   async upsert(
     data: Partial<T>[],
     options?: { returning?: string }
-  ): Promise<Schemas["RowsAffectedResponse"] | T[]> {
+  ): Promise<Result<Schemas["RowsAffectedResponse"] | T[]>> {
     const params = new URLSearchParams();
     if (options?.returning) params.set("select", options.returning);
 
@@ -582,11 +868,12 @@ export class TableQuery<T extends Record<string, unknown>> {
 
   /**
    * Update rows matching filter
+   * @example const { data, error } = await client.from("users").eq("id", 1).update({ name: "Jane" });
    */
   async update(
     data: Partial<T>,
     options?: { returning?: string }
-  ): Promise<Schemas["RowsAffectedResponse"] | T[]> {
+  ): Promise<Result<Schemas["RowsAffectedResponse"] | T[]>> {
     const params = this.buildParams();
     if (options?.returning) params.set("select", options.returning);
 
@@ -602,10 +889,11 @@ export class TableQuery<T extends Record<string, unknown>> {
 
   /**
    * Delete rows matching filter
+   * @example const { data, error } = await client.from("users").eq("id", 1).delete();
    */
   async delete(options?: {
     returning?: string;
-  }): Promise<Schemas["RowsAffectedResponse"] | T[]> {
+  }): Promise<Result<Schemas["RowsAffectedResponse"] | T[]>> {
     const params = this.buildParams();
     if (options?.returning) params.set("select", options.returning);
 
@@ -621,6 +909,14 @@ export class TableQuery<T extends Record<string, unknown>> {
 
 /**
  * Create an Atomicbase client
+ * @example
+ * const client = createClient({ baseUrl: "http://localhost:8080" });
+ * const { data, error } = await client.from("users").get();
+ * if (error) {
+ *   console.error("Error:", error.message);
+ * } else {
+ *   console.log("Users:", data);
+ * }
  */
 export function createClient(config: AtomicbaseConfig): AtomicbaseClient {
   return new AtomicbaseClient(config);

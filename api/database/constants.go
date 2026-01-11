@@ -1,5 +1,5 @@
-// Package daos provides constants used throughout the data access layer.
-package daos
+// Package database provides constants used throughout the data access layer.
+package database
 
 // Column types for SQLite schema validation.
 const (
@@ -87,4 +87,8 @@ const (
 )
 
 // ReservedTableDatabases is the internal table name that cannot be queried by users.
-const ReservedTableDatabases = "databases"
+// Uses _ab_ prefix to avoid collision with user tables and be filtered from schema views.
+const ReservedTableDatabases = "_ab_databases"
+
+// ReservedTableTemplates stores schema templates for multi-tenant database management.
+const ReservedTableTemplates = "_ab_schema_templates"

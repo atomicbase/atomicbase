@@ -390,6 +390,49 @@ paths:
         - bearerAuth: []
 
   /schema:
+    get:
+      tags:
+        - Schema
+      summary: List all tables
+      description: |
+        Get a list of all tables in the database schema with their columns and primary keys.
+      operationId: getSchema
+      parameters:
+        - $ref: '#/components/parameters/DBNameHeader'
+      responses:
+        '200':
+          description: List of tables
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Table'
+              example:
+                - name: users
+                  pk: id
+                  columns:
+                    - name: id
+                      type: INTEGER
+                    - name: email
+                      type: TEXT
+                    - name: name
+                      type: TEXT
+                - name: posts
+                  pk: id
+                  columns:
+                    - name: id
+                      type: INTEGER
+                    - name: title
+                      type: TEXT
+                    - name: user_id
+                      type: INTEGER
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
     post:
       tags:
         - Schema
@@ -1090,6 +1133,43 @@ components:
           type: array
           items: {}
           description: Query arguments (for parameterized queries)
+
+    Table:
+      type: object
+      description: Table schema information
+      required:
+        - name
+        - columns
+      properties:
+        name:
+          type: string
+          description: Table name
+        pk:
+          type: string
+          description: Primary key column name (empty if using rowid)
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/Column'
+
+    Column:
+      type: object
+      description: Column definition
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          description: Column name
+        type:
+          type: string
+          description: Column type (TEXT, INTEGER, REAL, BLOB)
+          enum:
+            - TEXT
+            - INTEGER
+            - REAL
+            - BLOB
 
     TableSchemaResponse:
       type: object

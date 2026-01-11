@@ -1,4 +1,4 @@
-package daos
+package database
 
 import (
 	"bytes"
@@ -31,8 +31,8 @@ type Database struct {
 
 // SchemaCache holds cached table and foreign key information for query validation.
 type SchemaCache struct {
-	Tables    []Table  // Sorted by table name for binary search
-	Fks       []Fk     // Sorted by table, then references for binary search
+	Tables    []Table  // Sorted by table name
+	Fks       []Fk     // Sorted by table, then references
 	FTSTables []string // Sorted list of tables that have FTS5 indexes (table names without _fts suffix)
 }
 
@@ -46,15 +46,28 @@ type Fk struct {
 
 // Table represents a database table's schema.
 type Table struct {
-	Name    string // Table name
-	Pk      string // Primary key column name (empty if rowid)
-	Columns []Col  // Sorted by column name for binary search
+	Name    string `json:"name"`    // Table name
+	Pk      string `json:"pk"`      // Primary key column name (empty if rowid)
+	Columns []Col  `json:"columns"` // Sorted by column name
 }
 
 // Col represents a column definition.
 type Col struct {
-	Name string // Column name
-	Type string // SQLite type (TEXT, INTEGER, REAL, BLOB)
+	Name       string `json:"name"`                 // Column name
+	Type       string `json:"type"`                 // SQLite type (TEXT, INTEGER, REAL, BLOB)
+	NotNull    bool   `json:"notNull,omitempty"`    // NOT NULL constraint
+	Default    any    `json:"default,omitempty"`    // Default value (nil if none)
+	References string `json:"references,omitempty"` // Foreign key reference (format: "table.column")
+}
+
+// SchemaTemplate represents a reusable schema template for multi-tenant databases.
+// Daughter databases associated with a template will inherit its schema.
+type SchemaTemplate struct {
+	ID        int32   `json:"id"`
+	Name      string  `json:"name"`
+	Tables    []Table `json:"tables"`    // Table definitions for this template
+	CreatedAt string  `json:"createdAt"` // ISO timestamp
+	UpdatedAt string  `json:"updatedAt"` // ISO timestamp
 }
 
 // Primary database connection (reused across requests)
@@ -88,21 +101,45 @@ func initPrimaryDB() error {
 	var buf bytes.Buffer
 	gob.NewEncoder(&buf).Encode(SchemaCache{})
 
-	_, err = db.Exec(`
-	CREATE TABLE IF NOT EXISTS databases
+	// Create templates table first (referenced by databases)
+	_, err = db.Exec(fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s
 	(
 		id INTEGER PRIMARY KEY,
-		name TEXT UNIQUE,
-		token TEXT,
-		schema BLOB
+		name TEXT UNIQUE NOT NULL,
+		tables BLOB NOT NULL,
+		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+		updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_databases_name ON databases(name);
-	INSERT INTO databases (id, schema) values(1, ?) ON CONFLICT (id) DO NOTHING;
-	`, buf.Bytes())
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_ab_templates_name ON %s(name);
+	`, ReservedTableTemplates, ReservedTableTemplates))
 	if err != nil {
 		db.Close()
 		return err
 	}
+
+	// Create databases table with template_id reference
+	_, err = db.Exec(fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s
+	(
+		id INTEGER PRIMARY KEY,
+		name TEXT UNIQUE,
+		token TEXT,
+		schema BLOB,
+		template_id INTEGER REFERENCES %s(id)
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_ab_databases_name ON %s(name);
+	INSERT INTO %s (id, schema) values(1, ?) ON CONFLICT (id) DO NOTHING;
+	`, ReservedTableDatabases, ReservedTableTemplates, ReservedTableDatabases, ReservedTableDatabases), buf.Bytes())
+	if err != nil {
+		db.Close()
+		return err
+	}
+
+	// Migration: Add template_id column if it doesn't exist (for existing databases)
+	// SQLite doesn't have IF NOT EXISTS for ALTER TABLE, so we just try and ignore the error
+	_, _ = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN template_id INTEGER REFERENCES %s(id)`,
+		ReservedTableDatabases, ReservedTableTemplates))
 
 	primaryDB = db
 
@@ -160,7 +197,7 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, errors.New("TURSO_ORGANIZATION environment variable is not set but is required to access external databases")
 	}
 
-	row := dao.Client.QueryRow("SELECT id, token, schema from databases WHERE name = ?", dbName)
+	row := dao.Client.QueryRow(fmt.Sprintf("SELECT id, token, schema from %s WHERE name = ?", ReservedTableDatabases), dbName)
 
 	var id sql.NullInt32
 	var token sql.NullString

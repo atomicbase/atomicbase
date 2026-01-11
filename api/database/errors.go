@@ -1,5 +1,5 @@
-// Package daos provides error definitions for the data access layer.
-package daos
+// Package database provides error definitions for the data access layer.
+package database
 
 import (
 	"errors"
@@ -30,6 +30,8 @@ var (
 	ErrNotDDLQuery         = errors.New("only DDL statements are allowed (CREATE, ALTER, DROP)")
 	ErrQueryTooDeep        = errors.New("query nesting exceeds maximum depth")
 	ErrNoFTSIndex          = errors.New("no FTS index exists for table")
+	ErrTemplateNotFound    = errors.New("template not found")
+	ErrTemplateInUse       = errors.New("template is in use by one or more databases")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.

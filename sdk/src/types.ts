@@ -82,7 +82,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List all tables
+         * @description Get a list of all tables in the database schema with their columns and primary keys.
+         */
+        get: operations["getSchema"];
         put?: never;
         /**
          * Execute DDL query
@@ -327,6 +331,30 @@ export interface components {
             /** @description Query arguments (for parameterized queries) */
             args?: unknown[];
         };
+        /** @description Table schema information */
+        Table: {
+            /** @description Table name */
+            name: string;
+            /** @description Primary key column name (empty if using rowid) */
+            pk?: string;
+            columns: components["schemas"]["Column"][];
+        };
+        /** @description Column definition */
+        Column: {
+            /** @description Column name */
+            name: string;
+            /**
+             * @description Column type (TEXT, INTEGER, REAL, BLOB)
+             * @enum {string}
+             */
+            type: "TEXT" | "INTEGER" | "REAL" | "BLOB";
+            /** @description NOT NULL constraint */
+            notNull?: boolean;
+            /** @description Default value */
+            default?: unknown;
+            /** @description Foreign key reference (format: "table.column") */
+            references?: string;
+        };
         TableSchemaResponse: {
             columns?: {
                 name?: string;
@@ -426,6 +454,37 @@ export interface components {
             ftsTable?: string;
             /** @description Columns included in the FTS index */
             columns?: string[];
+        };
+        /** @description Schema template for multi-tenant database management */
+        SchemaTemplate: {
+            /** @description Template ID */
+            id: number;
+            /** @description Template name */
+            name: string;
+            /** @description Table definitions for this template */
+            tables: components["schemas"]["Table"][];
+            /** @description ISO timestamp of creation */
+            createdAt: string;
+            /** @description ISO timestamp of last update */
+            updatedAt: string;
+        };
+        /** @description Result of syncing a template to a database */
+        SyncResult: {
+            /** @description Database name */
+            database: string;
+            /** @description Whether the sync was successful */
+            success: boolean;
+            /** @description Error message if sync failed */
+            error?: string;
+            /** @description List of changes applied */
+            changes?: string[];
+        };
+        /** @description Result of syncing a single database to its template */
+        DatabaseSyncResult: {
+            /** @description Whether the sync was successful */
+            success: boolean;
+            /** @description List of changes applied */
+            changes: string[];
         };
     };
     responses: {
@@ -834,6 +893,71 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getSchema: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target database name (default is primary database) */
+                "DB-Name"?: components["parameters"]["DBNameHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of tables */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example [
+                     *       {
+                     *         "name": "users",
+                     *         "pk": "id",
+                     *         "columns": [
+                     *           {
+                     *             "name": "id",
+                     *             "type": "INTEGER"
+                     *           },
+                     *           {
+                     *             "name": "email",
+                     *             "type": "TEXT"
+                     *           },
+                     *           {
+                     *             "name": "name",
+                     *             "type": "TEXT"
+                     *           }
+                     *         ]
+                     *       },
+                     *       {
+                     *         "name": "posts",
+                     *         "pk": "id",
+                     *         "columns": [
+                     *           {
+                     *             "name": "id",
+                     *             "type": "INTEGER"
+                     *           },
+                     *           {
+                     *             "name": "title",
+                     *             "type": "TEXT"
+                     *           },
+                     *           {
+                     *             "name": "user_id",
+                     *             "type": "INTEGER"
+                     *           }
+                     *         ]
+                     *       }
+                     *     ]
+                     */
+                    "application/json": components["schemas"]["Table"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             429: components["responses"]["RateLimited"];
         };
     };

@@ -1,4 +1,4 @@
-package daos
+package database
 
 import (
 	"bytes"
@@ -71,6 +71,11 @@ func (dao *Database) InvalidateSchema(ctx context.Context) error {
 	}
 
 	return dao.saveSchema()
+}
+
+// GetSchema returns all tables in the schema as JSON.
+func (dao *Database) GetSchema() ([]byte, error) {
+	return json.Marshal(dao.Schema.Tables)
 }
 
 func (dao *Database) GetTableSchema(table string) ([]byte, error) {

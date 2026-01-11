@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // Config holds all application configuration values.
@@ -27,6 +29,8 @@ type Config struct {
 var Cfg Config
 
 func init() {
+	// Load .env file before reading config (ignore error if file doesn't exist)
+	godotenv.Load()
 	Cfg = Load()
 }
 

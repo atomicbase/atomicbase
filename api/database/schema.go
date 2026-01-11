@@ -1,4 +1,4 @@
-package daos
+package database
 
 import (
 	"bytes"
@@ -72,8 +72,20 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 
 	var tbls []Table
 
+	// First, fetch foreign keys and build a lookup map
+	fks, err := schemaFks(db)
+	if err != nil {
+		return nil, err
+	}
+	// Map: "table.column" -> "refTable.refColumn"
+	fkMap := make(map[string]string)
+	for _, fk := range fks {
+		key := fk.Table + "." + fk.From
+		fkMap[key] = fk.References + "." + fk.To
+	}
+
 	rows, err := db.Query(`
-		SELECT m.name, l.name as col, l.type as colType, l.pk
+		SELECT m.name, l.name as col, l.type as colType, l.pk, l."notnull", l.dflt_value
 		FROM sqlite_master m
 		JOIN pragma_table_info(m.name) l
 		WHERE m.type = 'table'
@@ -92,8 +104,10 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 		var colType sql.NullString
 		var name sql.NullString
 		var pk sql.NullBool
+		var notNull sql.NullBool
+		var dfltValue sql.NullString
 
-		err := rows.Scan(&name, &col, &colType, &pk)
+		err := rows.Scan(&name, &col, &colType, &pk, &notNull, &dfltValue)
 		if err != nil {
 			return nil, err
 		}
@@ -104,11 +118,27 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 				firstRow = false
 			} else {
 				tbls = append(tbls, currTbl)
-				currTbl = Table{name.String, "", nil}
+				currTbl = Table{Name: name.String}
 			}
 		}
 
-		currTbl.Columns = append(currTbl.Columns, Col{col.String, colType.String})
+		newCol := Col{
+			Name:    col.String,
+			Type:    colType.String,
+			NotNull: notNull.Bool,
+		}
+
+		// Parse default value if present
+		if dfltValue.Valid && dfltValue.String != "" {
+			newCol.Default = parseDefaultValue(dfltValue.String)
+		}
+
+		// Check for foreign key reference
+		if ref, ok := fkMap[name.String+"."+col.String]; ok {
+			newCol.References = ref
+		}
+
+		currTbl.Columns = append(currTbl.Columns, newCol)
 
 		if pk.Bool {
 			currTbl.Pk = col.String
@@ -119,6 +149,20 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 
 	return tbls, rows.Err()
 
+}
+
+// parseDefaultValue converts SQLite's default value string to appropriate Go type
+func parseDefaultValue(val string) any {
+	// Remove quotes from string defaults
+	if len(val) >= 2 && ((val[0] == '\'' && val[len(val)-1] == '\'') || (val[0] == '"' && val[len(val)-1] == '"')) {
+		return val[1 : len(val)-1]
+	}
+	// Try to parse as number
+	if val == "NULL" || val == "null" {
+		return nil
+	}
+	// Return as-is for expressions like CURRENT_TIMESTAMP
+	return val
 }
 
 func (dao *Database) saveSchema() error {
@@ -148,7 +192,7 @@ func (dao *Database) saveSchema() error {
 		return err
 	}
 
-	_, err = client.Exec("UPDATE databases SET schema = ? WHERE id = ?", buf.Bytes(), dao.id)
+	_, err = client.Exec(fmt.Sprintf("UPDATE %s SET schema = ? WHERE id = ?", ReservedTableDatabases), buf.Bytes(), dao.id)
 	return err
 }
 

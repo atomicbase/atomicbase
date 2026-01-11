@@ -1,4 +1,4 @@
-package daos
+package database
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
 		return err
 	}
 
-	rows, err := dao.Client.QueryContext(ctx, "SELECT name FROM databases")
+	rows, err := dao.Client.QueryContext(ctx, fmt.Sprintf("SELECT name FROM %s", ReservedTableDatabases))
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
 				return err
 			}
 
-			_, err = dao.Client.ExecContext(ctx, "INSERT INTO databases (name, token, schema) values (?, ?, ?)", db.Name, dbToken, buf.Bytes())
+			_, err = dao.Client.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s (name, token, schema) values (?, ?, ?)", ReservedTableDatabases), db.Name, dbToken, buf.Bytes())
 			if err != nil {
 				return err
 			}
@@ -149,6 +149,7 @@ func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
 
 // creates a schema cache and stores it for an already existing turso db
 func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToken string) ([]byte, error) {
+
 	type reqBody struct {
 		Name string `json:"name"`
 	}
@@ -191,14 +192,20 @@ func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToke
 	request.Header.Set("Authorization", "Bearer "+token)
 
 	res, err := client.Do(request)
+
+	fmt.Println("Made request to turso")
 	if err != nil {
+		fmt.Println("Fail at request: ", err)
 		return nil, err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
+		fmt.Println("Fail at status code: ", res.StatusCode)
 		return nil, readAPIError(res)
 	}
+
+	fmt.Println("Received response from turso")
 
 	var dbResp dbResponse
 	if err := json.NewDecoder(res.Body).Decode(&dbResp); err != nil {
@@ -241,13 +248,14 @@ func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToke
 		return nil, err
 	}
 
-	_, err = dao.Client.ExecContext(ctx, "INSERT INTO databases (name, token, schema) values (?, ?, ?)", bod.Name, dbToken, buf.Bytes())
+	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s (name, token, schema) values (?, ?, ?)", ReservedTableDatabases), bod.Name, dbToken, buf.Bytes())
 
 	return []byte(fmt.Sprintf(`{"message":"database %s registered"}`, bod.Name)), err
 }
 
 func (dao PrimaryDao) ListDBs(ctx context.Context) ([]byte, error) {
-	row := dao.Client.QueryRowContext(ctx, "SELECT json_group_array(json_object('name', name, 'id', id)) AS data FROM (SELECT name, id from databases ORDER BY id)")
+	// Exclude primary database (id=1, name=NULL) from the list
+	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(json_object('name', name, 'id', id)) AS data FROM (SELECT name, id from %s WHERE name IS NOT NULL ORDER BY id)", ReservedTableDatabases))
 
 	if row.Err() != nil {
 		return nil, row.Err()
@@ -326,7 +334,7 @@ func (dao PrimaryDao) CreateDB(ctx context.Context, body io.ReadCloser) ([]byte,
 		return nil, err
 	}
 
-	_, err = dao.Client.ExecContext(ctx, "INSERT INTO databases (name, token, schema) values (?, ?, ?)", bod.Name, newToken, buf.Bytes())
+	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s (name, token, schema) values (?, ?, ?)", ReservedTableDatabases), bod.Name, newToken, buf.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +345,7 @@ func (dao PrimaryDao) CreateDB(ctx context.Context, body io.ReadCloser) ([]byte,
 // for use with the primary database
 func (dao PrimaryDao) DeleteDB(ctx context.Context, name string) ([]byte, error) {
 
-	_, err := dao.Client.ExecContext(ctx, "DELETE FROM databases WHERE name = ?", name)
+	_, err := dao.Client.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE name = ?", ReservedTableDatabases), name)
 	if err != nil {
 		return nil, err
 	}
@@ -376,6 +384,7 @@ func (dao PrimaryDao) DeleteDB(ctx context.Context, name string) ([]byte, error)
 // createDBToken creates a new auth token for a Turso database.
 // If TURSO_TOKEN_EXPIRATION is set (e.g., "7d", "30d", "never"), it will be used.
 func createDBToken(ctx context.Context, dbName string) (string, error) {
+	fmt.Println("Creating db token")
 	type jwtBody struct {
 		Jwt string `json:"jwt"`
 	}
@@ -401,14 +410,16 @@ func createDBToken(ctx context.Context, dbName string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-
+	fmt.Println("Making request to turso")
 	res, err := client.Do(req)
 	if err != nil {
+		fmt.Println("Fail at request: ", err)
 		return "", err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
+		fmt.Println("Fail at status code: ", res.StatusCode)
 		return "", readAPIError(res)
 	}
 

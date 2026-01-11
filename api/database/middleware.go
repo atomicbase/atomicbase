@@ -1,4 +1,4 @@
-package handlers
+package database
 
 import (
 	"bytes"
@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/joe-ervin05/atomicbase/config"
-	"github.com/joe-ervin05/atomicbase/daos"
 )
 
 // Logger is the global structured logger instance.
@@ -25,11 +24,11 @@ var Logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 	Level: slog.LevelInfo,
 }))
 
-type DbHandler func(ctx context.Context, db *daos.Database, req *http.Request) ([]byte, error)
+type DbHandler func(ctx context.Context, db *Database, req *http.Request) ([]byte, error)
 
-type DbResponseHandler func(ctx context.Context, db *daos.Database, req *http.Request, w http.ResponseWriter) ([]byte, error)
+type DbResponseHandler func(ctx context.Context, db *Database, req *http.Request, w http.ResponseWriter) ([]byte, error)
 
-type PrimaryHandler func(ctx context.Context, db *daos.PrimaryDao, req *http.Request) ([]byte, error)
+type PrimaryHandler func(ctx context.Context, db *PrimaryDao, req *http.Request) ([]byte, error)
 
 // responseWriter wraps http.ResponseWriter to capture status code.
 type responseWriter struct {
@@ -96,7 +95,7 @@ type rateLimiter struct {
 }
 
 type clientLimit struct {
-	count    int
+	count       int
 	windowStart time.Time
 }
 
@@ -257,7 +256,7 @@ func withPrimary(handler PrimaryHandler) http.HandlerFunc {
 		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
 		defer req.Body.Close()
 
-		dao, err := daos.ConnPrimary()
+		dao, err := ConnPrimary()
 		if err != nil {
 			respErr(wr, err)
 			return
@@ -343,24 +342,28 @@ func respErr(wr http.ResponseWriter, err error) {
 
 	// Map known errors to appropriate status codes and safe messages
 	switch {
-	case errors.Is(err, daos.ErrTableNotFound),
-		errors.Is(err, daos.ErrColumnNotFound),
-		errors.Is(err, daos.ErrDatabaseNotFound),
-		errors.Is(err, daos.ErrNoRelationship):
+	case errors.Is(err, ErrTableNotFound),
+		errors.Is(err, ErrColumnNotFound),
+		errors.Is(err, ErrDatabaseNotFound),
+		errors.Is(err, ErrNoRelationship),
+		errors.Is(err, ErrTemplateNotFound):
 		status = http.StatusNotFound
 		message = err.Error() // Safe to expose
-	case errors.Is(err, daos.ErrInvalidOperator),
-		errors.Is(err, daos.ErrInvalidColumnType),
-		errors.Is(err, daos.ErrMissingWhereClause),
-		errors.Is(err, daos.ErrInvalidIdentifier),
-		errors.Is(err, daos.ErrEmptyIdentifier),
-		errors.Is(err, daos.ErrIdentifierTooLong),
-		errors.Is(err, daos.ErrInvalidCharacter),
-		errors.Is(err, daos.ErrNotDDLQuery),
-		errors.Is(err, daos.ErrQueryTooDeep):
+	case errors.Is(err, ErrTemplateInUse):
+		status = http.StatusConflict
+		message = err.Error() // Safe to expose
+	case errors.Is(err, ErrInvalidOperator),
+		errors.Is(err, ErrInvalidColumnType),
+		errors.Is(err, ErrMissingWhereClause),
+		errors.Is(err, ErrInvalidIdentifier),
+		errors.Is(err, ErrEmptyIdentifier),
+		errors.Is(err, ErrIdentifierTooLong),
+		errors.Is(err, ErrInvalidCharacter),
+		errors.Is(err, ErrNotDDLQuery),
+		errors.Is(err, ErrQueryTooDeep):
 		status = http.StatusBadRequest
 		message = err.Error() // Safe to expose
-	case errors.Is(err, daos.ErrReservedTable):
+	case errors.Is(err, ErrReservedTable):
 		status = http.StatusForbidden
 		message = err.Error() // Safe to expose
 	case strings.Contains(err.Error(), "UNIQUE constraint failed"):
@@ -392,18 +395,18 @@ func respErr(wr http.ResponseWriter, err error) {
 
 // connDb returns a database connection and a boolean indicating if it's an external (non-pooled) connection.
 // External connections should be closed after use; pooled connections should not.
-func connDb(req *http.Request) (daos.Database, bool, error) {
+func connDb(req *http.Request) (Database, bool, error) {
 	dbName := req.Header.Get("DB-Name")
 
-	dao, err := daos.ConnPrimary()
+	dao, err := ConnPrimary()
 	if err != nil {
-		return daos.Database{}, false, err
+		return Database{}, false, err
 	}
 
 	if dbName != "" {
 		db, err := dao.ConnTurso(dbName)
 		if err != nil {
-			return daos.Database{}, false, err
+			return Database{}, false, err
 		}
 		// Return external connection - should be closed after use
 		return db, true, nil
