@@ -1,6 +1,6 @@
 # Atomicbase
 
-> [!IMPORTANT] > **Atomicbase is in early stages of development.** APIs may change.
+## **Atomicbase is in early stages of development.** APIs may change.
 
 Atomicbase is the backend for effortless multi-tenant architecture. It provides a complete backend solution on top of LibSQL and Turso with authentication, file storage, a dashboard, and client SDKs - all packaged as a single lightning-fast Go executable.
 
