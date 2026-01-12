@@ -7,20 +7,20 @@ REST API for SQLite/Turso with JSON queries, multi-tenant database management, a
 ```typescript
 import { createClient, eq, or } from "atomicbase";
 
-const { db, schema, databases, templates } = createClient({
+const client = createClient({
   url: "http://localhost:8080",
   apiKey: process.env.ATOMICBASE_API_KEY,
 });
 
 // Query
-const users = await db
+const users = await client
   .from("users")
   .select("id", "name")
   .where(eq("status", "active"));
 
 // Multi-tenant
-const tenant = databases.get("tenant-123");
-await tenant.db.from("projects").select("*");
+const tenant = client.database("tenant-123");
+await tenant.from("projects").select("*");
 ```
 
 ---
@@ -210,36 +210,39 @@ Reusable schemas for multi-tenant apps:
 ```typescript
 import { createClient, eq, gt, or, not } from "atomicbase";
 
-const { db, schema, databases, templates } = createClient({ url, apiKey });
+const client = createClient({ url, apiKey });
 ```
 
-### db - Queries
+### Querying
 
 ```typescript
 // Select
-const users = await db
+const users = await client
   .from("users")
   .select("id", "name")
   .where(eq("status", "active"));
 
 // With relations
-const users = await db.from("users").select("id", { posts: ["title"] });
+const users = await client.from("users").select("id", { posts: ["title"] });
 
 // OR conditions
-const users = await db
+const users = await client
   .from("users")
   .where(or(eq("role", "admin"), gt("age", 21)));
 
 // Insert
-await db.from("users").insert({ name: "Alice" });
-const [user] = await db.from("users").insert({ name: "Alice" }).returning("id");
+await client.from("users").insert({ name: "Alice" });
+const [user] = await client
+  .from("users")
+  .insert({ name: "Alice" })
+  .returning("id");
 
 // Update/Delete
-await db.from("users").update({ status: "inactive" }).where(eq("id", 5));
-await db.from("users").delete().where(eq("status", "deleted"));
+await client.from("users").update({ status: "inactive" }).where(eq("id", 5));
+await client.from("users").delete().where(eq("status", "deleted"));
 
 // Pagination
-await db
+await client
   .from("users")
   .select("*")
   .orderBy("created_at", "desc")
@@ -250,26 +253,28 @@ await db
 ### schema - DDL
 
 ```typescript
-await schema.createTable("users", {
+await client.schema.createTable("users", {
   id: { type: "integer", primaryKey: true },
   email: { type: "text", unique: true, notNull: true },
 });
-await schema.alterTable("users", { addColumns: { avatar: { type: "text" } } });
-await schema.dropTable("users");
-await schema.createFtsIndex("articles", ["title", "content"]);
+await client.schema.alterTable("users", {
+  addColumns: { avatar: { type: "text" } },
+});
+await client.schema.dropTable("users");
+await client.schema.createFtsIndex("articles", ["title", "content"]);
 ```
 
 ### databases - Multi-Tenant
 
 ```typescript
-await databases.create('tenant-123')
-await databases.delete('tenant-123')
-const list = await databases.list()
+await client.databases.create("tenant-123");
+await client.databases.delete("tenant-123");
+const list = await client.databases.list();
 
-// Scoped client
-const tenant = databases.get('tenant-123')
-await tenant.db.from('projects').select('*')
-await tenant.schema.createTable('tasks', {...})
+// Scoped client (same structure as primary client)
+const tenant = client.database("tenant-123");
+await tenant.from("projects").select("*");
+await tenant.schema.createTable("tasks", {...});
 ```
 
 **Database-per-user pattern:**
@@ -277,26 +282,36 @@ await tenant.schema.createTable('tasks', {...})
 ```typescript
 async function createUser(email: string) {
   const dbName = `tenant-${crypto.randomUUID()}`;
-  await databases.create(dbName);
-  await db.from("users").insert({ email, database: dbName });
-  await templates.applyTo(dbName, "user-app");
+  await client.databases.create(dbName);
+  await client.from("users").insert({ email, database: dbName });
+  await client.templates.applyTo(dbName, "user-app");
 }
 
 async function getUserData(userId: number) {
-  const [user] = await db
+  const [user] = await client
     .from("users")
     .select("database")
     .where(eq("id", userId));
-  return databases.get(user.database).db.from("projects").select("*");
+  return client.database(user.database).from("projects").select("*");
 }
 ```
 
 ### templates - Schema Templates
 
 ```typescript
-await templates.create('saas-app', { tables: [...] })
-await templates.applyTo('tenant-123', 'saas-app')
-await templates.sync('saas-app') // Sync all databases using this template
+await client.templates.create("saas-app", { tables: [...] });
+await client.templates.applyTo("tenant-123", "saas-app");
+await client.templates.sync("saas-app"); // Sync all databases using this template
+```
+
+### Client Structure
+
+```typescript
+client.from(...)              // Query builder (top-level, most common)
+client.schema.*               // DDL operations
+client.databases.*            // Database management (create, delete, list)
+client.database(name)         // Get scoped client → same structure
+client.templates.*            // Template management
 ```
 
 ---
@@ -321,13 +336,13 @@ Override implicit FK joins:
 
 ```typescript
 // Inner join instead of left
-await db
+await client
   .from("users")
   .select("id", { posts: ["title"] })
   .innerJoin("posts");
 
 // Custom condition
-await db
+await client
   .from("messages")
   .select("id", { sender: ["name"], recipient: ["name"] })
   .leftJoin("users", eq("messages.sender_id", "users.id"), { as: "sender" })
