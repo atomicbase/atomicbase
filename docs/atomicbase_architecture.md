@@ -150,12 +150,12 @@ func serveDashboard(w http.ResponseWriter, r *http.Request) {
 
 ## Routes
 
-| Path | Package | Purpose |
-|------|---------|---------|
-| `/api/*` | `database/` | REST API for database operations |
-| `/auth/*` | `auth/` | Authentication (register, login, logout, etc.) |
-| `/storage/*` | `storage/` | File storage (upload, download, delete) |
-| `/admin/*` | `admin/` | Dashboard SPA |
+| Path         | Package     | Purpose                                        |
+| ------------ | ----------- | ---------------------------------------------- |
+| `/api/*`     | `database/` | REST API for database operations               |
+| `/auth/*`    | `auth/`     | Authentication (register, login, logout, etc.) |
+| `/storage/*` | `storage/`  | File storage (upload, download, delete)        |
+| `/admin/*`   | `admin/`    | Dashboard SPA                                  |
 
 ## Build Process
 
