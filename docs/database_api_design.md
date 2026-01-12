@@ -1,681 +1,363 @@
 # Atomicbase Database API
 
-A PostgREST-style REST API for SQLite and Turso databases with support for multi-database management, full-text search, and schema templates.
+REST API for SQLite/Turso with JSON queries, multi-tenant database management, and schema templates.
 
-## Table of Contents
+## Quick Start
 
-- [Current Features](#current-features)
-  - [CRUD Operations](#crud-operations)
-  - [Query & Filtering](#query--filtering)
-  - [Nested Relations](#nested-relations)
-  - [Aggregations](#aggregations)
-  - [Full-Text Search (FTS5)](#full-text-search-fts5)
-  - [Schema Management](#schema-management)
-  - [Multi-Database Support](#multi-database-support)
-  - [Schema Templates](#schema-templates)
-  - [Security & Middleware](#security--middleware)
-- [Upcoming Features](#upcoming-features)
-  - [Batch Transactions](#batch-transactions)
-  - [Complex Joins](#complex-joins)
-  - [Views](#views)
-- [API Reference](#api-reference)
+```typescript
+import { createClient, eq, or } from "atomicbase";
+
+const { db, schema, databases, templates } = createClient({
+  url: "http://localhost:8080",
+  apiKey: process.env.ATOMICBASE_API_KEY,
+});
+
+// Query
+const users = await db
+  .from("users")
+  .select("id", "name")
+  .where(eq("status", "active"));
+
+// Multi-tenant
+const tenant = databases.get("tenant-123");
+await tenant.db.from("projects").select("*");
+```
 
 ---
 
-## Current Features
+## REST API
 
 ### CRUD Operations
 
-Full create, read, update, delete operations on any table.
+All queries use `POST /query/{table}` with JSON bodies. Operation determined by body structure:
 
-| Method   | Endpoint         | Description                                      |
-| -------- | ---------------- | ------------------------------------------------ |
-| `GET`    | `/query/{table}` | Select rows with filtering, ordering, pagination |
-| `POST`   | `/query/{table}` | Insert a single row                              |
-| `PATCH`  | `/query/{table}` | Update rows matching WHERE conditions            |
-| `DELETE` | `/query/{table}` | Delete rows matching WHERE conditions            |
+| Operation | Method | Body                          | Returns            |
+| --------- | ------ | ----------------------------- | ------------------ |
+| SELECT    | POST   | `{select: [...]}`             | Rows               |
+| INSERT    | POST   | `{data: {...}}`               | `{last_insert_id}` |
+| UPSERT    | POST   | `{data: [...]}`               | `{rows_affected}`  |
+| UPDATE    | PATCH  | `{data: {...}, where: [...]}` | `{rows_affected}`  |
+| DELETE    | DELETE | `{where: [...]}`              | `{rows_affected}`  |
 
-**Insert with return:**
+**Select:**
 
-```bash
-POST /query/users?select=id,name
-{"name": "Alice", "email": "alice@example.com"}
-# Returns: [{"id": 1, "name": "Alice"}]
-```
-
-**Upsert (bulk insert/update):**
-
-```bash
+```json
 POST /query/users
-Prefer: resolution=merge-duplicates
-
-[{"id": 1, "name": "Alice Updated"}, {"id": 2, "name": "Bob"}]
-# Returns: {"rows_affected": 2}
+{"select": ["id", "name"], "where": [{"status": {"eq": "active"}}], "limit": 20}
 ```
 
-**Delete requires WHERE clause** (prevents accidental mass deletes):
+**Insert with returning:**
 
-```bash
-DELETE /query/users?id=eq.5
-# Returns: {"rows_affected": 1}
+```json
+POST /query/users
+{"data": {"name": "Alice"}, "returning": ["id", "created_at"]}
+```
+
+**Update:**
+
+```json
+PATCH /query/users
+{"data": {"status": "inactive"}, "where": [{"id": {"eq": 5}}]}
 ```
 
 ---
 
-### Query & Filtering
+### Filtering
 
-Filter rows using URL query parameters with operator syntax: `column=operator.value`
+`where` is always an array. Elements are ANDed together.
 
-#### Comparison Operators
+**Operators:**
 
-| Operator | SQL  | Example              |
-| -------- | ---- | -------------------- |
-| `eq`     | `=`  | `status=eq.active`   |
-| `neq`    | `!=` | `status=neq.deleted` |
-| `gt`     | `>`  | `age=gt.21`          |
-| `gte`    | `>=` | `price=gte.100`      |
-| `lt`     | `<`  | `age=lt.65`          |
-| `lte`    | `<=` | `stock=lte.10`       |
+| Operator                              | Example                              |
+| ------------------------------------- | ------------------------------------ |
+| `eq`, `neq`, `gt`, `gte`, `lt`, `lte` | `{"age": {"gte": 21}}`               |
+| `like`, `glob`                        | `{"name": {"like": "%smith%"}}`      |
+| `in`, `between`                       | `{"status": {"in": ["a", "b"]}}`     |
+| `is`, `fts`                           | `{"deleted_at": {"is": null}}`       |
+| `not`                                 | `{"name": {"not": {"eq": "Admin"}}}` |
 
-#### Pattern Matching
+**OR conditions:**
 
-| Operator | SQL    | Example                  |
-| -------- | ------ | ------------------------ |
-| `like`   | `LIKE` | `name=like.%smith%`      |
-| `glob`   | `GLOB` | `email=glob.*@gmail.com` |
-
-#### Other Operators
-
-| Operator  | SQL              | Example                             |
-| --------- | ---------------- | ----------------------------------- |
-| `in`      | `IN`             | `status=in.(active,pending,review)` |
-| `between` | `BETWEEN`        | `age=between.18,65`                 |
-| `is`      | `IS`             | `deleted_at=is.null`                |
-| `fts`     | Full-text search | `title=fts.search terms`            |
-
-#### Negation
-
-Prefix any operator with `not.` to negate:
-
-```
-name=not.eq.Admin           # name != 'Admin'
-status=not.in.(deleted,banned)  # status NOT IN (...)
-email=not.like.%test%       # email NOT LIKE '%test%'
-deleted_at=not.is.null      # deleted_at IS NOT NULL
+```json
+{
+  "where": [
+    { "org_id": { "eq": 5 } },
+    { "or": [{ "status": { "eq": "active" } }, { "role": { "eq": "admin" } }] }
+  ]
+}
 ```
 
-#### Logical OR
+→ `WHERE org_id = 5 AND (status = 'active' OR role = 'admin')`
 
-Combine conditions with OR using the `or` parameter:
+**Pagination:**
 
-```
-GET /query/users?or=(status.eq.active,status.eq.pending)
-# WHERE status = 'active' OR status = 'pending'
-```
-
-#### Ordering & Pagination
-
-```
-GET /query/users?order=created_at:desc&limit=20&offset=40
-```
-
-- `order` - Sort by column: `column:asc` or `column:desc`
-- `limit` - Max rows to return (default: 100, max: 1000)
-- `offset` - Skip N rows for pagination
-
-#### Row Counting
-
-Get total count alongside results:
-
-```bash
-GET /query/users?status=eq.active
-Prefer: count=exact
-
-# Response header: X-Total-Count: 1523
-# Body: [{...}, {...}, ...]
-```
-
-Get count only (no data):
-
-```bash
-GET /query/users?status=eq.active&count=only
-# Returns: {"count": 1523}
+```json
+{
+  "select": ["*"],
+  "order": { "created_at": "desc" },
+  "limit": 20,
+  "offset": 40
+}
 ```
 
 ---
 
 ### Nested Relations
 
-Automatically join related tables via foreign key relationships.
-
-```
-GET /query/users?select=id,name,posts(title,created_at)
-```
-
-Returns:
+Auto-join via foreign keys:
 
 ```json
-[
-  {
-    "id": 1,
-    "name": "Alice",
-    "posts": [
-      { "title": "Hello World", "created_at": "2024-01-15" },
-      { "title": "Second Post", "created_at": "2024-01-20" }
-    ]
-  }
-]
+{ "select": ["id", "name", { "posts": ["title", { "comments": ["body"] }] }] }
 ```
 
-Nested relations work in both directions:
+Returns nested JSON:
 
-- Parent → Children: `users?select=*,posts(*)`
-- Child → Parent: `posts?select=*,users(name)`
+```json
+[{"id": 1, "name": "Alice", "posts": [{"title": "Hello", "comments": [...]}]}]
+```
 
 ---
 
 ### Aggregations
 
-Use aggregate functions in the `select` parameter:
-
-| Function      | Example            |
-| ------------- | ------------------ |
-| `count(*)`    | Count all rows     |
-| `sum(column)` | Sum numeric column |
-| `avg(column)` | Average of column  |
-| `min(column)` | Minimum value      |
-| `max(column)` | Maximum value      |
-
-**Basic aggregation:**
-
-```
-GET /query/orders?select=count(*),sum(total)
-# Returns: [{"count": 150, "sum": 45230.50}]
-```
-
-**Group by with aggregates:**
-
-```
-GET /query/orders?select=status,count(*),avg(total)
-# Returns: [
-#   {"status": "pending", "count": 23, "avg": 150.00},
-#   {"status": "completed", "count": 127, "avg": 320.50}
-# ]
-```
-
-**Aliasing:**
-
-```
-GET /query/orders?select=status,order_count:count(*),total_revenue:sum(total)
+```json
+{ "select": ["status", { "count": "*" }, { "sum": "total", "as": "revenue" }] }
 ```
 
 ---
 
-### Full-Text Search (FTS5)
+### Full-Text Search
 
-Create FTS5 indexes for fast text search with automatic synchronization.
-
-**Create an FTS index:**
-
-```bash
+```json
 POST /schema/fts/articles
 {"columns": ["title", "content"]}
 ```
 
-This creates:
-
-- FTS5 virtual table `articles_fts`
-- Insert/update/delete triggers to keep index in sync
-
-**Search using FTS:**
-
-```
-GET /query/articles?title=fts.sqlite database
-```
-
-FTS5 supports advanced syntax:
-
-- `word1 word2` - Both words (AND)
-- `word1 OR word2` - Either word
-- `"exact phrase"` - Phrase match
-- `word*` - Prefix match
-- `NEAR(word1 word2, 5)` - Words within 5 tokens
-
-**List FTS indexes:**
-
-```bash
-GET /schema/fts
-# Returns: [{"table": "articles", "ftsTable": "articles_fts", "columns": ["title", "content"]}]
-```
-
-**Drop FTS index:**
-
-```bash
-DELETE /schema/fts/articles
+```json
+POST /query/articles
+{"select": ["*"], "where": [{"title": {"fts": "sqlite database"}}]}
 ```
 
 ---
 
 ### Schema Management
 
-#### Get Schema
+| Endpoint               | Method      | Description        |
+| ---------------------- | ----------- | ------------------ |
+| `/schema`              | GET         | List all tables    |
+| `/schema/table/{name}` | POST        | Create table       |
+| `/schema/table/{name}` | PATCH       | Alter table        |
+| `/schema/table/{name}` | DELETE      | Drop table         |
+| `/schema/fts/{table}`  | POST/DELETE | Manage FTS indexes |
 
-```bash
-GET /schema
-# Returns all tables with columns and primary keys
-```
+**Create table:**
 
-#### Create Table
-
-```bash
+```json
 POST /schema/table/users
-{
-  "id": {"type": "integer", "primaryKey": true},
-  "email": {"type": "text", "unique": true, "notNull": true},
-  "name": {"type": "text"},
-  "org_id": {"type": "integer", "references": "organizations.id", "onDelete": "cascade"}
-}
-```
-
-Column options:
-
-- `type`: `text`, `integer`, `real`, `blob`
-- `primaryKey`: `true/false`
-- `unique`: `true/false`
-- `notNull`: `true/false`
-- `default`: default value
-- `references`: `"table.column"` for foreign keys
-- `onDelete`/`onUpdate`: `cascade`, `restrict`, `set null`, `set default`, `no action`
-
-#### Alter Table
-
-```bash
-PATCH /schema/table/users
-{
-  "newName": "customers",           # Rename table
-  "renameColumns": {"old": "new"},  # Rename columns
-  "newColumns": {...},              # Add columns
-  "dropColumns": ["temp_col"]       # Drop columns
-}
-```
-
-#### Drop Table
-
-```bash
-DELETE /schema/table/users
-```
-
-#### Execute Raw DDL
-
-```bash
-POST /schema
-{"query": "CREATE INDEX idx_users_email ON users(email)"}
-```
-
-Only DDL statements (CREATE, ALTER, DROP) are allowed.
-
-#### Invalidate Schema Cache
-
-```bash
-POST /schema/invalidate
+{"columns": {"id": {"type": "integer", "primaryKey": true}, "email": {"type": "text", "unique": true}}}
 ```
 
 ---
 
-### Multi-Database Support
+### Multi-Database
 
-Atomicbase supports both a local SQLite database and multiple external Turso databases.
+Target Turso databases with `DB-Name` header:
 
-**Target a specific database:**
-
-```bash
-GET /query/users
-DB-Name: my-turso-db
+```
+POST /query/users
+DB-Name: tenant-123
+{"select": ["*"]}
 ```
 
-**List registered databases:**
-
-```bash
-GET /db
-```
-
-**Create a new Turso database:**
-
-```bash
-POST /db
-{"name": "my-new-db", "group": "default"}
-```
-
-**Register an existing Turso database:**
-
-```bash
-PATCH /db
-{"name": "existing-db"}
-```
-
-**Register all organization databases:**
-
-```bash
-PATCH /db/all
-```
-
-**Delete a database:**
-
-```bash
-DELETE /db/my-db
-```
+| Endpoint     | Method | Description     |
+| ------------ | ------ | --------------- |
+| `/db`        | GET    | List databases  |
+| `/db`        | POST   | Create database |
+| `/db/{name}` | DELETE | Delete database |
 
 ---
 
 ### Schema Templates
 
-Define reusable schemas for multi-tenant database management.
+Reusable schemas for multi-tenant apps:
 
-**Create a template:**
+| Endpoint                      | Description                      |
+| ----------------------------- | -------------------------------- |
+| `POST /templates`             | Create template                  |
+| `PUT /db/{name}/template`     | Associate database with template |
+| `POST /db/{name}/sync`        | Sync database to template        |
+| `POST /templates/{name}/sync` | Sync all databases               |
 
-```bash
-POST /templates
-{
-  "name": "saas-app",
-  "tables": [
-    {
-      "name": "users",
-      "pk": "id",
-      "columns": [
-        {"name": "id", "type": "INTEGER"},
-        {"name": "email", "type": "TEXT"},
-        {"name": "name", "type": "TEXT"}
-      ]
-    }
-  ]
+---
+
+### Configuration
+
+| Env Variable                    | Description                              |
+| ------------------------------- | ---------------------------------------- |
+| `ATOMICBASE_API_KEY`            | Enable auth (Bearer token)               |
+| `ATOMICBASE_RATE_LIMIT_ENABLED` | Enable rate limiting                     |
+| `ATOMICBASE_RATE_LIMIT`         | Requests/minute (default: 100)           |
+| `ATOMICBASE_CORS_ORIGINS`       | Allowed origins (`*` or comma-separated) |
+| `ATOMICBASE_REQUEST_TIMEOUT`    | Timeout in seconds (default: 30)         |
+| `ATOMICBASE_MAX_QUERY_DEPTH`    | Max nested relation depth (default: 4)   |
+
+---
+
+## TypeScript SDK
+
+### Setup
+
+```typescript
+import { createClient, eq, gt, or, not } from "atomicbase";
+
+const { db, schema, databases, templates } = createClient({ url, apiKey });
+```
+
+### db - Queries
+
+```typescript
+// Select
+const users = await db
+  .from("users")
+  .select("id", "name")
+  .where(eq("status", "active"));
+
+// With relations
+const users = await db.from("users").select("id", { posts: ["title"] });
+
+// OR conditions
+const users = await db
+  .from("users")
+  .where(or(eq("role", "admin"), gt("age", 21)));
+
+// Insert
+await db.from("users").insert({ name: "Alice" });
+const [user] = await db.from("users").insert({ name: "Alice" }).returning("id");
+
+// Update/Delete
+await db.from("users").update({ status: "inactive" }).where(eq("id", 5));
+await db.from("users").delete().where(eq("status", "deleted"));
+
+// Pagination
+await db
+  .from("users")
+  .select("*")
+  .orderBy("created_at", "desc")
+  .limit(20)
+  .offset(40);
+```
+
+### schema - DDL
+
+```typescript
+await schema.createTable("users", {
+  id: { type: "integer", primaryKey: true },
+  email: { type: "text", unique: true, notNull: true },
+});
+await schema.alterTable("users", { addColumns: { avatar: { type: "text" } } });
+await schema.dropTable("users");
+await schema.createFtsIndex("articles", ["title", "content"]);
+```
+
+### databases - Multi-Tenant
+
+```typescript
+await databases.create('tenant-123')
+await databases.delete('tenant-123')
+const list = await databases.list()
+
+// Scoped client
+const tenant = databases.get('tenant-123')
+await tenant.db.from('projects').select('*')
+await tenant.schema.createTable('tasks', {...})
+```
+
+**Database-per-user pattern:**
+
+```typescript
+async function createUser(email: string) {
+  const dbName = `tenant-${crypto.randomUUID()}`;
+  await databases.create(dbName);
+  await db.from("users").insert({ email, database: dbName });
+  await templates.applyTo(dbName, "user-app");
+}
+
+async function getUserData(userId: number) {
+  const [user] = await db
+    .from("users")
+    .select("database")
+    .where(eq("id", userId));
+  return databases.get(user.database).db.from("projects").select("*");
 }
 ```
 
-**Associate a database with a template:**
+### templates - Schema Templates
 
-```bash
-PUT /db/tenant-123/template
-{"templateName": "saas-app"}
-```
-
-**Sync a database to its template:**
-
-```bash
-POST /db/tenant-123/sync?dropExtra=true
-```
-
-**Sync all databases using a template:**
-
-```bash
-POST /templates/saas-app/sync?dropExtra=false
+```typescript
+await templates.create('saas-app', { tables: [...] })
+await templates.applyTo('tenant-123', 'saas-app')
+await templates.sync('saas-app') // Sync all databases using this template
 ```
 
 ---
 
-### Security & Middleware
-
-#### Authentication
-
-Set `ATOMICBASE_API_KEY` to enable Bearer token authentication:
-
-```bash
-GET /query/users
-Authorization: Bearer your-api-key
-```
-
-Public endpoints (no auth required): `/health`, `/openapi.yaml`, `/docs`
-
-#### Rate Limiting
-
-Enable with `ATOMICBASE_RATE_LIMIT_ENABLED=true`.
-
-Configure requests per minute with `ATOMICBASE_RATE_LIMIT` (default: 100).
-
-#### CORS
-
-Set `ATOMICBASE_CORS_ORIGINS` to allowed origins:
-
-- `*` for all origins
-- Comma-separated list: `https://app.example.com,https://admin.example.com`
-
-#### Request Timeout
-
-Configure with `ATOMICBASE_REQUEST_TIMEOUT` in seconds (default: 30).
-
-#### Query Depth Limit
-
-Prevent deeply nested queries with `ATOMICBASE_MAX_QUERY_DEPTH` (default: 4).
-
-#### Other Security Features
-
-- Parameterized queries prevent SQL injection
-- Constant-time API key comparison prevents timing attacks
-- Request body size limits prevent memory exhaustion
-- Structured JSON logging with request IDs for audit trails
-
----
-
-## Upcoming Features
+## Planned Features
 
 ### Batch Transactions
 
-> **Status:** Planned
-
-Execute multiple operations atomically in a single request.
-
-#### API Design
-
-```bash
-POST /batch
-{
-  "atomic": true,
-  "operations": [
-    {"method": "POST", "path": "/query/users", "body": {"name": "Alice"}},
-    {"method": "POST", "path": "/query/accounts", "body": {"user_id": "$0.last_insert_id", "balance": 0}},
-    {"method": "POST", "path": "/query/audit_log", "body": {"action": "user_created"}}
-  ]
-}
-```
-
-**Response:**
+Atomic multi-operation requests with placeholder references:
 
 ```json
-{
-  "results": [
-    { "status": 201, "body": { "last_insert_id": 5 } },
-    { "status": 201, "body": { "last_insert_id": 12 } },
-    { "status": 201, "body": { "last_insert_id": 99 } }
-  ]
-}
+POST /batch
+{"atomic": true, "operations": [
+  {"method": "POST", "path": "/query/users", "body": {"data": {"name": "Alice"}}},
+  {"method": "POST", "path": "/query/accounts", "body": {"data": {"user_id": "$0.last_insert_id"}}}
+]}
 ```
 
-#### Placeholder References
+### Explicit Joins
 
-Reference results from previous operations using `$N.field` syntax:
-
-| Placeholder         | Description                             |
-| ------------------- | --------------------------------------- |
-| `$0.last_insert_id` | Last insert ID from operation 0         |
-| `$1.rows_affected`  | Rows affected by operation 1            |
-| `$2.body.id`        | Field from returned body of operation 2 |
-
-#### SDK Experience
-
-The SDK will provide a fluent transaction builder:
+Override implicit FK joins:
 
 ```typescript
-const tx = client.startTx();
+// Inner join instead of left
+await db
+  .from("users")
+  .select("id", { posts: ["title"] })
+  .innerJoin("posts");
 
-// Operations queue locally (no network calls)
-await tx.from("users").insert({ name: "Alice" });
-await tx.from("accounts").insert({
-  user_id: tx.ref(0, "last_insert_id"), // Reference previous result
-  balance: 0,
-});
-await tx.from("audit_log").insert({ action: "user_created" });
-
-// Single network request, atomic execution
-const results = await tx.commit();
-
-// Or discard without sending
-tx.rollback();
+// Custom condition
+await db
+  .from("messages")
+  .select("id", { sender: ["name"], recipient: ["name"] })
+  .leftJoin("users", eq("messages.sender_id", "users.id"), { as: "sender" })
+  .leftJoin("users", eq("messages.recipient_id", "users.id"), {
+    as: "recipient",
+  });
 ```
-
-#### Implementation Notes
-
-**Server-side execution:**
-
-```go
-func (dao *Database) ExecuteBatch(ctx context.Context, batch BatchRequest) ([]Result, error) {
-    tx, err := dao.Client.BeginTx(ctx, nil)
-    if err != nil {
-        return nil, err
-    }
-    defer tx.Rollback()
-
-    results := make([]Result, len(batch.Operations))
-
-    for i, op := range batch.Operations {
-        // Resolve $N.field placeholders from previous results
-        resolvedBody := resolvePlaceholders(op.Body, results)
-
-        // Execute operation within transaction
-        result, err := executeOperation(ctx, tx, op)
-        if err != nil {
-            return nil, fmt.Errorf("operation %d failed: %w", i, err)
-        }
-        results[i] = result
-    }
-
-    if err := tx.Commit(); err != nil {
-        return nil, err
-    }
-    return results, nil
-}
-```
-
-**Key design decisions:**
-
-- REST-style operations that mirror existing API endpoints
-- Server-side placeholder resolution (Turso's batch API doesn't support this natively)
-- Sequential execution within a transaction for placeholder support
-- Atomic: all operations succeed or all rollback
-- 10-second transaction timeout to prevent lock contention
-
-**Interface abstraction for transaction support:**
-
-```go
-// QueryExecutor allows both *sql.DB and *sql.Tx to be used interchangeably
-type QueryExecutor interface {
-    ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-    QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-```
-
----
-
-### Complex Joins
-
-> **Status:** Planned
-
-Currently, nested relations only work via foreign key inference. Planned support for:
-
-- **Explicit JOIN conditions:**
-
-  ```
-  GET /query/orders?join=users:orders.user_id=users.id&select=orders.*,users.name
-  ```
-
-- **Self-joins:**
-
-  ```
-  GET /query/employees?join=employees:manager_id=id&select=*,manager:employees(name)
-  ```
-
-- **Cross-database joins** (for Turso):
-  ```
-  GET /query/orders?join=products@catalog-db:orders.product_id=products.id
-  ```
-
----
 
 ### Views
 
-> **Status:** Planned
-
-Create and query database views for complex data transformations.
-
-**Create a view:**
-
-```bash
+```json
 POST /schema/view/active_users
-{
-  "query": "SELECT id, name, email FROM users WHERE status = 'active' AND deleted_at IS NULL",
-  "columns": ["id", "name", "email"]
-}
-```
-
-**Query a view:**
-
-```bash
-GET /query/active_users?name=like.%smith%
-```
-
-**Materialized views** (refreshed periodically):
-
-```bash
-POST /schema/view/daily_stats
-{
-  "query": "SELECT date, count(*) as orders, sum(total) as revenue FROM orders GROUP BY date",
-  "materialized": true,
-  "refreshInterval": "1h"
-}
+{"query": "SELECT * FROM users WHERE status = 'active'"}
 ```
 
 ---
 
 ## API Reference
 
-See the OpenAPI specification at `/openapi.yaml` or interactive docs at `/docs`.
+| Category  | Endpoint                                    | Methods                  |
+| --------- | ------------------------------------------- | ------------------------ |
+| Query     | `/query/{table}`                            | POST, PATCH, DELETE      |
+| Schema    | `/schema`, `/schema/table/{table}`          | GET, POST, PATCH, DELETE |
+| FTS       | `/schema/fts/{table}`                       | POST, DELETE             |
+| Database  | `/db`, `/db/{name}`                         | GET, POST, DELETE        |
+| Templates | `/templates`, `/templates/{name}`           | GET, POST, PUT, DELETE   |
+| Sync      | `/db/{name}/sync`, `/templates/{name}/sync` | POST                     |
 
-### Endpoints Summary
+**Headers:**
 
-| Category    | Endpoint                      | Methods                  |
-| ----------- | ----------------------------- | ------------------------ |
-| Health      | `/health`                     | GET                      |
-| Docs        | `/openapi.yaml`, `/docs`      | GET                      |
-| Query       | `/query/{table}`              | GET, POST, PATCH, DELETE |
-| Schema      | `/schema`                     | GET, POST                |
-| Schema      | `/schema/invalidate`          | POST                     |
-| Schema      | `/schema/table/{table}`       | GET, POST, PATCH, DELETE |
-| FTS         | `/schema/fts`                 | GET                      |
-| FTS         | `/schema/fts/{table}`         | POST, DELETE             |
-| Database    | `/db`                         | GET, POST, PATCH         |
-| Database    | `/db/all`                     | PATCH                    |
-| Database    | `/db/{name}`                  | DELETE                   |
-| Templates   | `/templates`                  | GET, POST                |
-| Templates   | `/templates/{name}`           | GET, PUT, DELETE         |
-| Templates   | `/templates/{name}/sync`      | POST                     |
-| Templates   | `/templates/{name}/databases` | GET                      |
-| DB Template | `/db/{name}/template`         | GET, PUT, DELETE         |
-| DB Template | `/db/{name}/sync`             | POST                     |
-| Batch       | `/batch`                      | POST _(planned)_         |
-
-### Headers
-
-| Header          | Description                                                           |
-| --------------- | --------------------------------------------------------------------- |
-| `Authorization` | `Bearer <api-key>` for authentication                                 |
-| `DB-Name`       | Target database name (default: primary)                               |
-| `DB-Token`      | Database auth token (for registering)                                 |
-| `Prefer`        | `count=exact` for row count, `resolution=merge-duplicates` for upsert |
-| `X-Request-ID`  | Request tracing ID (auto-generated if not provided)                   |
-
-### Response Headers
-
-| Header          | Description                                  |
-| --------------- | -------------------------------------------- |
-| `X-Total-Count` | Total row count (when `Prefer: count=exact`) |
-| `X-Request-ID`  | Request tracing ID                           |
-| `Retry-After`   | Seconds until rate limit resets (on 429)     |
+- `Authorization: Bearer <key>` - API authentication
+- `DB-Name: <name>` - Target database
+- `Prefer: count=exact` - Include total count in `X-Total-Count` header
