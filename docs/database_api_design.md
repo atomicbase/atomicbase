@@ -19,7 +19,7 @@ const users = await client
   .where(eq("status", "active"));
 
 // Multi-tenant
-const tenant = client.database("tenant-123");
+const tenant = client.tenant("tenant-123");
 await tenant.from("projects").select("*");
 ```
 
@@ -29,34 +29,40 @@ await tenant.from("projects").select("*");
 
 ### CRUD Operations
 
-All queries use `POST /query/{table}` with JSON bodies. Operation determined by body structure:
+All queries use `POST /query/{table}` with JSON bodies. Operation specified via `Prefer` header:
 
-| Operation | Method | Body                          | Returns            |
-| --------- | ------ | ----------------------------- | ------------------ |
-| SELECT    | POST   | `{select: [...]}`             | Rows               |
-| INSERT    | POST   | `{data: {...}}`               | `{last_insert_id}` |
-| UPSERT    | POST   | `{data: [...]}`               | `{rows_affected}`  |
-| UPDATE    | PATCH  | `{data: {...}, where: [...]}` | `{rows_affected}`  |
-| DELETE    | DELETE | `{where: [...]}`              | `{rows_affected}`  |
+| Operation | Header                    | Body                          | Returns            |
+| --------- | ------------------------- | ----------------------------- | ------------------ |
+| SELECT    | `Prefer: operation=select`| `{select: [...], where: ...}` | Rows               |
+| INSERT    | `Prefer: operation=insert`| `{data: {...}}`               | `{last_insert_id}` |
+| UPSERT    | `Prefer: operation=upsert`| `{data: [...]}`               | `{rows_affected}`  |
+| UPDATE    | `Prefer: operation=update`| `{data: {...}, where: [...]}` | `{rows_affected}`  |
+| DELETE    | `Prefer: operation=delete`| `{where: [...]}`              | `{rows_affected}`  |
 
 **Select:**
 
-```json
+```http
 POST /query/users
+Prefer: operation=select
+
 {"select": ["id", "name"], "where": [{"status": {"eq": "active"}}], "limit": 20}
 ```
 
 **Insert with returning:**
 
-```json
+```http
 POST /query/users
+Prefer: operation=insert
+
 {"data": {"name": "Alice"}, "returning": ["id", "created_at"]}
 ```
 
 **Update:**
 
-```json
-PATCH /query/users
+```http
+POST /query/users
+Prefer: operation=update
+
 {"data": {"status": "inactive"}, "where": [{"id": {"eq": 5}}]}
 ```
 
@@ -159,21 +165,23 @@ POST /schema/table/users
 
 ---
 
-### Multi-Database
+### Multi-Tenant
 
-Target Turso databases with `DB-Name` header:
+Target tenant databases with `Tenant` header:
 
-```
+```http
 POST /query/users
-DB-Name: tenant-123
+Tenant: tenant-123
+Prefer: operation=select
+
 {"select": ["*"]}
 ```
 
-| Endpoint     | Method | Description     |
-| ------------ | ------ | --------------- |
-| `/db`        | GET    | List databases  |
-| `/db`        | POST   | Create database |
-| `/db/{name}` | DELETE | Delete database |
+| Endpoint          | Method | Description    |
+| ----------------- | ------ | -------------- |
+| `/tenants`        | GET    | List tenants   |
+| `/tenants`        | POST   | Create tenant  |
+| `/tenants/{name}` | DELETE | Delete tenant  |
 
 ---
 
@@ -181,12 +189,12 @@ DB-Name: tenant-123
 
 Reusable schemas for multi-tenant apps:
 
-| Endpoint                      | Description                      |
-| ----------------------------- | -------------------------------- |
-| `POST /templates`             | Create template                  |
-| `PUT /db/{name}/template`     | Associate database with template |
-| `POST /db/{name}/sync`        | Sync database to template        |
-| `POST /templates/{name}/sync` | Sync all databases               |
+| Endpoint                       | Description                    |
+| ------------------------------ | ------------------------------ |
+| `POST /templates`              | Create template                |
+| `PUT /tenants/{name}/template` | Associate tenant with template |
+| `POST /tenants/{name}/sync`    | Sync tenant to template        |
+| `POST /templates/{name}/sync`  | Sync all tenants               |
 
 ---
 
@@ -264,35 +272,36 @@ await client.schema.dropTable("users");
 await client.schema.createFtsIndex("articles", ["title", "content"]);
 ```
 
-### databases - Multi-Tenant
+### tenants - Multi-Tenant
 
 ```typescript
-await client.databases.create("tenant-123");
-await client.databases.delete("tenant-123");
-const list = await client.databases.list();
+await client.tenants.create("tenant-123");
+await client.tenants.delete("tenant-123");
+const list = await client.tenants.list();
 
 // Scoped client (same structure as primary client)
-const tenant = client.database("tenant-123");
+const tenant = client.tenant("tenant-123");
 await tenant.from("projects").select("*");
 await tenant.schema.createTable("tasks", {...});
 ```
 
-**Database-per-user pattern:**
+**Tenant-per-user pattern:**
 
 ```typescript
 async function createUser(email: string) {
-  const dbName = `tenant-${crypto.randomUUID()}`;
-  await client.databases.create(dbName);
-  await client.from("users").insert({ email, database: dbName });
-  await client.templates.applyTo(dbName, "user-app");
+  const tenantId = `tenant-${crypto.randomUUID()}`;
+  await client.tenants.create(tenantId);
+  await client.from("users").insert({ email, tenant: tenantId });
+  await client.templates.applyTo(tenantId, "user-app");
 }
 
 async function getUserData(userId: number) {
-  const [user] = await client
+  const { data: user } = await client
     .from("users")
-    .select("database")
-    .where(eq("id", userId));
-  return client.database(user.database).from("projects").select("*");
+    .select("tenant")
+    .where(eq("id", userId))
+    .single();
+  return client.tenant(user.tenant).from("projects").select("*");
 }
 ```
 
@@ -309,9 +318,39 @@ await client.templates.sync("saas-app"); // Sync all databases using this templa
 ```typescript
 client.from(...)              // Query builder (top-level, most common)
 client.schema.*               // DDL operations
-client.databases.*            // Database management (create, delete, list)
-client.database(name)         // Get scoped client → same structure
+client.tenants.*              // Tenant management (create, delete, list)
+client.tenant(name)           // Get scoped client → same structure
 client.templates.*            // Template management
+```
+
+### Response Format
+
+All SDK methods return `{ data, error }`:
+
+```typescript
+const { data: users, error } = await client
+  .from("users")
+  .select("id", "name");
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+// data is typed, error is null
+users.forEach(u => console.log(u.name));
+```
+
+For single records:
+
+```typescript
+const { data: user, error } = await client
+  .from("users")
+  .select("*")
+  .where(eq("id", 1))
+  .single();
+
+// data is single object or null, not an array
 ```
 
 ---
@@ -362,17 +401,18 @@ POST /schema/view/active_users
 
 ## API Reference
 
-| Category  | Endpoint                                    | Methods                  |
-| --------- | ------------------------------------------- | ------------------------ |
-| Query     | `/query/{table}`                            | POST, PATCH, DELETE      |
-| Schema    | `/schema`, `/schema/table/{table}`          | GET, POST, PATCH, DELETE |
-| FTS       | `/schema/fts/{table}`                       | POST, DELETE             |
-| Database  | `/db`, `/db/{name}`                         | GET, POST, DELETE        |
-| Templates | `/templates`, `/templates/{name}`           | GET, POST, PUT, DELETE   |
-| Sync      | `/db/{name}/sync`, `/templates/{name}/sync` | POST                     |
+| Category  | Endpoint                                         | Methods                  |
+| --------- | ------------------------------------------------ | ------------------------ |
+| Query     | `/query/{table}`                                 | POST                     |
+| Schema    | `/schema`, `/schema/table/{table}`               | GET, POST, PATCH, DELETE |
+| FTS       | `/schema/fts/{table}`                            | POST, DELETE             |
+| Tenants   | `/tenants`, `/tenants/{name}`                    | GET, POST, DELETE        |
+| Templates | `/templates`, `/templates/{name}`                | GET, POST, PUT, DELETE   |
+| Sync      | `/tenants/{name}/sync`, `/templates/{name}/sync` | POST                     |
 
 **Headers:**
 
 - `Authorization: Bearer <key>` - API authentication
-- `DB-Name: <name>` - Target database
+- `Tenant: <name>` - Target tenant database
+- `Prefer: operation=<op>` - Operation type (select, insert, upsert, update, delete)
 - `Prefer: count=exact` - Include total count in `X-Total-Count` header
