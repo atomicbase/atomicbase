@@ -6,11 +6,18 @@ import (
 	"fmt"
 )
 
+// MaxBatchOperations is the maximum number of operations allowed in a single batch request.
+const MaxBatchOperations = 100
+
 // Batch executes multiple operations atomically within a SQL transaction.
 // Works for both primary and Turso databases via their respective connections.
 func (dao *Database) Batch(ctx context.Context, req BatchRequest) (BatchResponse, error) {
 	if len(req.Operations) == 0 {
 		return BatchResponse{Results: []any{}}, nil
+	}
+
+	if len(req.Operations) > MaxBatchOperations {
+		return BatchResponse{}, ErrBatchTooLarge
 	}
 
 	tx, err := dao.Client.BeginTx(ctx, nil)

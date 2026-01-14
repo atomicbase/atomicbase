@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -429,6 +430,12 @@ func buildAPIError(err error) (int, APIError) {
 			Code:    CodeArrayTooLarge,
 			Message: err.Error(),
 			Hint:    "Split large IN clauses into multiple smaller queries.",
+		}
+	case errors.Is(err, ErrBatchTooLarge):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeBatchTooLarge,
+			Message: err.Error(),
+			Hint:    fmt.Sprintf("Split the batch into multiple requests with at most %d operations each.", MaxBatchOperations),
 		}
 	case errors.Is(err, ErrReservedTable):
 		return http.StatusForbidden, APIError{

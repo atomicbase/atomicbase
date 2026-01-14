@@ -34,6 +34,7 @@ const (
 	CodeForeignKeyViolation = "FOREIGN_KEY_VIOLATION"
 	CodeNotNullViolation    = "NOT_NULL_VIOLATION"
 	CodeNoFTSIndex          = "NO_FTS_INDEX"
+	CodeBatchTooLarge       = "BATCH_TOO_LARGE"
 	CodeInternalError       = "INTERNAL_ERROR"
 
 	// Turso-specific error codes
@@ -77,6 +78,7 @@ var (
 	ErrTemplateNotFound    = errors.New("template not found")
 	ErrTemplateInUse   = errors.New("template is in use by one or more databases")
 	ErrInArrayTooLarge = errors.New("IN array exceeds maximum size")
+	ErrBatchTooLarge   = errors.New("batch exceeds maximum number of operations")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.
