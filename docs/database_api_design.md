@@ -29,15 +29,16 @@ await tenant.from("projects").select("*");
 
 ### CRUD Operations
 
-All queries use `POST /query/{table}` with JSON bodies. Operation specified via `Prefer` header:
+POST operations use `Prefer` header to specify behavior. PATCH/DELETE use HTTP method directly.
 
-| Operation | Header                    | Body                          | Returns            |
-| --------- | ------------------------- | ----------------------------- | ------------------ |
-| SELECT    | `Prefer: operation=select`| `{select: [...], where: ...}` | Rows               |
-| INSERT    | `Prefer: operation=insert`| `{data: {...}}`               | `{last_insert_id}` |
-| UPSERT    | `Prefer: operation=upsert`| `{data: [...]}`               | `{rows_affected}`  |
-| UPDATE    | `Prefer: operation=update`| `{data: {...}, where: [...]}` | `{rows_affected}`  |
-| DELETE    | `Prefer: operation=delete`| `{where: [...]}`              | `{rows_affected}`  |
+| Operation     | Method | Header                        | Body                   | Returns            |
+| ------------- | ------ | ----------------------------- | ---------------------- | ------------------ |
+| SELECT        | POST   | `Prefer: operation=select`    | `{select, where, ...}` | Rows               |
+| INSERT        | POST   | —                             | `{data: {...}}`        | `{last_insert_id}` |
+| UPSERT        | POST   | `Prefer: on-conflict=replace` | `{data: [...]}`        | `{rows_affected}`  |
+| INSERT IGNORE | POST   | `Prefer: on-conflict=ignore`  | `{data: {...}}`        | `{rows_affected}`  |
+| UPDATE        | PATCH  | —                             | `{data, where}`        | `{rows_affected}`  |
+| DELETE        | DELETE | —                             | `{where}`              | `{rows_affected}`  |
 
 **Select:**
 
@@ -52,7 +53,6 @@ Prefer: operation=select
 
 ```http
 POST /query/users
-Prefer: operation=insert
 
 {"data": {"name": "Alice"}, "returning": ["id", "created_at"]}
 ```
@@ -60,8 +60,7 @@ Prefer: operation=insert
 **Update:**
 
 ```http
-POST /query/users
-Prefer: operation=update
+PATCH /query/users
 
 {"data": {"status": "inactive"}, "where": [{"id": {"eq": 5}}]}
 ```
@@ -124,11 +123,20 @@ Returns nested JSON:
 
 ---
 
-### Aggregations
+### Counting
 
-```json
-{ "select": ["status", { "count": "*" }, { "sum": "total", "as": "revenue" }] }
+Use `Prefer: count=exact` header to get total count:
+
+```http
+POST /query/users
+Prefer: operation=select, count=exact
+
+{"select": ["id", "name"], "where": [{"status": {"eq": "active"}}], "limit": 20}
 ```
+
+Response includes `X-Total-Count` header with total matching rows (ignoring limit/offset).
+
+For complex aggregations (sum, avg, group by), create views via migrations.
 
 ---
 
@@ -162,6 +170,8 @@ POST /query/articles
 POST /schema/table/users
 {"columns": {"id": {"type": "integer", "primaryKey": true}, "email": {"type": "text", "unique": true}}}
 ```
+
+**Views:** Views created via migrations or direct SQL are queryable through `/query/{view_name}`. No API for creating views - use migrations instead.
 
 ---
 
@@ -240,10 +250,18 @@ const users = await client
 
 // Insert
 await client.from("users").insert({ name: "Alice" });
-const [user] = await client
+const { data } = await client
   .from("users")
   .insert({ name: "Alice" })
   .returning("id");
+
+// Upsert (insert or replace on conflict)
+await client.from("users").upsert({ id: 1, name: "Alice" });
+// Or explicitly:
+await client.from("users").insert({ id: 1, name: "Alice" }).onConflict("replace");
+
+// Insert ignore (skip on conflict)
+await client.from("users").insert({ id: 1, name: "Alice" }).onConflict("ignore");
 
 // Update/Delete
 await client.from("users").update({ status: "inactive" }).where(eq("id", 5));
@@ -317,6 +335,8 @@ await client.templates.sync("saas-app"); // Sync all databases using this templa
 
 ```typescript
 client.from(...)              // Query builder (top-level, most common)
+client.batch([...])           // Atomic batch operations
+client.transaction()          // Start multi-request transaction
 client.schema.*               // DDL operations
 client.tenants.*              // Tenant management (create, delete, list)
 client.tenant(name)           // Get scoped client → same structure
@@ -353,21 +373,98 @@ const { data: user, error } = await client
 // data is single object or null, not an array
 ```
 
+### Transactions
+
+**Batch** - independent operations, single round trip:
+
+```typescript
+const { data, error } = await client.batch([
+  client.from("users").insert({ name: "Alice" }),
+  client.from("users").insert({ name: "Bob" }),
+  client.from("logs").insert({ action: "bulk_insert" }),
+]);
+
+// data.results = [{ last_insert_id: 1 }, { last_insert_id: 2 }, ...]
+```
+
+**Multi-request** - dependent operations with client logic:
+
+```typescript
+const tx = await client.transaction();
+
+const { data: user } = await tx.from("users").insert({ name: "Alice" });
+
+// Use result to build next query
+const { data: account } = await tx
+  .from("accounts")
+  .insert({ user_id: user.last_insert_id, balance: 0 });
+
+await tx.commit();
+// Or: await tx.rollback();
+```
+
+---
+
+## Transactions (REST API)
+
+### Batch (Single Request)
+
+Atomic multi-operation requests. All succeed or all rollback. For independent operations.
+
+```http
+POST /batch
+
+{
+  "operations": [
+    {"operation": "insert", "table": "users", "body": {"data": {"name": "Alice"}}},
+    {"operation": "insert", "table": "users", "body": {"data": {"name": "Bob"}}},
+    {"operation": "insert", "table": "logs", "body": {"data": {"action": "bulk_insert"}}}
+  ]
+}
+```
+
+Response:
+```json
+{
+  "results": [
+    {"last_insert_id": 1},
+    {"last_insert_id": 2},
+    {"last_insert_id": 3}
+  ]
+}
+```
+
+Operations: `select`, `insert`, `upsert`, `update`, `delete`
+
+### Multi-Request Transactions
+
+For dependent operations requiring client-side logic between queries.
+
+```http
+POST /transaction
+→ {"id": "tx_abc123", "expires_at": "2024-01-15T10:01:00Z"}
+
+POST /query/users
+Transaction: tx_abc123
+{"data": {"name": "Alice"}}
+→ {"last_insert_id": 42}
+
+POST /query/accounts
+Transaction: tx_abc123
+{"data": {"user_id": 42, "balance": 0}}
+→ {"last_insert_id": 1}
+
+POST /transaction/tx_abc123/commit
+→ {"status": "committed"}
+```
+
+Rollback: `POST /transaction/{id}/rollback`
+
+Transactions auto-rollback on timeout (default: 30s).
+
 ---
 
 ## Planned Features
-
-### Batch Transactions
-
-Atomic multi-operation requests with placeholder references:
-
-```json
-POST /batch
-{"atomic": true, "operations": [
-  {"method": "POST", "path": "/query/users", "body": {"data": {"name": "Alice"}}},
-  {"method": "POST", "path": "/query/accounts", "body": {"data": {"user_id": "$0.last_insert_id"}}}
-]}
-```
 
 ### Explicit Joins
 
@@ -390,29 +487,27 @@ await client
   });
 ```
 
-### Views
-
-```json
-POST /schema/view/active_users
-{"query": "SELECT * FROM users WHERE status = 'active'"}
-```
-
 ---
 
 ## API Reference
 
-| Category  | Endpoint                                         | Methods                  |
-| --------- | ------------------------------------------------ | ------------------------ |
-| Query     | `/query/{table}`                                 | POST                     |
-| Schema    | `/schema`, `/schema/table/{table}`               | GET, POST, PATCH, DELETE |
-| FTS       | `/schema/fts/{table}`                            | POST, DELETE             |
-| Tenants   | `/tenants`, `/tenants/{name}`                    | GET, POST, DELETE        |
-| Templates | `/templates`, `/templates/{name}`                | GET, POST, PUT, DELETE   |
-| Sync      | `/tenants/{name}/sync`, `/templates/{name}/sync` | POST                     |
+| Category     | Endpoint                                         | Methods                  |
+| ------------ | ------------------------------------------------ | ------------------------ |
+| Query        | `/query/{table}`                                 | POST, PATCH, DELETE      |
+| Batch        | `/batch`                                         | POST                     |
+| Transactions | `/transaction`, `/transaction/{id}/commit`, `/transaction/{id}/rollback` | POST |
+| Schema       | `/schema`, `/schema/table/{table}`               | GET, POST, PATCH, DELETE |
+| FTS          | `/schema/fts/{table}`                            | POST, DELETE             |
+| Tenants      | `/tenants`, `/tenants/{name}`                    | GET, POST, DELETE        |
+| Templates    | `/templates`, `/templates/{name}`                | GET, POST, PUT, DELETE   |
+| Sync         | `/tenants/{name}/sync`, `/templates/{name}/sync` | POST                     |
 
 **Headers:**
 
 - `Authorization: Bearer <key>` - API authentication
 - `Tenant: <name>` - Target tenant database
-- `Prefer: operation=<op>` - Operation type (select, insert, upsert, update, delete)
+- `Transaction: <id>` - Execute within transaction
+- `Prefer: operation=select` - Specify SELECT query (POST only)
+- `Prefer: on-conflict=replace` - UPSERT behavior
+- `Prefer: on-conflict=ignore` - INSERT IGNORE behavior
 - `Prefer: count=exact` - Include total count in `X-Total-Count` header

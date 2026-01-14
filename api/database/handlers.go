@@ -35,15 +35,13 @@ func RegisterRoutes(app *http.ServeMux) {
 	app.HandleFunc("GET /openapi.yaml", handleOpenAPISpec())
 	app.HandleFunc("GET /docs", handleSwaggerUI())
 
-	// Row operations
-	app.HandleFunc("GET /query/{table}", handleSelectRows())
-	app.HandleFunc("POST /query/{table}", handleInsertRows())
-	app.HandleFunc("PATCH /query/{table}", handleUpdateRows())
-	app.HandleFunc("DELETE /query/{table}", handleDeleteRows())
+	// Row operations (JSON body API)
+	app.HandleFunc("POST /query/{table}", handleQueryRows())
+	app.HandleFunc("PATCH /query/{table}", handleUpdateRowsJSON())
+	app.HandleFunc("DELETE /query/{table}", handleDeleteRowsJSON())
 
 	// Schema operations
 	app.HandleFunc("GET /schema", handleGetSchema())
-	app.HandleFunc("POST /schema", handleEditSchema())
 	app.HandleFunc("POST /schema/invalidate", handleInvalidateSchema())
 
 	// Table schema operations
@@ -80,64 +78,83 @@ func RegisterRoutes(app *http.ServeMux) {
 	app.HandleFunc("POST /db/{name}/sync", handleSyncDBToTemplate())
 }
 
-func handleSelectRows() http.HandlerFunc {
+// handleQueryRows handles POST /query/{table} for SELECT, INSERT, and UPSERT operations.
+// Operation determined by Prefer header:
+//   - Prefer: operation=select -> SELECT query
+//   - Prefer: on-conflict=replace -> UPSERT
+//   - Prefer: on-conflict=ignore -> INSERT IGNORE
+//   - (no header) -> INSERT
+func handleQueryRows() http.HandlerFunc {
 	return withDBResponse(func(ctx context.Context, dao *Database, req *http.Request, w http.ResponseWriter) ([]byte, error) {
-		params := req.URL.Query()
-
-		// Check for count preferences
 		prefer := req.Header.Get("Prefer")
-		includeCount := strings.Contains(prefer, "count=exact")
-		countOnly := params.Get(ParamCount) == "only"
+		table := req.PathValue("table")
 
-		// If count is requested, use SelectWithCount
-		if includeCount || countOnly {
-			result, err := dao.SelectWithCount(ctx, req.PathValue("table"), params, includeCount, countOnly)
+		// SELECT operation
+		if strings.Contains(prefer, PreferOperationSelect) {
+			var query SelectQuery
+			if err := json.NewDecoder(req.Body).Decode(&query); err != nil {
+				return nil, err
+			}
+
+			includeCount := strings.Contains(prefer, PreferCountExact)
+			result, err := dao.SelectJSON(ctx, table, query, includeCount)
 			if err != nil {
 				return nil, err
 			}
 
-			// Set count header
-			if includeCount || countOnly {
+			if includeCount {
 				w.Header().Set("X-Total-Count", strconv.FormatInt(result.Count, 10))
-			}
-
-			// If count only, return just the count as JSON
-			if countOnly {
-				return json.Marshal(map[string]int64{"count": result.Count})
 			}
 
 			return result.Data, nil
 		}
 
-		return dao.Select(ctx, req.PathValue("table"), params)
-	})
-}
-
-func handleInsertRows() http.HandlerFunc {
-	return withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
-		if req.Header.Get("Prefer") == "resolution=merge-duplicates" {
-			return dao.Upsert(ctx, req.PathValue("table"), req.URL.Query(), req.Body)
+		// UPSERT operation
+		if strings.Contains(prefer, PreferOnConflictReplace) {
+			var upsertReq UpsertRequest
+			if err := json.NewDecoder(req.Body).Decode(&upsertReq); err != nil {
+				return nil, err
+			}
+			return dao.UpsertJSON(ctx, table, upsertReq)
 		}
 
-		return dao.Insert(ctx, req.PathValue("table"), req.URL.Query(), req.Body)
+		// INSERT IGNORE operation
+		if strings.Contains(prefer, PreferOnConflictIgnore) {
+			var ignoreReq InsertRequest
+			if err := json.NewDecoder(req.Body).Decode(&ignoreReq); err != nil {
+				return nil, err
+			}
+			return dao.InsertIgnoreJSON(ctx, table, ignoreReq)
+		}
+
+		// Default: INSERT operation
+		var insertReq InsertRequest
+		if err := json.NewDecoder(req.Body).Decode(&insertReq); err != nil {
+			return nil, err
+		}
+		return dao.InsertJSON(ctx, table, insertReq)
 	})
 }
 
-func handleUpdateRows() http.HandlerFunc {
+// handleUpdateRowsJSON handles PATCH /query/{table} for UPDATE operations.
+func handleUpdateRowsJSON() http.HandlerFunc {
 	return withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
-		return dao.Update(ctx, req.PathValue("table"), req.URL.Query(), req.Body)
+		var updateReq UpdateRequest
+		if err := json.NewDecoder(req.Body).Decode(&updateReq); err != nil {
+			return nil, err
+		}
+		return dao.UpdateJSON(ctx, req.PathValue("table"), updateReq)
 	})
 }
 
-func handleDeleteRows() http.HandlerFunc {
+// handleDeleteRowsJSON handles DELETE /query/{table} for DELETE operations.
+func handleDeleteRowsJSON() http.HandlerFunc {
 	return withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
-		return dao.Delete(ctx, req.PathValue("table"), req.URL.Query())
-	})
-}
-
-func handleEditSchema() http.HandlerFunc {
-	return withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
-		return dao.EditSchema(ctx, req.Body)
+		var deleteReq DeleteRequest
+		if err := json.NewDecoder(req.Body).Decode(&deleteReq); err != nil {
+			return nil, err
+		}
+		return dao.DeleteJSON(ctx, req.PathValue("table"), deleteReq)
 	})
 }
 

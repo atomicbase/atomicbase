@@ -43,7 +43,7 @@ func (dao *Database) updateSchema() error {
 		return err
 	}
 
-	dao.Schema = SchemaCache{cols, fks, ftsTables}
+	dao.Schema = SchemaCache{Tables: cols, Fks: fks, FTSTables: ftsTables}
 
 	return nil
 }
@@ -63,7 +63,7 @@ func (dao *Database) InvalidateSchema(ctx context.Context) error {
 		return err
 	}
 
-	dao.Schema = SchemaCache{cols, fks, ftsTables}
+	dao.Schema = SchemaCache{Tables: cols, Fks: fks, FTSTables: ftsTables}
 
 	// Update the cached schema if this is the primary database
 	if dao.id == 1 {
@@ -103,13 +103,17 @@ func (dao *Database) GetTableSchema(table string) ([]byte, error) {
 
 	var fks []fKey
 
-	for _, key := range dao.Schema.Fks {
-		if key.Table == table {
-			fks = append(fks, fKey{key.From, fmt.Sprintf("%s.%s", key.References, key.To)})
-		}
+	for _, key := range dao.Schema.Fks[table] {
+		fks = append(fks, fKey{key.From, fmt.Sprintf("%s.%s", key.References, key.To)})
 	}
 
-	err = json.NewEncoder(&buf).Encode(tableSchema{tbl.Columns, tbl.Pk, fks})
+	// Convert column map to slice for JSON output
+	cols := make([]Col, 0, len(tbl.Columns))
+	for _, col := range tbl.Columns {
+		cols = append(cols, col)
+	}
+
+	err = json.NewEncoder(&buf).Encode(tableSchema{cols, tbl.Pk, fks})
 
 	return buf.Bytes(), err
 }
@@ -349,32 +353,6 @@ func (dao *Database) DropTable(ctx context.Context, table string) ([]byte, error
 	}
 
 	return []byte(fmt.Sprintf(`{"message":"table %s dropped"}`, table)), dao.InvalidateSchema(ctx)
-}
-
-func (dao *Database) EditSchema(ctx context.Context, body io.ReadCloser) ([]byte, error) {
-	type reqBody struct {
-		Query string `json:"query"`
-		Args  []any  `json:"args"`
-	}
-
-	var bod reqBody
-
-	err := json.NewDecoder(body).Decode(&bod)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate that the query is a DDL statement (schema modification only)
-	if err := ValidateDDLQuery(bod.Query); err != nil {
-		return nil, err
-	}
-
-	_, err = dao.Client.ExecContext(ctx, bod.Query, bod.Args...)
-	if err != nil {
-		return nil, err
-	}
-
-	return []byte(`{"message":"schema edited"}`), dao.InvalidateSchema(ctx)
 }
 
 // mapColType validates and normalizes a column type string.

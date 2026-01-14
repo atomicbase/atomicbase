@@ -143,16 +143,16 @@ func (dao *Database) ListFTSIndexes() ([]byte, error) {
 
 	var indexes []ftsInfo
 
-	for _, table := range dao.Schema.FTSTables {
+	for table := range dao.Schema.FTSTables {
 		ftsTable := table + FTSSuffix
 
 		// Get columns from FTS table
 		var columns []string
 		ftsTableInfo, err := dao.Schema.SearchTbls(ftsTable)
 		if err == nil {
-			for _, col := range ftsTableInfo.Columns {
+			for colName, col := range ftsTableInfo.Columns {
 				// Skip internal FTS columns
-				if !strings.HasPrefix(col.Name, ftsTable) {
+				if !strings.HasPrefix(colName, ftsTable) {
 					columns = append(columns, col.Name)
 				}
 			}

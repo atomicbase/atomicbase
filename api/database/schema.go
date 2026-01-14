@@ -9,16 +9,14 @@ import (
 	"github.com/joe-ervin05/atomicbase/config"
 )
 
-func schemaFks(db *sql.DB) ([]Fk, error) {
-
-	var fks []Fk
+func schemaFks(db *sql.DB) (map[string][]Fk, error) {
+	fks := make(map[string][]Fk)
 
 	rows, err := db.Query(`
 		SELECT m.name as "table", p."table" as "references", p."from", p."to"
 		FROM sqlite_master m
 		JOIN pragma_foreign_key_list(m.name) p ON m.name != p."table"
-		WHERE m.type = 'table'
-		ORDER BY "table" ASC, "references" ASC, "from" ASC;
+		WHERE m.type = 'table';
 	`)
 	if err != nil {
 		return nil, err
@@ -33,21 +31,20 @@ func schemaFks(db *sql.DB) ([]Fk, error) {
 			return nil, err
 		}
 
-		fks = append(fks, Fk{table.String, references.String, from.String, to.String})
-
+		fk := Fk{table.String, references.String, from.String, to.String}
+		fks[table.String] = append(fks[table.String], fk)
 	}
 
-	return fks, err
+	return fks, rows.Err()
 }
 
 // schemaFTS discovers FTS5 virtual tables and returns the base table names (without _fts suffix).
-func schemaFTS(db *sql.DB) ([]string, error) {
-	var ftsTables []string
+func schemaFTS(db *sql.DB) (map[string]bool, error) {
+	ftsTables := make(map[string]bool)
 
 	rows, err := db.Query(`
 		SELECT name FROM sqlite_master
-		WHERE type = 'table' AND sql LIKE '%fts5%'
-		ORDER BY name ASC;
+		WHERE type = 'table' AND sql LIKE '%fts5%';
 	`)
 	if err != nil {
 		return nil, err
@@ -61,16 +58,15 @@ func schemaFTS(db *sql.DB) ([]string, error) {
 		}
 		// Remove _fts suffix to get base table name
 		if len(name) > len(FTSSuffix) && name[len(name)-len(FTSSuffix):] == FTSSuffix {
-			ftsTables = append(ftsTables, name[:len(name)-len(FTSSuffix)])
+			ftsTables[name[:len(name)-len(FTSSuffix)]] = true
 		}
 	}
 
 	return ftsTables, rows.Err()
 }
 
-func schemaCols(db *sql.DB) ([]Table, error) {
-
-	var tbls []Table
+func schemaCols(db *sql.DB) (map[string]Table, error) {
+	tbls := make(map[string]Table)
 
 	// First, fetch foreign keys and build a lookup map
 	fks, err := schemaFks(db)
@@ -79,31 +75,29 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 	}
 	// Map: "table.column" -> "refTable.refColumn"
 	fkMap := make(map[string]string)
-	for _, fk := range fks {
-		key := fk.Table + "." + fk.From
-		fkMap[key] = fk.References + "." + fk.To
+	for _, fkList := range fks {
+		for _, fk := range fkList {
+			key := fk.Table + "." + fk.From
+			fkMap[key] = fk.References + "." + fk.To
+		}
 	}
 
 	rows, err := db.Query(`
 		SELECT m.name, l.name as col, l.type as colType, l.pk, l."notnull", l.dflt_value
 		FROM sqlite_master m
 		JOIN pragma_table_info(m.name) l
-		WHERE m.type = 'table'
-		ORDER BY m.name ASC, col ASC;
+		WHERE m.type IN ('table', 'view');
 	`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var currTbl Table
-	firstRow := true
-
 	for rows.Next() {
 		var col sql.NullString
 		var colType sql.NullString
 		var name sql.NullString
-		var pk sql.NullBool
+		var pk sql.NullInt64 // SQLite pk is 0 for non-PK, 1+ for PK position in composite keys
 		var notNull sql.NullBool
 		var dfltValue sql.NullString
 
@@ -112,14 +106,9 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 			return nil, err
 		}
 
-		if currTbl.Name != name.String {
-			if firstRow {
-				currTbl.Name = name.String
-				firstRow = false
-			} else {
-				tbls = append(tbls, currTbl)
-				currTbl = Table{Name: name.String}
-			}
+		tbl, exists := tbls[name.String]
+		if !exists {
+			tbl = Table{Name: name.String, Columns: make(map[string]Col)}
 		}
 
 		newCol := Col{
@@ -138,17 +127,19 @@ func schemaCols(db *sql.DB) ([]Table, error) {
 			newCol.References = ref
 		}
 
-		currTbl.Columns = append(currTbl.Columns, newCol)
+		tbl.Columns[col.String] = newCol
 
-		if pk.Bool {
-			currTbl.Pk = col.String
+		// pk > 0 means this column is part of the primary key
+		// For composite keys, pk indicates position (1, 2, etc.)
+		// We only track the first column as the "primary key" for simplicity
+		if pk.Int64 == 1 {
+			tbl.Pk = col.String
 		}
+
+		tbls[name.String] = tbl
 	}
 
-	tbls = append(tbls, currTbl)
-
 	return tbls, rows.Err()
-
 }
 
 // parseDefaultValue converts SQLite's default value string to appropriate Go type
@@ -172,7 +163,7 @@ func (dao *Database) saveSchema() error {
 	if dao.id == 1 {
 		client = dao.Client
 	} else {
-		client, err = sql.Open("libsql", "file:"+config.Cfg.PrimaryDBPath)
+		client, err = sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
 		if err != nil {
 			return fmt.Errorf("failed to open primary database for schema save: %w", err)
 		}
@@ -208,85 +199,42 @@ func loadSchema(data []byte) (SchemaCache, error) {
 
 }
 
-// SearchFks performs binary search for a foreign key by table and references.
-// Returns the index in schema.Fks or -1 if not found.
-func (schema SchemaCache) SearchFks(table string, references string) int {
-	left, right := 0, len(schema.Fks)-1
-
-	for left <= right {
-		mid := (left + right) / 2
-		midValue := schema.Fks[mid]
-
-		if midValue.Table == table && midValue.References == references {
-			return mid
-		} else if midValue.Table < table {
-			left = mid + 1
-		} else if midValue.Table == table && midValue.References < references {
-			left = mid + 1
-		} else {
-			right = mid - 1
+// SearchFks searches for a foreign key from table to references.
+// Returns the Fk and true if found, or empty Fk and false if not found.
+func (schema SchemaCache) SearchFks(table string, references string) (Fk, bool) {
+	fks, exists := schema.Fks[table]
+	if !exists {
+		return Fk{}, false
+	}
+	for _, fk := range fks {
+		if fk.References == references {
+			return fk, true
 		}
 	}
-
-	return -1
+	return Fk{}, false
 }
 
-// SearchTbls performs binary search for a table by name.
+// SearchTbls searches for a table by name.
 // Returns the Table or ErrTableNotFound if not found.
 func (schema SchemaCache) SearchTbls(table string) (Table, error) {
-	left, right := 0, len(schema.Tables)-1
-
-	for left <= right {
-		mid := (left + right) / 2
-		midValue := schema.Tables[mid].Name
-		if midValue == table {
-			return schema.Tables[mid], nil
-		} else if midValue < table {
-			left = mid + 1
-		} else {
-			right = mid - 1
-		}
+	tbl, exists := schema.Tables[table]
+	if !exists {
+		return Table{}, TableNotFoundErr(table)
 	}
-
-	return Table{}, TableNotFoundErr(table)
+	return tbl, nil
 }
 
-// SearchCols performs binary search for a column by name.
+// SearchCols searches a column by name.
 // Returns the Col or ErrColumnNotFound if not found.
 func (tbl Table) SearchCols(col string) (Col, error) {
-
-	left, right := 0, len(tbl.Columns)-1
-
-	for left <= right {
-		mid := (left + right) / 2
-		midValue := tbl.Columns[mid].Name
-		if midValue == col {
-			return tbl.Columns[mid], nil
-		} else if midValue < col {
-			left = mid + 1
-		} else {
-			right = mid - 1
-		}
+	c, exists := tbl.Columns[col]
+	if !exists {
+		return Col{}, ColumnNotFoundErr(tbl.Name, col)
 	}
-
-	return Col{}, ColumnNotFoundErr(tbl.Name, col)
+	return c, nil
 }
 
-// HasFTSIndex checks if a table has an FTS5 index using binary search.
+// HasFTSIndex checks if a table has an FTS5 index.
 func (schema SchemaCache) HasFTSIndex(table string) bool {
-	left, right := 0, len(schema.FTSTables)-1
-
-	for left <= right {
-		mid := (left + right) / 2
-		midValue := schema.FTSTables[mid]
-		if midValue == table {
-			return true
-		} else if midValue < table {
-			left = mid + 1
-		} else {
-			right = mid - 1
-		}
-	}
-
-	return false
+	return schema.FTSTables[table]
 }

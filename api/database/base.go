@@ -31,9 +31,9 @@ type Database struct {
 
 // SchemaCache holds cached table and foreign key information for query validation.
 type SchemaCache struct {
-	Tables    []Table  // Sorted by table name
-	Fks       []Fk     // Sorted by table, then references
-	FTSTables []string // Sorted list of tables that have FTS5 indexes (table names without _fts suffix)
+	Tables    map[string]Table // Keyed by table name
+	Fks       map[string][]Fk  // Keyed by table name -> list of FKs from that table
+	FTSTables map[string]bool  // Set of tables that have FTS5 indexes
 }
 
 // Fk represents a foreign key relationship between tables.
@@ -46,9 +46,9 @@ type Fk struct {
 
 // Table represents a database table's schema.
 type Table struct {
-	Name    string `json:"name"`    // Table name
-	Pk      string `json:"pk"`      // Primary key column name (empty if rowid)
-	Columns []Col  `json:"columns"` // Sorted by column name
+	Name    string         `json:"name"`    // Table name
+	Pk      string         `json:"pk"`      // Primary key column name (empty if rowid)
+	Columns map[string]Col `json:"columns"` // Keyed by column name
 }
 
 // Col represents a column definition.
@@ -88,7 +88,7 @@ func initPrimaryDB() error {
 		return err
 	}
 
-	db, err := sql.Open("libsql", "file:"+config.Cfg.PrimaryDBPath)
+	db, err := sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func initPrimaryDB() error {
 		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 		updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_ab_templates_name ON %s(name);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_templates_name ON %s(name);
 	`, ReservedTableTemplates, ReservedTableTemplates))
 	if err != nil {
 		db.Close()
@@ -128,7 +128,7 @@ func initPrimaryDB() error {
 		schema BLOB,
 		template_id INTEGER REFERENCES %s(id)
 	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_ab_databases_name ON %s(name);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_databases_name ON %s(name);
 	INSERT INTO %s (id, schema) values(1, ?) ON CONFLICT (id) DO NOTHING;
 	`, ReservedTableDatabases, ReservedTableTemplates, ReservedTableDatabases, ReservedTableDatabases), buf.Bytes())
 	if err != nil {

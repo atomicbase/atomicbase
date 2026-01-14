@@ -19,15 +19,6 @@ const (
 	ParamCount  = "count"
 )
 
-// Aggregate function names.
-const (
-	AggCount = "count"
-	AggSum   = "sum"
-	AggAvg   = "avg"
-	AggMin   = "min"
-	AggMax   = "max"
-)
-
 // Filter operators for WHERE clause conditions.
 const (
 	OpEq      = "eq"
@@ -86,9 +77,12 @@ const (
 	OrderDesc = "desc"
 )
 
+// InternalTablePrefix is the prefix for internal atomicbase tables.
+// Tables with this prefix are excluded from user queries and schema sync operations.
+const InternalTablePrefix = "atomicbase_"
+
 // ReservedTableDatabases is the internal table name that cannot be queried by users.
-// Uses _ab_ prefix to avoid collision with user tables and be filtered from schema views.
-const ReservedTableDatabases = "_ab_databases"
+const ReservedTableDatabases = "atomicbase_databases"
 
 // ReservedTableTemplates stores schema templates for multi-tenant database management.
-const ReservedTableTemplates = "_ab_schema_templates"
+const ReservedTableTemplates = "atomicbase_schema_templates"

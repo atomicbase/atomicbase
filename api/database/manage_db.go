@@ -129,7 +129,7 @@ func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
 			}
 
 			var buf bytes.Buffer
-			schema := SchemaCache{tbls, fks, ftsTables}
+			schema := SchemaCache{Tables: tbls, Fks: fks, FTSTables: ftsTables}
 			enc := gob.NewEncoder(&buf)
 
 			err = enc.Encode(schema)
@@ -240,7 +240,7 @@ func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToke
 	}
 
 	var buf bytes.Buffer
-	schema := SchemaCache{tbls, fks, ftsTables}
+	schema := SchemaCache{Tables: tbls, Fks: fks, FTSTables: ftsTables}
 	enc := gob.NewEncoder(&buf)
 
 	err = enc.Encode(schema)

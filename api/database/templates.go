@@ -364,13 +364,14 @@ func syncSchemaToDatabase(ctx context.Context, db *Database, templateTables []Ta
 		return nil, fmt.Errorf("failed to get current schema: %w", err)
 	}
 
+	// Filter out internal tables
 	currentMap := make(map[string]Table)
-	for _, t := range currentTables {
+	for name, t := range currentTables {
 		// Skip internal tables
-		if len(t.Name) > 0 && t.Name[0] == '_' {
+		if len(name) >= len(InternalTablePrefix) && name[:len(InternalTablePrefix)] == InternalTablePrefix {
 			continue
 		}
-		currentMap[t.Name] = t
+		currentMap[name] = t
 	}
 
 	// Drop extra tables if requested
@@ -466,15 +467,9 @@ func buildCreateTableQuery(name string, table Table) string {
 func syncTableColumns(ctx context.Context, db *Database, tableName string, current Table, template Table) ([]string, error) {
 	var changes []string
 
-	// Build map of current columns
-	currentCols := make(map[string]Col)
-	for _, c := range current.Columns {
-		currentCols[c.Name] = c
-	}
-
-	// Add missing columns
-	for _, templateCol := range template.Columns {
-		if _, exists := currentCols[templateCol.Name]; !exists {
+	// Add missing columns (current.Columns and template.Columns are already maps)
+	for colName, templateCol := range template.Columns {
+		if _, exists := current.Columns[colName]; !exists {
 			query := fmt.Sprintf("ALTER TABLE [%s] ADD COLUMN [%s] %s ", tableName, templateCol.Name, templateCol.Type)
 
 			if templateCol.NotNull {
