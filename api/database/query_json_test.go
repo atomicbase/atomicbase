@@ -237,6 +237,22 @@ func TestBuildWhereFromJSON(t *testing.T) {
 			wantErr:     true,
 			errContains: "must be an array",
 		},
+		{
+			name:        "in empty array",
+			table:       tableUsers,
+			where:       []map[string]any{{"id": map[string]any{"in": []any{}}}},
+			schema:      schemaWithoutFTS,
+			wantErr:     true,
+			errContains: "cannot be empty",
+		},
+		{
+			name:        "not in empty array",
+			table:       tableUsers,
+			where:       []map[string]any{{"id": map[string]any{"not": map[string]any{"in": []any{}}}}},
+			schema:      schemaWithoutFTS,
+			wantErr:     true,
+			errContains: "cannot be empty",
+		},
 	}
 
 	for _, tt := range tests {
@@ -451,6 +467,32 @@ func TestQueryJSONErrorTypes(t *testing.T) {
 		_, _, err := tableUsers.BuildWhereFromJSON(where, schemaWithoutFTS)
 		if !errors.Is(err, ErrNoFTSIndex) {
 			t.Errorf("expected ErrNoFTSIndex, got %v", err)
+		}
+	})
+
+	t.Run("ErrInArrayTooLarge", func(t *testing.T) {
+		// Create array larger than MaxInArraySize
+		largeArray := make([]any, MaxInArraySize+1)
+		for i := range largeArray {
+			largeArray[i] = i
+		}
+		where := []map[string]any{{"id": map[string]any{"in": largeArray}}}
+		_, _, err := tableUsers.BuildWhereFromJSON(where, schemaWithoutFTS)
+		if !errors.Is(err, ErrInArrayTooLarge) {
+			t.Errorf("expected ErrInArrayTooLarge, got %v", err)
+		}
+	})
+
+	t.Run("ErrInArrayTooLarge_NotIn", func(t *testing.T) {
+		// Create array larger than MaxInArraySize for NOT IN
+		largeArray := make([]any, MaxInArraySize+1)
+		for i := range largeArray {
+			largeArray[i] = i
+		}
+		where := []map[string]any{{"id": map[string]any{"not": map[string]any{"in": largeArray}}}}
+		_, _, err := tableUsers.BuildWhereFromJSON(where, schemaWithoutFTS)
+		if !errors.Is(err, ErrInArrayTooLarge) {
+			t.Errorf("expected ErrInArrayTooLarge, got %v", err)
 		}
 	})
 }

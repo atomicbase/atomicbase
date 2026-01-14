@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/joe-ervin05/atomicbase/config"
@@ -137,9 +138,13 @@ func initPrimaryDB() error {
 	}
 
 	// Migration: Add template_id column if it doesn't exist (for existing databases)
-	// SQLite doesn't have IF NOT EXISTS for ALTER TABLE, so we just try and ignore the error
-	_, _ = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN template_id INTEGER REFERENCES %s(id)`,
+	// SQLite doesn't have IF NOT EXISTS for ALTER TABLE, so we check for the expected error
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN template_id INTEGER REFERENCES %s(id)`,
 		ReservedTableDatabases, ReservedTableTemplates))
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		db.Close()
+		return fmt.Errorf("migration failed: %w", err)
+	}
 
 	primaryDB = db
 
@@ -191,7 +196,7 @@ func updatePrimarySchema(schema SchemaCache) {
 
 // ConnTurso opens a connection to an external Turso database by name.
 func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
-	org := os.Getenv("TURSO_ORGANIZATION")
+	org := config.Cfg.TursoOrganization
 
 	if org == "" {
 		return Database{}, errors.New("TURSO_ORGANIZATION environment variable is not set but is required to access external databases")

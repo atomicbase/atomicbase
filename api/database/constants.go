@@ -77,6 +77,12 @@ const (
 	OrderDesc = "desc"
 )
 
+// Query limits.
+const (
+	MaxInArraySize    = 100 // Max elements in IN/NOT IN arrays
+	MaxSelectColumns  = 50  // Max columns in SELECT (SQLite json_object limit: 100 args / 2)
+)
+
 // InternalTablePrefix is the prefix for internal atomicbase tables.
 // Tables with this prefix are excluded from user queries and schema sync operations.
 const InternalTablePrefix = "atomicbase_"

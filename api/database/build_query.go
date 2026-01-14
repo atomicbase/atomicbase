@@ -36,7 +36,9 @@ type column struct {
 }
 
 // findForeignKey searches for a foreign key relationship between two tables.
+// Returns an empty Fk if no relationship exists. Callers must check for empty Fk.
 func (schema SchemaCache) findForeignKey(table, references string) Fk {
+	// Error intentionally ignored - returns empty Fk when not found, which callers check
 	fk, _ := schema.SearchFks(table, references)
 	return fk
 }
@@ -55,6 +57,40 @@ func relationDepth(rel *Relation) int {
 	return 1 + maxChild
 }
 
+// buildJSONAggregation builds a json_object expression from key-value pairs.
+// If pairs exceed MaxSelectColumns, chunks them and wraps with json_patch.
+// Each pair is a string like "'colname', [colname]" (the key and value for json_object).
+// Returns the complete expression: either "json_object(...)" or "json_patch(json_object(...), ...)".
+func buildJSONAggregation(pairs []string) string {
+	if len(pairs) == 0 {
+		return "json_object()"
+	}
+
+	// If within limit, use simple json_object
+	if len(pairs) <= MaxSelectColumns {
+		return "json_object(" + strings.Join(pairs, ", ") + ")"
+	}
+
+	// Chunk into groups of MaxSelectColumns and use json_patch to merge
+	var chunks []string
+	for i := 0; i < len(pairs); i += MaxSelectColumns {
+		end := i + MaxSelectColumns
+		if end > len(pairs) {
+			end = len(pairs)
+		}
+		chunk := "json_object(" + strings.Join(pairs[i:end], ", ") + ")"
+		chunks = append(chunks, chunk)
+	}
+
+	// Nest json_patch calls: json_patch(json_patch(a, b), c)
+	result := chunks[0]
+	for i := 1; i < len(chunks); i++ {
+		result = fmt.Sprintf("json_patch(%s, %s)", result, chunks[i])
+	}
+
+	return result
+}
+
 // buildSelect constructs a SELECT query with JSON aggregation for the root relation.
 func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 	// Check query depth limit
@@ -62,7 +98,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 		return "", "", fmt.Errorf("%w: depth %d exceeds limit %d", ErrQueryTooDeep, depth, config.Cfg.MaxQueryDepth)
 	}
 
-	agg := ""
+	var aggPairs []string
 	sel := ""
 	joins := ""
 
@@ -82,7 +118,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 				if strings.EqualFold(c.Type, ColTypeBlob) {
 					continue
 				}
-				agg += fmt.Sprintf("'%s', [%s], ", c.Name, c.Name)
+				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", c.Name, c.Name))
 			}
 			continue
 		}
@@ -102,9 +138,9 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			if err != nil {
 				return "", "", err
 			}
-			agg += fmt.Sprintf("'%s', [%s], ", sanitized, col.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", sanitized, col.name))
 		} else {
-			agg += fmt.Sprintf("'%s', [%s], ", col.name, col.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", col.name, col.name))
 		}
 	}
 
@@ -114,9 +150,9 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			if err != nil {
 				return "", "", err
 			}
-			agg += fmt.Sprintf("'%s', json([%s]), ", sanitized, joinTbl.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', json([%s])", sanitized, joinTbl.name))
 		} else {
-			agg += fmt.Sprintf("'%s', json([%s]), ", joinTbl.name, joinTbl.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', json([%s])", joinTbl.name, joinTbl.name))
 		}
 		query, aggs, err := schema.buildSelCurr(*joinTbl, rel.name)
 		if err != nil {
@@ -128,7 +164,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			return "", "", NoRelationshipErr(rel.name, joinTbl.name)
 		}
 
-		sel += fmt.Sprintf("json_group_array(json_object(%s)) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, fk.Table, fk.From, joinTbl.name)
+		sel += fmt.Sprintf("json_group_array(%s) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, fk.Table, fk.From, joinTbl.name)
 
 		if joinTbl.inner {
 			joins += "INNER "
@@ -165,14 +201,14 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 		}
 	}
 
-	return query, agg[:len(agg)-2], nil
+	return query, buildJSONAggregation(aggPairs), nil
 }
 
 // buildSelCurr constructs a SELECT query for a nested/joined relation.
 func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, string, error) {
 	var sel string
 	var joins string
-	var agg string
+	var aggPairs []string
 	includesFk := false
 	var fk Fk
 
@@ -200,7 +236,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 				if strings.EqualFold(c.Type, ColTypeBlob) {
 					continue
 				}
-				agg += fmt.Sprintf("'%s', [%s].[%s], ", c.Name, rel.name, c.Name)
+				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", c.Name, rel.name, c.Name))
 			}
 			continue
 		}
@@ -220,9 +256,9 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 			if err != nil {
 				return "", "", err
 			}
-			agg += fmt.Sprintf("'%s', [%s].[%s], ", sanitized, rel.name, col.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", sanitized, rel.name, col.name))
 		} else {
-			agg += fmt.Sprintf("'%s', [%s].[%s], ", col.name, rel.name, col.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", col.name, rel.name, col.name))
 		}
 	}
 
@@ -236,9 +272,9 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 			if err != nil {
 				return "", "", err
 			}
-			agg += fmt.Sprintf("'%s', json([%s]), ", sanitized, joinTbl.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', json([%s])", sanitized, joinTbl.name))
 		} else {
-			agg += fmt.Sprintf("'%s', json([%s]), ", joinTbl.name, joinTbl.name)
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', json([%s])", joinTbl.name, joinTbl.name))
 		}
 		query, aggs, err := schema.buildSelCurr(*joinTbl, rel.name)
 		if err != nil {
@@ -250,7 +286,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 			return "", "", NoRelationshipErr(rel.name, joinTbl.name)
 		}
 
-		sel += fmt.Sprintf("json_group_array(json_object(%s)) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, nestedFk.Table, nestedFk.From, joinTbl.name)
+		sel += fmt.Sprintf("json_group_array(%s) FILTER (WHERE [%s].[%s] IS NOT NULL) AS [%s], ", aggs, nestedFk.Table, nestedFk.From, joinTbl.name)
 
 		if joinTbl.inner {
 			joins += "INNER "
@@ -263,7 +299,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 
 	query := "SELECT " + sel[:len(sel)-2] + fmt.Sprintf(" FROM [%s] ", rel.name) + joins
 
-	return query, agg[:len(agg)-2], nil
+	return query, buildJSONAggregation(aggPairs), nil
 }
 
 // parseSelect parses a select parameter string into a Relation tree.

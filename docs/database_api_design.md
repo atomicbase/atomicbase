@@ -230,6 +230,98 @@ Reusable schemas for multi-tenant apps:
 | `ATOMICBASE_CORS_ORIGINS`       | Allowed origins (`*` or comma-separated) |
 | `ATOMICBASE_REQUEST_TIMEOUT`    | Timeout in seconds (default: 30)         |
 | `ATOMICBASE_MAX_QUERY_DEPTH`    | Max nested relation depth (default: 4)   |
+| `TURSO_ORGANIZATION`            | Turso organization name (multi-tenant)   |
+| `TURSO_API_KEY`                 | Turso API key (multi-tenant)             |
+| `TURSO_TOKEN_EXPIRATION`        | Token expiration: `7d`, `30d`, `never`   |
+
+---
+
+## Error Handling
+
+All errors return a consistent JSON structure with a stable `code` for programmatic handling, a human-readable `message`, and an optional `hint` with actionable guidance.
+
+### Error Response Format
+
+```json
+{
+  "code": "TABLE_NOT_FOUND",
+  "message": "table not found in schema: users",
+  "hint": "Verify the table name is spelled correctly. Use GET /schema to list available tables."
+}
+```
+
+### Error Codes
+
+**Resource Errors (404)**
+
+| Code                | Description                                    |
+| ------------------- | ---------------------------------------------- |
+| `TABLE_NOT_FOUND`   | Table doesn't exist in schema                  |
+| `COLUMN_NOT_FOUND`  | Column doesn't exist in table                  |
+| `DATABASE_NOT_FOUND`| Tenant database not found                      |
+| `TEMPLATE_NOT_FOUND`| Schema template not found                      |
+| `NO_RELATIONSHIP`   | No foreign key between tables for auto-join   |
+
+**Validation Errors (400)**
+
+| Code                    | Description                                |
+| ----------------------- | ------------------------------------------ |
+| `INVALID_OPERATOR`      | Unknown filter operator in where clause    |
+| `INVALID_COLUMN_TYPE`   | Invalid type in schema definition          |
+| `INVALID_IDENTIFIER`    | Table/column name contains invalid chars   |
+| `MISSING_WHERE_CLAUSE`  | DELETE/UPDATE requires where clause        |
+| `QUERY_TOO_DEEP`        | Nested relations exceed max depth          |
+| `ARRAY_TOO_LARGE`       | IN clause exceeds 100 elements             |
+| `NOT_DDL_QUERY`         | Only CREATE/ALTER/DROP allowed for schema  |
+| `NO_FTS_INDEX`          | Full-text search requires FTS index        |
+
+**Constraint Errors**
+
+| Code                    | Status | Description                          |
+| ----------------------- | ------ | ------------------------------------ |
+| `UNIQUE_VIOLATION`      | 409    | Record with unique value exists      |
+| `FOREIGN_KEY_VIOLATION` | 400    | Referenced record doesn't exist      |
+| `NOT_NULL_VIOLATION`    | 400    | Required field is missing            |
+| `TEMPLATE_IN_USE`       | 409    | Template has associated databases    |
+| `RESERVED_TABLE`        | 403    | Cannot query internal tables         |
+
+**Turso Errors**
+
+| Code                    | Status | Description                          |
+| ----------------------- | ------ | ------------------------------------ |
+| `TURSO_CONFIG_MISSING`  | 503    | Missing TURSO_ORGANIZATION or API_KEY|
+| `TURSO_AUTH_FAILED`     | 401    | Invalid or expired API key/token     |
+| `TURSO_FORBIDDEN`       | 403    | API key lacks permission             |
+| `TURSO_NOT_FOUND`       | 404    | Database/org not found in Turso      |
+| `TURSO_RATE_LIMITED`    | 429    | Too many Turso API requests          |
+| `TURSO_CONNECTION_ERROR`| 502    | Cannot reach Turso database          |
+| `TURSO_TOKEN_EXPIRED`   | 401    | Database token has expired           |
+| `TURSO_SERVER_ERROR`    | 502    | Turso service temporarily unavailable|
+
+**Other**
+
+| Code             | Status | Description                              |
+| ---------------- | ------ | ---------------------------------------- |
+| `INTERNAL_ERROR` | 500    | Unexpected server error (check logs)     |
+
+### SDK Error Handling
+
+```typescript
+const { data, error } = await client.from("users").select("*");
+
+if (error) {
+  switch (error.code) {
+    case "TABLE_NOT_FOUND":
+      console.log("Table doesn't exist:", error.hint);
+      break;
+    case "TURSO_TOKEN_EXPIRED":
+      await client.tenants.reregister(tenantId);
+      break;
+    default:
+      console.error(error.message);
+  }
+}
+```
 
 ---
 

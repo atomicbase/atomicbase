@@ -23,6 +23,11 @@ type Config struct {
 	MaxQueryDepth    int      // Maximum nesting depth for queries (default 5)
 	MaxQueryLimit    int      // Maximum rows per query (default 1000, 0 = unlimited)
 	DefaultLimit     int      // Default limit when not specified (default 100, 0 = unlimited)
+
+	// Turso configuration (for multi-tenant external databases)
+	TursoOrganization   string // Turso organization name
+	TursoAPIKey         string // Turso API key for management operations
+	TursoTokenExpiration string // Token expiration (e.g., "7d", "30d", "never")
 }
 
 // Cfg is the global configuration instance, loaded at startup.
@@ -94,6 +99,11 @@ func Load() Config {
 		MaxQueryDepth:    maxQueryDepth,
 		MaxQueryLimit:    maxQueryLimit,
 		DefaultLimit:     defaultLimit,
+
+		// Turso configuration
+		TursoOrganization:    os.Getenv("TURSO_ORGANIZATION"),
+		TursoAPIKey:          os.Getenv("TURSO_API_KEY"),
+		TursoTokenExpiration: getEnv("TURSO_TOKEN_EXPIRATION", "7d"),
 	}
 }
 

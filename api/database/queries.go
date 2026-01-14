@@ -90,12 +90,10 @@ func (dao *Database) SelectJSON(ctx context.Context, relation string, query Sele
 		baseQuery += fmt.Sprintf("OFFSET %d ", offset)
 	}
 
-	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(json_object(%s)) AS data FROM (%s)", agg, baseQuery), args...)
-	if row.Err() != nil {
-		return SelectResult{}, row.Err()
+	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(%s) AS data FROM (%s)", agg, baseQuery), args...)
+	if err := row.Scan(&result.Data); err != nil {
+		return SelectResult{}, err
 	}
-
-	row.Scan(&result.Data)
 
 	return result, nil
 }
@@ -150,7 +148,10 @@ func (dao *Database) InsertJSON(ctx context.Context, relation string, req Insert
 		return nil, err
 	}
 
-	lastInsertId, _ := result.LastInsertId()
+	lastInsertId, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get last insert id: %w", err)
+	}
 	return json.Marshal(map[string]any{"last_insert_id": lastInsertId})
 }
 
@@ -204,7 +205,10 @@ func (dao *Database) InsertIgnoreJSON(ctx context.Context, relation string, req 
 		return nil, err
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }
 
@@ -284,7 +288,10 @@ func (dao *Database) UpsertJSON(ctx context.Context, relation string, req Upsert
 		return nil, err
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }
 
@@ -342,7 +349,10 @@ func (dao *Database) UpdateJSON(ctx context.Context, relation string, req Update
 		return nil, err
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }
 
@@ -378,6 +388,9 @@ func (dao *Database) DeleteJSON(ctx context.Context, relation string, req Delete
 		return nil, err
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
 }

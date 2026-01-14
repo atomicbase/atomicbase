@@ -10,7 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+
+	"github.com/joe-ervin05/atomicbase/config"
 )
 
 // readAPIError reads the error message from a Turso API error response.
@@ -36,11 +37,11 @@ func (dao PrimaryDao) RegisterAllDbs(ctx context.Context) error {
 		Databases []dbInfo `json:"databases"`
 	}
 
-	org := os.Getenv("TURSO_ORGANIZATION")
+	org := config.Cfg.TursoOrganization
 	if org == "" {
 		return errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
 	}
-	token := os.Getenv("TURSO_API_KEY")
+	token := config.Cfg.TursoAPIKey
 	if token == "" {
 		return errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
 	}
@@ -174,11 +175,11 @@ func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToke
 		}
 	}
 
-	org := os.Getenv("TURSO_ORGANIZATION")
+	org := config.Cfg.TursoOrganization
 	if org == "" {
 		return nil, errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
 	}
-	token := os.Getenv("TURSO_API_KEY")
+	token := config.Cfg.TursoAPIKey
 	if token == "" {
 		return nil, errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
 	}
@@ -193,19 +194,14 @@ func (dao PrimaryDao) RegisterDB(ctx context.Context, body io.ReadCloser, dbToke
 
 	res, err := client.Do(request)
 
-	fmt.Println("Made request to turso")
 	if err != nil {
-		fmt.Println("Fail at request: ", err)
 		return nil, err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		fmt.Println("Fail at status code: ", res.StatusCode)
 		return nil, readAPIError(res)
 	}
-
-	fmt.Println("Received response from turso")
 
 	var dbResp dbResponse
 	if err := json.NewDecoder(res.Body).Decode(&dbResp); err != nil {
@@ -292,11 +288,11 @@ func (dao PrimaryDao) CreateDB(ctx context.Context, body io.ReadCloser) ([]byte,
 		return nil, err
 	}
 
-	org := os.Getenv("TURSO_ORGANIZATION")
+	org := config.Cfg.TursoOrganization
 	if org == "" {
 		return nil, errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
 	}
-	token := os.Getenv("TURSO_API_KEY")
+	token := config.Cfg.TursoAPIKey
 	if token == "" {
 		return nil, errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
 	}
@@ -350,11 +346,11 @@ func (dao PrimaryDao) DeleteDB(ctx context.Context, name string) ([]byte, error)
 		return nil, err
 	}
 
-	org := os.Getenv("TURSO_ORGANIZATION")
+	org := config.Cfg.TursoOrganization
 	if org == "" {
 		return nil, errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
 	}
-	token := os.Getenv("TURSO_API_KEY")
+	token := config.Cfg.TursoAPIKey
 	if token == "" {
 		return nil, errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
 	}
@@ -384,23 +380,22 @@ func (dao PrimaryDao) DeleteDB(ctx context.Context, name string) ([]byte, error)
 // createDBToken creates a new auth token for a Turso database.
 // If TURSO_TOKEN_EXPIRATION is set (e.g., "7d", "30d", "never"), it will be used.
 func createDBToken(ctx context.Context, dbName string) (string, error) {
-	fmt.Println("Creating db token")
 	type jwtBody struct {
 		Jwt string `json:"jwt"`
 	}
 
-	org := os.Getenv("TURSO_ORGANIZATION")
+	org := config.Cfg.TursoOrganization
 	if org == "" {
 		return "", errors.New("TURSO_ORGANIZATION is not set but is required for managing turso databases")
 	}
-	token := os.Getenv("TURSO_API_KEY")
+	token := config.Cfg.TursoAPIKey
 	if token == "" {
 		return "", errors.New("TURSO_API_KEY is not set but is required for managing turso databases")
 	}
 
 	// Build URL with optional expiration parameter
 	url := fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s/auth/tokens", org, dbName)
-	if expiration := os.Getenv("TURSO_TOKEN_EXPIRATION"); expiration != "" {
+	if expiration := config.Cfg.TursoTokenExpiration; expiration != "" {
 		url += "?expiration=" + expiration
 	}
 
@@ -410,16 +405,13 @@ func createDBToken(ctx context.Context, dbName string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	fmt.Println("Making request to turso")
 	res, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Fail at request: ", err)
 		return "", err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		fmt.Println("Fail at status code: ", res.StatusCode)
 		return "", readAPIError(res)
 	}
 

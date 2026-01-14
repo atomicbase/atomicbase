@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -391,6 +392,33 @@ func TestBuildSelect(t *testing.T) {
 		_, _, err := schemaPostsUsers.buildSelect(rel)
 		if !errors.Is(err, ErrQueryTooDeep) {
 			t.Errorf("expected ErrQueryTooDeep, got %v", err)
+		}
+	})
+
+	t.Run("many columns uses json_patch", func(t *testing.T) {
+		// Create a table with more columns than MaxSelectColumns
+		cols := make(map[string]Col)
+		for i := 0; i < MaxSelectColumns+10; i++ {
+			name := fmt.Sprintf("col%d", i)
+			cols[name] = Col{Name: name, Type: ColTypeText}
+		}
+		cols["id"] = Col{Name: "id", Type: ColTypeInteger}
+
+		schemaMany := SchemaCache{
+			Tables: map[string]Table{
+				"wide": {Name: "wide", Pk: "id", Columns: cols},
+			},
+		}
+
+		// SELECT * should expand to all columns and use json_patch
+		rel := Relation{name: "wide", columns: []column{{"*", ""}}}
+		_, agg, err := schemaMany.buildSelect(rel)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Should use json_patch to combine multiple json_object chunks
+		if !strings.Contains(agg, "json_patch") {
+			t.Errorf("expected json_patch for many columns, got: %s", agg)
 		}
 	})
 }

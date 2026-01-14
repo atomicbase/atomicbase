@@ -142,6 +142,12 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 			if !ok {
 				return "", nil, fmt.Errorf("in value must be an array")
 			}
+			if len(arr) == 0 {
+				return "", nil, fmt.Errorf("in array cannot be empty")
+			}
+			if len(arr) > MaxInArraySize {
+				return "", nil, fmt.Errorf("%w: %d elements (max %d)", ErrInArrayTooLarge, len(arr), MaxInArraySize)
+			}
 			placeholders := make([]string, len(arr))
 			for i := range arr {
 				placeholders[i] = "?"
@@ -179,6 +185,12 @@ func (table Table) buildNotFilterClause(column string, filter map[string]any, sc
 			arr, ok := val.([]any)
 			if !ok {
 				return "", nil, fmt.Errorf("in value must be an array")
+			}
+			if len(arr) == 0 {
+				return "", nil, fmt.Errorf("in array cannot be empty")
+			}
+			if len(arr) > MaxInArraySize {
+				return "", nil, fmt.Errorf("%w: %d elements (max %d)", ErrInArrayTooLarge, len(arr), MaxInArraySize)
 			}
 			placeholders := make([]string, len(arr))
 			for i := range arr {
