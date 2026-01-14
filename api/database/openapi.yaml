@@ -62,6 +62,8 @@ tags:
     description: Health check endpoints
   - name: Query
     description: CRUD operations on table rows
+  - name: Batch
+    description: Atomic batch operations
   - name: Schema
     description: Schema management operations
   - name: Tenants
@@ -239,6 +241,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RowsAffectedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /batch:
+    post:
+      tags: [Batch]
+      summary: Execute batch operations
+      description: |
+        Execute multiple operations atomically in a single request. All operations succeed or all rollback.
+
+        **Example:**
+        ```json
+        {
+          "operations": [
+            {"operation": "insert", "table": "users", "body": {"data": {"name": "Alice"}}},
+            {"operation": "insert", "table": "users", "body": {"data": {"name": "Bob"}}},
+            {"operation": "update", "table": "counters", "body": {"data": {"count": 2}, "where": [{"id": {"eq": 1}}]}}
+          ]
+        }
+        ```
+
+        **Supported operations:**
+        - `select` - body: `{select, where, order, limit, offset}`
+        - `insert` - body: `{data: {...}}`
+        - `upsert` - body: `{data: [...]}`
+        - `update` - body: `{data: {...}, where: [...]}`
+        - `delete` - body: `{where: [...]}`
+      operationId: batch
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+            example:
+              operations:
+                - operation: insert
+                  table: users
+                  body:
+                    data:
+                      name: Alice
+                - operation: insert
+                  table: users
+                  body:
+                    data:
+                      name: Bob
+                - operation: select
+                  table: users
+                  body:
+                    select: ["id", "name"]
+      responses:
+        '200':
+          description: All operations succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+              example:
+                results:
+                  - last_insert_id: 1
+                  - last_insert_id: 2
+                  - - id: 1
+                      name: Alice
+                    - id: 2
+                      name: Bob
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1072,6 +1149,40 @@ components:
           items:
             type: object
           description: Filter conditions (required)
+
+    BatchRequest:
+      type: object
+      required: [operations]
+      properties:
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchOperation'
+          description: List of operations to execute atomically
+
+    BatchOperation:
+      type: object
+      required: [operation, table, body]
+      properties:
+        operation:
+          type: string
+          enum: [select, insert, upsert, update, delete]
+          description: Operation type
+        table:
+          type: string
+          description: Target table name
+        body:
+          type: object
+          description: Operation-specific body (same format as individual endpoints)
+
+    BatchResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: {}
+          description: Results for each operation in order (arrays for select, objects for insert/update/delete)
 
     Table:
       type: object

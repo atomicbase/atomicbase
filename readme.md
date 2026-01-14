@@ -114,6 +114,24 @@ Prefer: operation=select
 {"select": ["*"], "where": [{"title": {"fts": "sqlite database"}}]}
 ```
 
+### Batch Operations
+
+Execute multiple operations atomically in a single request:
+
+```http
+POST /batch
+
+{
+  "operations": [
+    {"operation": "insert", "table": "users", "body": {"data": {"name": "Alice"}}},
+    {"operation": "insert", "table": "users", "body": {"data": {"name": "Bob"}}},
+    {"operation": "update", "table": "counters", "body": {"data": {"count": 2}, "where": [{"id": {"eq": 1}}]}}
+  ]
+}
+```
+
+All operations succeed or all rollback. Supported operations: `select`, `insert`, `upsert`, `update`, `delete`.
+
 For complete API documentation, see [docs/database_api_design.md](./docs/database_api_design.md).
 
 ## Features
@@ -123,6 +141,7 @@ For complete API documentation, see [docs/database_api_design.md](./docs/databas
 - JSON query syntax (filtering, ordering, pagination)
 - Nested relation queries with automatic joins
 - Full-text search (FTS5)
+- Batch operations (atomic transactions)
 - Schema management (create, alter, drop tables)
 - Multi-database support (local SQLite + Turso)
 
@@ -234,6 +253,7 @@ All errors return a consistent JSON structure with a stable `code` for programma
 | Category  | Endpoint                                         | Methods                  |
 | --------- | ------------------------------------------------ | ------------------------ |
 | Query     | `/query/{table}`                                 | POST, PATCH, DELETE      |
+| Batch     | `/batch`                                         | POST                     |
 | Schema    | `/schema`                                        | GET                      |
 | Schema    | `/schema/table/{table}`                          | GET, POST, PATCH, DELETE |
 | FTS       | `/schema/fts`, `/schema/fts/{table}`             | GET, POST, DELETE        |

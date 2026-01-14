@@ -18,6 +18,10 @@ type SelectResult struct {
 // SelectJSON queries rows using JSON body format.
 // POST /query/{table} with Prefer: operation=select
 func (dao *Database) SelectJSON(ctx context.Context, relation string, query SelectQuery, includeCount bool) (SelectResult, error) {
+	return dao.selectJSON(ctx, dao.Client, relation, query, includeCount)
+}
+
+func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation string, query SelectQuery, includeCount bool) (SelectResult, error) {
 	if err := ValidateTableName(relation); err != nil {
 		return SelectResult{}, err
 	}
@@ -54,7 +58,7 @@ func (dao *Database) SelectJSON(ctx context.Context, relation string, query Sele
 	// Get count if requested
 	if includeCount {
 		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM (%s)", baseQuery)
-		row := dao.Client.QueryRowContext(ctx, countQuery, args...)
+		row := exec.QueryRowContext(ctx, countQuery, args...)
 		if err := row.Scan(&result.Count); err != nil {
 			return SelectResult{}, err
 		}
@@ -90,7 +94,7 @@ func (dao *Database) SelectJSON(ctx context.Context, relation string, query Sele
 		baseQuery += fmt.Sprintf("OFFSET %d ", offset)
 	}
 
-	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(%s) AS data FROM (%s)", agg, baseQuery), args...)
+	row := exec.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(%s) AS data FROM (%s)", agg, baseQuery), args...)
 	if err := row.Scan(&result.Data); err != nil {
 		return SelectResult{}, err
 	}
@@ -101,6 +105,10 @@ func (dao *Database) SelectJSON(ctx context.Context, relation string, query Sele
 // InsertJSON inserts a single row using JSON body format.
 // POST /query/{table} (no Prefer header)
 func (dao *Database) InsertJSON(ctx context.Context, relation string, req InsertRequest) ([]byte, error) {
+	return dao.insertJSON(ctx, dao.Client, relation, req)
+}
+
+func (dao *Database) insertJSON(ctx context.Context, exec Executor, relation string, req InsertRequest) ([]byte, error) {
 	if err := ValidateTableName(relation); err != nil {
 		return nil, err
 	}
@@ -140,10 +148,10 @@ func (dao *Database) InsertJSON(ctx context.Context, relation string, req Insert
 			return nil, err
 		}
 		query += retQuery
-		return dao.QueryJSON(ctx, query, args...)
+		return dao.queryJSONWithExec(ctx, exec, query, args...)
 	}
 
-	result, err := dao.Client.ExecContext(ctx, query, args...)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +166,10 @@ func (dao *Database) InsertJSON(ctx context.Context, relation string, req Insert
 // InsertIgnoreJSON inserts a single row, ignoring conflicts.
 // POST /query/{table} with Prefer: on-conflict=ignore
 func (dao *Database) InsertIgnoreJSON(ctx context.Context, relation string, req InsertRequest) ([]byte, error) {
+	return dao.insertIgnoreJSON(ctx, dao.Client, relation, req)
+}
+
+func (dao *Database) insertIgnoreJSON(ctx context.Context, exec Executor, relation string, req InsertRequest) ([]byte, error) {
 	if err := ValidateTableName(relation); err != nil {
 		return nil, err
 	}
@@ -197,10 +209,10 @@ func (dao *Database) InsertIgnoreJSON(ctx context.Context, relation string, req 
 			return nil, err
 		}
 		query += retQuery
-		return dao.QueryJSON(ctx, query, args...)
+		return dao.queryJSONWithExec(ctx, exec, query, args...)
 	}
 
-	result, err := dao.Client.ExecContext(ctx, query, args...)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +227,10 @@ func (dao *Database) InsertIgnoreJSON(ctx context.Context, relation string, req 
 // UpsertJSON inserts multiple rows, updating on conflict.
 // POST /query/{table} with Prefer: on-conflict=replace
 func (dao *Database) UpsertJSON(ctx context.Context, relation string, req UpsertRequest) ([]byte, error) {
+	return dao.upsertJSON(ctx, dao.Client, relation, req)
+}
+
+func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation string, req UpsertRequest) ([]byte, error) {
 	if err := ValidateTableName(relation); err != nil {
 		return nil, err
 	}
@@ -280,10 +296,10 @@ func (dao *Database) UpsertJSON(ctx context.Context, relation string, req Upsert
 			return nil, err
 		}
 		query += retQuery
-		return dao.QueryJSON(ctx, query, args...)
+		return dao.queryJSONWithExec(ctx, exec, query, args...)
 	}
 
-	result, err := dao.Client.ExecContext(ctx, query, args...)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -298,6 +314,10 @@ func (dao *Database) UpsertJSON(ctx context.Context, relation string, req Upsert
 // UpdateJSON modifies rows using JSON body format.
 // PATCH /query/{table}
 func (dao *Database) UpdateJSON(ctx context.Context, relation string, req UpdateRequest) ([]byte, error) {
+	return dao.updateJSON(ctx, dao.Client, relation, req)
+}
+
+func (dao *Database) updateJSON(ctx context.Context, exec Executor, relation string, req UpdateRequest) ([]byte, error) {
 	if err := ValidateTableName(relation); err != nil {
 		return nil, err
 	}
@@ -344,7 +364,7 @@ func (dao *Database) UpdateJSON(ctx context.Context, relation string, req Update
 	query += where
 	args = append(args, whereArgs...)
 
-	result, err := dao.Client.ExecContext(ctx, query, args...)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +379,10 @@ func (dao *Database) UpdateJSON(ctx context.Context, relation string, req Update
 // DeleteJSON removes rows using JSON body format.
 // DELETE /query/{table}
 func (dao *Database) DeleteJSON(ctx context.Context, relation string, req DeleteRequest) ([]byte, error) {
+	return dao.deleteJSON(ctx, dao.Client, relation, req)
+}
+
+func (dao *Database) deleteJSON(ctx context.Context, exec Executor, relation string, req DeleteRequest) ([]byte, error) {
 	if err := ValidateTableName(relation); err != nil {
 		return nil, err
 	}
@@ -383,7 +407,7 @@ func (dao *Database) DeleteJSON(ctx context.Context, relation string, req Delete
 	}
 	query += where
 
-	result, err := dao.Client.ExecContext(ctx, query, args...)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -393,4 +417,44 @@ func (dao *Database) DeleteJSON(ctx context.Context, relation string, req Delete
 		return nil, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	return json.Marshal(map[string]any{"rows_affected": rowsAffected})
+}
+
+// queryJSONWithExec executes a query and returns JSON results using the provided executor.
+func (dao *Database) queryJSONWithExec(ctx context.Context, exec Executor, query string, args ...any) ([]byte, error) {
+	rows, err := exec.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]any
+
+	for rows.Next() {
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, err
+		}
+
+		row := make(map[string]any)
+		for i, col := range columns {
+			row[col] = values[i]
+		}
+		results = append(results, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(results)
 }

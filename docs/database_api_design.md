@@ -440,7 +440,7 @@ await client.templates.sync("saas-app"); // Sync all databases using this templa
 ```typescript
 client.from(...)              // Query builder (top-level, most common)
 client.batch([...])           // Atomic batch operations
-client.transaction()          // Start multi-request transaction
+client.transaction()          // Start multi-request transaction (planned)
 client.schema.*               // DDL operations
 client.tenants.*              // Tenant management (create, delete, list)
 client.tenant(name)           // Get scoped client → same structure
@@ -477,9 +477,9 @@ const { data: user, error } = await client
 // data is single object or null, not an array
 ```
 
-### Transactions
+### Batch Operations
 
-**Batch** - independent operations, single round trip:
+Execute multiple operations atomically in a single request:
 
 ```typescript
 const { data, error } = await client.batch([
@@ -491,7 +491,9 @@ const { data, error } = await client.batch([
 // data.results = [{ last_insert_id: 1 }, { last_insert_id: 2 }, ...]
 ```
 
-**Multi-request** - dependent operations with client logic:
+### Multi-Request Transactions (Planned)
+
+For dependent operations with client logic between queries:
 
 ```typescript
 const tx = await client.transaction();
@@ -509,13 +511,9 @@ await tx.commit();
 
 ---
 
-## Transactions (REST API) - Planned
+## Batch Operations
 
-> **Note:** Batch and multi-request transactions are planned features, not yet implemented.
-
-### Batch (Single Request)
-
-Atomic multi-operation requests. All succeed or all rollback. For independent operations.
+Execute multiple operations atomically in a single request. All operations succeed or all rollback.
 
 ```http
 POST /batch
@@ -524,7 +522,7 @@ POST /batch
   "operations": [
     {"operation": "insert", "table": "users", "body": {"data": {"name": "Alice"}}},
     {"operation": "insert", "table": "users", "body": {"data": {"name": "Bob"}}},
-    {"operation": "insert", "table": "logs", "body": {"data": {"action": "bulk_insert"}}}
+    {"operation": "update", "table": "counters", "body": {"data": {"count": 2}, "where": [{"id": {"eq": 1}}]}}
   ]
 }
 ```
@@ -535,14 +533,51 @@ Response:
   "results": [
     {"last_insert_id": 1},
     {"last_insert_id": 2},
-    {"last_insert_id": 3}
+    {"rows_affected": 1}
   ]
 }
 ```
 
-Operations: `select`, `insert`, `upsert`, `update`, `delete`
+**Operations:**
 
-### Multi-Request Transactions
+| Operation | Body Format | Result |
+| --------- | ----------- | ------ |
+| `select`  | `{select, where, order, limit, offset}` | Array of rows |
+| `insert`  | `{data: {...}}` | `{last_insert_id}` |
+| `upsert`  | `{data: [...]}` | `{rows_affected}` |
+| `update`  | `{data: {...}, where: [...]}` | `{rows_affected}` |
+| `delete`  | `{where: [...]}` | `{rows_affected}` |
+
+**Example with select:**
+
+```http
+POST /batch
+
+{
+  "operations": [
+    {"operation": "insert", "table": "users", "body": {"data": {"name": "Alice"}}},
+    {"operation": "select", "table": "users", "body": {"select": ["id", "name"], "where": [{"name": {"eq": "Alice"}}]}}
+  ]
+}
+```
+
+Response:
+```json
+{
+  "results": [
+    {"last_insert_id": 1},
+    [{"id": 1, "name": "Alice"}]
+  ]
+}
+```
+
+**Multi-tenant:** Use `Tenant` header to execute batch on a tenant database.
+
+---
+
+## Multi-Request Transactions (Planned)
+
+> **Note:** Multi-request transactions are a planned feature, not yet implemented.
 
 For dependent operations requiring client-side logic between queries.
 
@@ -600,6 +635,7 @@ await client
 | Category     | Endpoint                                                                   | Methods                  |
 | ------------ | -------------------------------------------------------------------------- | ------------------------ |
 | Query        | `/query/{table}`                                                           | POST, PATCH, DELETE      |
+| Batch        | `/batch`                                                                   | POST                     |
 | Schema       | `/schema`, `/schema/invalidate`                                            | GET, POST                |
 | Schema       | `/schema/table/{table}`                                                    | GET, POST, PATCH, DELETE |
 | FTS          | `/schema/fts`, `/schema/fts/{table}`                                       | GET, POST, DELETE        |
@@ -614,7 +650,6 @@ await client
 
 | Category     | Endpoint                                                                   | Methods |
 | ------------ | -------------------------------------------------------------------------- | ------- |
-| Batch        | `/batch`                                                                   | POST    |
 | Transactions | `/transaction`, `/transaction/{id}/commit`, `/transaction/{id}/rollback`   | POST    |
 
 **Headers:**

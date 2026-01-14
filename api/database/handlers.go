@@ -41,6 +41,9 @@ func RegisterRoutes(app *http.ServeMux) {
 	app.HandleFunc("PATCH /query/{table}", handleUpdateRowsJSON())
 	app.HandleFunc("DELETE /query/{table}", handleDeleteRowsJSON())
 
+	// Batch operations
+	app.HandleFunc("POST /batch", handleBatch())
+
 	// Schema operations
 	app.HandleFunc("GET /schema", handleGetSchema())
 	app.HandleFunc("POST /schema/invalidate", handleInvalidateSchema())
@@ -77,6 +80,21 @@ func RegisterRoutes(app *http.ServeMux) {
 	app.HandleFunc("PUT /tenants/{name}/template", handleSetDBTemplate())
 	app.HandleFunc("DELETE /tenants/{name}/template", handleRemoveDBTemplate())
 	app.HandleFunc("POST /tenants/{name}/sync", handleSyncDBToTemplate())
+}
+
+// handleBatch handles POST /batch for atomic multi-operation requests.
+func handleBatch() http.HandlerFunc {
+	return withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
+		var batchReq BatchRequest
+		if err := json.NewDecoder(req.Body).Decode(&batchReq); err != nil {
+			return nil, err
+		}
+		result, err := dao.Batch(ctx, batchReq)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	})
 }
 
 // handleQueryRows handles POST /query/{table} for SELECT, INSERT, and UPSERT operations.

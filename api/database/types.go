@@ -1,5 +1,18 @@
 package database
 
+import (
+	"context"
+	"database/sql"
+)
+
+// Executor is an interface that both *sql.DB and *sql.Tx implement.
+// This allows query methods to work with either a direct connection or a transaction.
+type Executor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // SelectQuery represents a JSON SELECT query request body.
 // Used with POST /query/{table} and Prefer: operation=select header.
 type SelectQuery struct {
