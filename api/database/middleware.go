@@ -135,7 +135,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 		// Handle preflight requests
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, DB-Name, DB-Token, Prefer")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Tenant, DB-Token, Prefer")
 			w.Header().Set("Access-Control-Max-Age", "86400")
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -396,7 +396,7 @@ func respErr(wr http.ResponseWriter, err error) {
 // connDb returns a database connection and a boolean indicating if it's an external (non-pooled) connection.
 // External connections should be closed after use; pooled connections should not.
 func connDb(req *http.Request) (Database, bool, error) {
-	dbName := req.Header.Get("DB-Name")
+	dbName := req.Header.Get("Tenant")
 
 	dao, err := ConnPrimary()
 	if err != nil {

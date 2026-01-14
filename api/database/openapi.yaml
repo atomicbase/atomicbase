@@ -2,76 +2,61 @@ openapi: 3.0.3
 info:
   title: Atomicbase API
   description: |
-    PostgREST-style REST API for SQLite and Turso databases.
+    REST API for SQLite/Turso with JSON queries, multi-tenant database management, and schema templates.
 
     ## Authentication
-    If `ATOMICBASE_API_KEY` is set, all endpoints (except `/health`) require a Bearer token:
+    If `ATOMICBASE_API_KEY` is set, all endpoints (except `/health`, `/docs`, `/openapi.yaml`) require a Bearer token:
     ```
     Authorization: Bearer <your-api-key>
     ```
 
-    ## Targeting Databases
-    By default, requests target the primary SQLite database. To target an external Turso database, use the `DB-Name` header:
+    ## Multi-Tenant
+    By default, requests target the primary SQLite database. To target a tenant database, use the `Tenant` header:
     ```
-    DB-Name: my-turso-db
+    Tenant: tenant-123
     ```
 
     ## Query Syntax
 
+    All CRUD operations use JSON request bodies.
+
     ### Filtering
-    Use query parameters with operators:
-    - `column=eq.value` - Equal to
-    - `column=neq.value` - Not equal to
-    - `column=gt.value` - Greater than
-    - `column=gte.value` - Greater than or equal
-    - `column=lt.value` - Less than
-    - `column=lte.value` - Less than or equal
-    - `column=like.pattern` - SQL LIKE pattern
-    - `column=ilike.pattern` - Case-insensitive LIKE
-    - `column=in.(a,b,c)` - In list
-    - `column=is.null` / `column=is.true` / `column=is.false`
-    - `column=fts.search terms` - Full-text search (requires FTS index)
+    The `where` field is always an array. Elements are ANDed together.
 
-    ### Negation (NOT operator)
-    Prefix any operator with `not.` to negate it:
-    - `column=not.eq.value` - Not equal to
-    - `column=not.like.pattern` - Not like
-    - `column=not.in.(a,b,c)` - Not in list
-    - `column=not.is.null` - Is not null
-    - `column=not.gt.value` - Not greater than
+    **Operators:**
+    - `{"column": {"eq": value}}` - Equal
+    - `{"column": {"neq": value}}` - Not equal
+    - `{"column": {"gt": value}}` - Greater than
+    - `{"column": {"gte": value}}` - Greater than or equal
+    - `{"column": {"lt": value}}` - Less than
+    - `{"column": {"lte": value}}` - Less than or equal
+    - `{"column": {"like": "%pattern%"}}` - SQL LIKE
+    - `{"column": {"glob": "*pattern*"}}` - SQL GLOB
+    - `{"column": {"in": [a, b, c]}}` - In list
+    - `{"column": {"between": [min, max]}}` - Between values
+    - `{"column": {"is": null}}` - IS NULL/TRUE/FALSE
+    - `{"column": {"fts": "search terms"}}` - Full-text search
+    - `{"column": {"not": {"eq": value}}}` - Negation wrapper
 
-    ### Column Selection
-    Use `select` parameter to choose columns and embed related tables:
-    - `select=id,name` - Select specific columns
-    - `select=*,posts(title,body)` - Include nested relation
+    **OR conditions:**
+    ```json
+    {"where": [{"org_id": {"eq": 5}}, {"or": [{"status": {"eq": "active"}}, {"role": {"eq": "admin"}}]}]}
+    ```
 
-    ### Aggregations
-    Use aggregate functions in the `select` parameter:
-    - `select=count(*)` - Count all rows
-    - `select=sum(price)` - Sum a column
-    - `select=avg(rating)` - Average a column
-    - `select=min(age),max(age)` - Min/max values
-    - `select=category,count(*),sum(price)` - Group by with aggregates
+    ### Nested Relations
+    Auto-join via foreign keys:
+    ```json
+    {"select": ["id", "name", {"posts": ["title", {"comments": ["body"]}]}]}
+    ```
 
-    Supported functions: `count`, `sum`, `avg`, `min`, `max`
-
-    ### Row Count
-    Get the total row count (ignoring limit/offset):
-    - Add header `Prefer: count=exact` to include count in `X-Total-Count` response header
-    - Add query parameter `count=only` to get only the count (no data)
-
-    ### Ordering
-    Use `order` parameter: `order=column:asc` or `order=column:desc`
-
-    ### Pagination
-    - `limit=N` - Maximum rows to return (default: 100, max: 1000)
-    - `offset=N` - Skip N rows
   version: 1.0.0
   license:
-    name: MIT
+    name: Apache-2.0
+
 servers:
   - url: http://localhost:8080
     description: Local development server
+
 tags:
   - name: Health
     description: Health check endpoints
@@ -79,16 +64,17 @@ tags:
     description: CRUD operations on table rows
   - name: Schema
     description: Schema management operations
-  - name: Database
-    description: Database management (Turso integration)
+  - name: Tenants
+    description: Tenant (database) management
+  - name: Templates
+    description: Schema template management
 
 paths:
   /health:
     get:
-      tags:
-        - Health
+      tags: [Health]
       summary: Health check
-      description: Returns the health status of the API and database connection. Does not require authentication.
+      description: Returns the health status of the API and database connection.
       operationId: getHealth
       responses:
         '200':
@@ -110,41 +96,57 @@ paths:
                 error: database ping failed
 
   /query/{table}:
-    get:
-      tags:
-        - Query
-      summary: Select rows
+    post:
+      tags: [Query]
+      summary: Query rows (SELECT, INSERT, UPSERT)
       description: |
-        Query rows from a table with optional filtering, ordering, pagination, and nested relations.
+        Perform SELECT, INSERT, or UPSERT operations based on the `Prefer` header.
 
-        Use query parameters for WHERE conditions (e.g., `id=eq.1`).
+        **SELECT** - `Prefer: operation=select`
+        ```json
+        {"select": ["id", "name"], "where": [{"status": {"eq": "active"}}], "limit": 20}
+        ```
 
-        **Aggregations**: Use aggregate functions in select parameter:
-        - `select=count(*)` - Count all rows
-        - `select=category,sum(price)` - Group by with aggregates
+        **INSERT** - No Prefer header
+        ```json
+        {"data": {"name": "Alice"}, "returning": ["id"]}
+        ```
 
-        **Row Count**: Add `Prefer: count=exact` header to include total count in `X-Total-Count` response header.
-        Use `count=only` parameter to get only the count without data.
-      operationId: selectRows
+        **UPSERT** - `Prefer: on-conflict=replace`
+        ```json
+        {"data": [{"id": 1, "name": "Alice"}], "returning": ["id"]}
+        ```
+
+        **INSERT IGNORE** - `Prefer: on-conflict=ignore`
+        ```json
+        {"data": {"id": 1, "name": "Alice"}}
+        ```
+      operationId: queryRows
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
-        - $ref: '#/components/parameters/SelectParam'
-        - $ref: '#/components/parameters/OrderParam'
-        - $ref: '#/components/parameters/LimitParam'
-        - $ref: '#/components/parameters/OffsetParam'
-        - $ref: '#/components/parameters/OrParam'
-        - $ref: '#/components/parameters/CountParam'
+        - $ref: '#/components/parameters/TenantHeader'
         - name: Prefer
           in: header
-          description: Set to `count=exact` to include total row count in X-Total-Count header
+          description: |
+            Operation mode:
+            - `operation=select` - SELECT query
+            - `on-conflict=replace` - UPSERT
+            - `on-conflict=ignore` - INSERT IGNORE
+            - `count=exact` - Include total count in X-Total-Count header
           schema:
             type: string
-            enum:
-              - count=exact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/SelectRequest'
+                - $ref: '#/components/schemas/InsertRequest'
+                - $ref: '#/components/schemas/UpsertRequest'
       responses:
         '200':
-          description: Rows matching the query
+          description: Operation successful
           headers:
             X-Total-Count:
               description: Total row count (when Prefer count=exact is set)
@@ -157,182 +159,47 @@ paths:
                   - type: array
                     items:
                       type: object
-                  - $ref: '#/components/schemas/CountResponse'
-              examples:
-                rows:
-                  summary: Normal row response
-                  value:
-                    - id: 1
-                      name: "Alice"
-                      email: "alice@example.com"
-                    - id: 2
-                      name: "Bob"
-                      email: "bob@example.com"
-                countOnly:
-                  summary: Count only response
-                  value:
-                    count: 42
-                aggregates:
-                  summary: Aggregation response
-                  value:
-                    - category: "electronics"
-                      count: 15
-                      sum_price: 4500.00
-                    - category: "books"
-                      count: 30
-                      sum_price: 750.50
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/RateLimited'
-      security:
-        - bearerAuth: []
-
-    post:
-      tags:
-        - Query
-      summary: Insert row
-      description: |
-        Insert a single row into a table.
-
-        To perform an upsert (insert or update on conflict), add the header:
-        ```
-        Prefer: resolution=merge-duplicates
-        ```
-        For upsert, the request body should be an array of objects.
-      operationId: insertRow
-      parameters:
-        - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
-        - $ref: '#/components/parameters/SelectParam'
-        - name: Prefer
-          in: header
-          description: Set to `resolution=merge-duplicates` for upsert behavior
-          schema:
-            type: string
-            enum:
-              - resolution=merge-duplicates
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              oneOf:
-                - type: object
-                  description: Single row insert
-                  additionalProperties: true
-                - type: array
-                  description: Multiple rows for upsert
-                  items:
-                    type: object
-                    additionalProperties: true
-            examples:
-              insert:
-                summary: Single row insert
-                value:
-                  name: "Charlie"
-                  email: "charlie@example.com"
-              upsert:
-                summary: Upsert multiple rows
-                value:
-                  - id: 1
-                    name: "Alice Updated"
-                  - id: 3
-                    name: "New User"
-      responses:
-        '200':
-          description: Row inserted successfully
-          content:
-            application/json:
-              schema:
-                oneOf:
                   - $ref: '#/components/schemas/InsertResponse'
                   - $ref: '#/components/schemas/RowsAffectedResponse'
-                  - type: array
-                    items:
-                      type: object
-              examples:
-                insert:
-                  summary: Insert without select
-                  value:
-                    last_insert_id: 3
-                upsert:
-                  summary: Upsert without select
-                  value:
-                    rows_affected: 2
-                withSelect:
-                  summary: With select parameter
-                  value:
-                    - id: 3
-                      name: "Charlie"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          description: Conflict (unique constraint violation)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: record already exists
         '429':
           $ref: '#/components/responses/RateLimited'
       security:
         - bearerAuth: []
 
     patch:
-      tags:
-        - Query
+      tags: [Query]
       summary: Update rows
       description: |
-        Update rows matching the WHERE conditions from query parameters.
+        Update rows matching the WHERE conditions.
 
-        Use query parameters for WHERE conditions (e.g., `id=eq.1`).
+        ```json
+        {"data": {"status": "inactive"}, "where": [{"id": {"eq": 5}}]}
+        ```
+
+        A WHERE clause is required.
       operationId: updateRows
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
-        - $ref: '#/components/parameters/SelectParam'
+        - $ref: '#/components/parameters/TenantHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
-              description: Column values to update
-            example:
-              name: "Alice Updated"
-              email: "alice.new@example.com"
+              $ref: '#/components/schemas/UpdateRequest'
       responses:
         '200':
-          description: Rows updated successfully
+          description: Rows updated
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/RowsAffectedResponse'
-                  - type: array
-                    items:
-                      type: object
-              examples:
-                default:
-                  summary: Without select parameter
-                  value:
-                    rows_affected: 1
-                withSelect:
-                  summary: With select parameter
-                  value:
-                    - id: 1
-                      name: "Alice Updated"
+                $ref: '#/components/schemas/RowsAffectedResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -345,39 +212,33 @@ paths:
         - bearerAuth: []
 
     delete:
-      tags:
-        - Query
+      tags: [Query]
       summary: Delete rows
       description: |
-        Delete rows matching the WHERE conditions from query parameters.
+        Delete rows matching the WHERE conditions.
 
-        **A WHERE clause is required** - mass deletes without conditions are not allowed.
+        ```json
+        {"where": [{"id": {"eq": 5}}]}
+        ```
+
+        A WHERE clause is required.
       operationId: deleteRows
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
-        - $ref: '#/components/parameters/SelectParam'
+        - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
       responses:
         '200':
-          description: Rows deleted successfully
+          description: Rows deleted
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/RowsAffectedResponse'
-                  - type: array
-                    items:
-                      type: object
-              examples:
-                default:
-                  summary: Without select parameter
-                  value:
-                    rows_affected: 1
-                withSelect:
-                  summary: With select parameter (returns deleted rows)
-                  value:
-                    - id: 1
-                      name: "Deleted User"
+                $ref: '#/components/schemas/RowsAffectedResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -391,14 +252,12 @@ paths:
 
   /schema:
     get:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: List all tables
-      description: |
-        Get a list of all tables in the database schema with their columns and primary keys.
+      description: Get a list of all tables in the database schema.
       operationId: getSchema
       parameters:
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
         '200':
           description: List of tables
@@ -408,62 +267,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Table'
-              example:
-                - name: users
-                  pk: id
-                  columns:
-                    - name: id
-                      type: INTEGER
-                    - name: email
-                      type: TEXT
-                    - name: name
-                      type: TEXT
-                - name: posts
-                  pk: id
-                  columns:
-                    - name: id
-                      type: INTEGER
-                    - name: title
-                      type: TEXT
-                    - name: user_id
-                      type: INTEGER
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '429':
-          $ref: '#/components/responses/RateLimited'
-      security:
-        - bearerAuth: []
-    post:
-      tags:
-        - Schema
-      summary: Execute DDL query
-      description: |
-        Execute a raw DDL (Data Definition Language) SQL query.
-
-        **Only DDL statements are allowed** (CREATE, ALTER, DROP, etc.). DML statements (SELECT, INSERT, UPDATE, DELETE) will be rejected.
-      operationId: executeSchema
-      parameters:
-        - $ref: '#/components/parameters/DBNameHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SchemaQueryRequest'
-            example:
-              query: "CREATE INDEX idx_users_email ON users(email)"
-              args: []
-      responses:
-        '200':
-          description: Schema modified successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: schema edited
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -473,16 +276,12 @@ paths:
 
   /schema/invalidate:
     post:
-      tags:
-        - Schema
-      summary: Invalidate schema cache
-      description: |
-        Force a refresh of the schema cache.
-
-        Call this after making schema changes outside of Atomicbase or if the cache becomes stale.
+      tags: [Schema]
+      summary: Refresh schema cache
+      description: Force a refresh of the schema cache.
       operationId: invalidateSchema
       parameters:
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
         '200':
           description: Schema cache invalidated
@@ -490,8 +289,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: schema invalidated
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -501,14 +298,13 @@ paths:
 
   /schema/table/{table}:
     get:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: Get table schema
-      description: Get the schema definition for a specific table including columns, primary key, and foreign keys.
+      description: Get the schema definition for a specific table.
       operationId: getTableSchema
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
         '200':
           description: Table schema
@@ -516,20 +312,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TableSchemaResponse'
-              example:
-                columns:
-                  - name: id
-                    type: INTEGER
-                  - name: name
-                    type: TEXT
-                  - name: email
-                    type: TEXT
-                  - name: created_at
-                    type: TEXT
-                primaryKey: id
-                foreignKeys:
-                  - column: org_id
-                    references: organizations.id
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -540,43 +322,26 @@ paths:
         - bearerAuth: []
 
     post:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: Create table
-      description: Create a new table with the specified columns and constraints.
+      description: Create a new table with the specified columns.
       operationId: createTable
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateTableRequest'
-            example:
-              id:
-                type: integer
-                primaryKey: true
-              name:
-                type: text
-                notNull: true
-              email:
-                type: text
-                unique: true
-              org_id:
-                type: integer
-                references: organizations.id
-                onDelete: cascade
       responses:
         '200':
-          description: Table created successfully
+          description: Table created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: table users created
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -587,51 +352,26 @@ paths:
         - bearerAuth: []
 
     patch:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: Alter table
-      description: Modify an existing table structure (add columns, rename columns, drop columns, rename table).
+      description: Modify an existing table structure.
       operationId: alterTable
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/AlterTableRequest'
-            examples:
-              addColumn:
-                summary: Add a new column
-                value:
-                  newColumns:
-                    phone:
-                      type: text
-                      notNull: false
-              renameColumn:
-                summary: Rename a column
-                value:
-                  renameColumns:
-                    old_name: new_name
-              dropColumn:
-                summary: Drop a column
-                value:
-                  dropColumns:
-                    - temp_column
-              renameTable:
-                summary: Rename the table
-                value:
-                  newName: users_v2
       responses:
         '200':
-          description: Table altered successfully
+          description: Table altered
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: table users altered
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -644,23 +384,20 @@ paths:
         - bearerAuth: []
 
     delete:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: Drop table
-      description: Drop (delete) a table and all its data.
+      description: Drop a table and all its data.
       operationId: dropTable
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
         '200':
-          description: Table dropped successfully
+          description: Table dropped
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: table users dropped
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -672,16 +409,12 @@ paths:
 
   /schema/fts:
     get:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: List FTS indexes
-      description: |
-        List all tables that have FTS5 (Full-Text Search) indexes configured.
-
-        Returns information about each FTS index including the base table name, FTS table name, and indexed columns.
+      description: List all tables with FTS5 indexes.
       operationId: listFTSIndexes
       parameters:
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
         '200':
           description: List of FTS indexes
@@ -691,17 +424,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/FTSIndexInfo'
-              example:
-                - table: articles
-                  ftsTable: articles_fts
-                  columns:
-                    - title
-                    - content
-                - table: products
-                  ftsTable: products_fts
-                  columns:
-                    - name
-                    - description
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -711,47 +433,32 @@ paths:
 
   /schema/fts/{table}:
     post:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: Create FTS index
       description: |
-        Create an FTS5 (Full-Text Search) index on a table.
+        Create an FTS5 full-text search index on a table.
 
-        This creates:
-        - An FTS5 virtual table named `{table}_fts`
-        - Triggers to keep the FTS index synchronized with the source table
-
-        **Requirements:**
-        - All specified columns must be TEXT type
-        - The table must not already have an FTS index
-
-        After creating an FTS index, you can use the `fts` operator in queries:
-        ```
-        GET /query/articles?title=fts.search+terms
+        After creating, use the `fts` operator in queries:
+        ```json
+        {"where": [{"title": {"fts": "search terms"}}]}
         ```
       operationId: createFTSIndex
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateFTSIndexRequest'
-            example:
-              columns:
-                - title
-                - content
       responses:
         '200':
-          description: FTS index created successfully
+          description: FTS index created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: FTS index created for table articles
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -764,30 +471,20 @@ paths:
         - bearerAuth: []
 
     delete:
-      tags:
-        - Schema
+      tags: [Schema]
       summary: Drop FTS index
-      description: |
-        Remove an FTS5 index from a table.
-
-        This drops:
-        - The FTS5 virtual table `{table}_fts`
-        - Associated synchronization triggers
-
-        The source table data is not affected.
+      description: Remove an FTS5 index from a table.
       operationId: dropFTSIndex
       parameters:
         - $ref: '#/components/parameters/TablePath'
-        - $ref: '#/components/parameters/DBNameHeader'
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
         '200':
-          description: FTS index dropped successfully
+          description: FTS index dropped
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: FTS index dropped for table articles
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -799,27 +496,21 @@ paths:
       security:
         - bearerAuth: []
 
-  /db:
+  /tenants:
     get:
-      tags:
-        - Database
-      summary: List databases
-      description: List all registered external databases (Turso).
-      operationId: listDatabases
+      tags: [Tenants]
+      summary: List tenants
+      description: List all registered tenant databases.
+      operationId: listTenants
       responses:
         '200':
-          description: List of registered databases
+          description: List of tenants
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/DatabaseInfo'
-              example:
-                - name: production-db
-                  id: 1
-                - name: staging-db
-                  id: 2
+                  $ref: '#/components/schemas/TenantInfo'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -828,32 +519,23 @@ paths:
         - bearerAuth: []
 
     post:
-      tags:
-        - Database
-      summary: Create database
-      description: |
-        Create a new Turso database.
-
-        Requires `TURSO_ORGANIZATION` and `TURSO_API_KEY` environment variables.
-      operationId: createDatabase
+      tags: [Tenants]
+      summary: Create tenant
+      description: Create a new Turso database for a tenant.
+      operationId: createTenant
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateDatabaseRequest'
-            example:
-              name: my-new-db
-              group: default
+              $ref: '#/components/schemas/CreateTenantRequest'
       responses:
         '200':
-          description: Database created successfully
+          description: Tenant created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: database my-new-db created
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -864,14 +546,10 @@ paths:
         - bearerAuth: []
 
     patch:
-      tags:
-        - Database
-      summary: Register database
-      description: |
-        Register an existing Turso database with Atomicbase.
-
-        Optionally provide a database token via the `DB-Token` header. If not provided, a new token will be created.
-      operationId: registerDatabase
+      tags: [Tenants]
+      summary: Register existing tenant
+      description: Register an existing Turso database as a tenant.
+      operationId: registerTenant
       parameters:
         - name: DB-Token
           in: header
@@ -883,18 +561,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegisterDatabaseRequest'
-            example:
-              name: existing-db
+              $ref: '#/components/schemas/RegisterTenantRequest'
       responses:
         '200':
-          description: Database registered successfully
+          description: Tenant registered
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: database existing-db registered
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -904,19 +578,15 @@ paths:
       security:
         - bearerAuth: []
 
-  /db/all:
+  /tenants/all:
     patch:
-      tags:
-        - Database
-      summary: Register all databases
-      description: |
-        Discover and register all Turso databases in your organization.
-
-        Requires `TURSO_ORGANIZATION` and `TURSO_API_KEY` environment variables.
-      operationId: registerAllDatabases
+      tags: [Tenants]
+      summary: Register all tenants
+      description: Discover and register all Turso databases in your organization.
+      operationId: registerAllTenants
       responses:
         '200':
-          description: All databases registered successfully
+          description: All tenants registered
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -926,32 +596,332 @@ paths:
       security:
         - bearerAuth: []
 
-  /db/{name}:
+  /tenants/{name}:
     delete:
-      tags:
-        - Database
-      summary: Delete database
-      description: |
-        Delete a Turso database.
-
-        **Warning**: This permanently deletes the database from Turso, not just from Atomicbase.
-      operationId: deleteDatabase
+      tags: [Tenants]
+      summary: Delete tenant
+      description: Delete a tenant database from Turso.
+      operationId: deleteTenant
       parameters:
-        - name: name
-          in: path
-          required: true
-          description: Database name
-          schema:
-            type: string
+        - $ref: '#/components/parameters/NamePath'
       responses:
         '200':
-          description: Database deleted successfully
+          description: Tenant deleted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: database my-db deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /tenants/{name}/template:
+    get:
+      tags: [Tenants]
+      summary: Get tenant's template
+      description: Get the schema template associated with a tenant.
+      operationId: getTenantTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Template info (or null if none)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+    put:
+      tags: [Tenants]
+      summary: Associate template with tenant
+      description: Associate a schema template with a tenant.
+      operationId: setTenantTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateName]
+              properties:
+                templateName:
+                  type: string
+      responses:
+        '200':
+          description: Template associated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+    delete:
+      tags: [Tenants]
+      summary: Remove template association
+      description: Remove the schema template association from a tenant.
+      operationId: removeTenantTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Template disassociated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /tenants/{name}/sync:
+    post:
+      tags: [Tenants]
+      summary: Sync tenant to template
+      description: Sync a tenant's schema to its associated template.
+      operationId: syncTenantToTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+        - name: dropExtra
+          in: query
+          description: Drop tables not in template
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /templates:
+    get:
+      tags: [Templates]
+      summary: List templates
+      description: List all schema templates.
+      operationId: listTemplates
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TemplateInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+    post:
+      tags: [Templates]
+      summary: Create template
+      description: Create a new schema template.
+      operationId: createTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '200':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /templates/{name}:
+    get:
+      tags: [Templates]
+      summary: Get template
+      description: Get a schema template by name.
+      operationId: getTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+    put:
+      tags: [Templates]
+      summary: Update template
+      description: Update a schema template's tables.
+      operationId: updateTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tables]
+              properties:
+                tables:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Table'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+    delete:
+      tags: [Templates]
+      summary: Delete template
+      description: Delete a schema template.
+      operationId: deleteTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Template deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Template is in use
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /templates/{name}/sync:
+    post:
+      tags: [Templates]
+      summary: Sync all tenants to template
+      description: Sync all tenants using this template to the template schema.
+      operationId: syncTemplate
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+        - name: dropExtra
+          in: query
+          description: Drop tables not in template
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Sync results for all tenants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantSyncResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      security:
+        - bearerAuth: []
+
+  /templates/{name}/databases:
+    get:
+      tags: [Templates]
+      summary: List tenants using template
+      description: List all tenants associated with a template.
+      operationId: listTemplateTenants
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: List of tenant names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -966,10 +936,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: |
-        API key authentication. Set `ATOMICBASE_API_KEY` environment variable to enable.
-
-        If not set, authentication is disabled.
+      description: API key authentication. Set `ATOMICBASE_API_KEY` to enable.
 
   parameters:
     TablePath:
@@ -980,196 +947,160 @@ components:
       schema:
         type: string
         pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$'
-        maxLength: 128
 
-    DBNameHeader:
-      name: DB-Name
+    NamePath:
+      name: name
+      in: path
+      required: true
+      description: Resource name
+      schema:
+        type: string
+
+    TenantHeader:
+      name: Tenant
       in: header
-      description: Target database name (default is primary database)
+      description: Target tenant database (default is primary)
       schema:
         type: string
-
-    SelectParam:
-      name: select
-      in: query
-      description: |
-        Columns to return. Supports nested relations and aggregate functions.
-
-        **Column Selection:**
-        - `*` - All columns
-        - `id,name,email` - Specific columns
-        - `*,posts(title,body)` - Include related posts
-
-        **Aggregations:**
-        - `count(*)` - Count all rows
-        - `sum(price)` - Sum a column
-        - `avg(rating)` - Average a column
-        - `min(age),max(age)` - Min/max values
-        - `category,count(*),sum(price)` - Group by with aggregates
-
-        **Aliases:**
-        - `alias:column` - Rename output field
-        - `total:sum(price)` - Alias for aggregate
-      schema:
-        type: string
-
-    OrderParam:
-      name: order
-      in: query
-      description: |
-        Sort order for results.
-
-        Examples:
-        - `name:asc` - Ascending by name
-        - `created_at:desc` - Descending by created_at
-      schema:
-        type: string
-
-    LimitParam:
-      name: limit
-      in: query
-      description: Maximum number of rows to return (default 100, max 1000)
-      schema:
-        type: integer
-        minimum: 0
-        maximum: 1000
-        default: 100
-
-    OffsetParam:
-      name: offset
-      in: query
-      description: Number of rows to skip (for pagination)
-      schema:
-        type: integer
-        minimum: 0
-        default: 0
-
-    OrParam:
-      name: or
-      in: query
-      description: |
-        Combine conditions with OR logic.
-
-        Example: `or=(status.eq.active,status.eq.pending)`
-      schema:
-        type: string
-
-    CountParam:
-      name: count
-      in: query
-      description: |
-        Set to `only` to get only the count of matching rows without data.
-
-        Returns `{ "count": N }` instead of row data.
-      schema:
-        type: string
-        enum:
-          - only
 
   schemas:
     ErrorResponse:
       type: object
-      required:
-        - error
+      required: [error]
       properties:
         error:
           type: string
-          description: Error message
 
     MessageResponse:
       type: object
-      required:
-        - message
+      required: [message]
       properties:
         message:
           type: string
 
     HealthResponse:
       type: object
-      required:
-        - status
+      required: [status]
       properties:
         status:
           type: string
-          enum:
-            - healthy
-            - unhealthy
+          enum: [healthy, unhealthy]
         error:
           type: string
-          description: Error details when unhealthy
 
     InsertResponse:
       type: object
       properties:
         last_insert_id:
           type: integer
-          description: ID of the inserted row
 
     RowsAffectedResponse:
       type: object
       properties:
         rows_affected:
           type: integer
-          description: Number of rows affected
 
-    CountResponse:
+    SelectRequest:
       type: object
-      required:
-        - count
       properties:
-        count:
-          type: integer
-          description: Total number of matching rows
-
-    SchemaQueryRequest:
-      type: object
-      required:
-        - query
-      properties:
-        query:
-          type: string
-          description: DDL SQL query to execute
-        args:
+        select:
           type: array
           items: {}
-          description: Query arguments (for parameterized queries)
+          description: Columns to select (strings or nested relation objects)
+        where:
+          type: array
+          items:
+            type: object
+          description: Filter conditions (ANDed)
+        order:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [asc, desc]
+          description: Order by columns
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    InsertRequest:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          description: Row data to insert
+        returning:
+          type: array
+          items:
+            type: string
+          description: Columns to return
+
+    UpsertRequest:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+          description: Rows to upsert
+        returning:
+          type: array
+          items:
+            type: string
+
+    UpdateRequest:
+      type: object
+      required: [data, where]
+      properties:
+        data:
+          type: object
+          description: Column values to update
+        where:
+          type: array
+          items:
+            type: object
+          description: Filter conditions (required)
+
+    DeleteRequest:
+      type: object
+      required: [where]
+      properties:
+        where:
+          type: array
+          items:
+            type: object
+          description: Filter conditions (required)
 
     Table:
       type: object
-      description: Table schema information
-      required:
-        - name
-        - columns
+      required: [name]
       properties:
         name:
           type: string
-          description: Table name
         pk:
           type: string
-          description: Primary key column name (empty if using rowid)
         columns:
-          type: array
-          items:
+          type: object
+          additionalProperties:
             $ref: '#/components/schemas/Column'
 
     Column:
       type: object
-      description: Column definition
-      required:
-        - name
-        - type
+      required: [name, type]
       properties:
         name:
           type: string
-          description: Column name
         type:
           type: string
-          description: Column type (TEXT, INTEGER, REAL, BLOB)
-          enum:
-            - TEXT
-            - INTEGER
-            - REAL
-            - BLOB
+          enum: [TEXT, INTEGER, REAL, BLOB]
+        notNull:
+          type: boolean
+        default: {}
+        references:
+          type: string
+          description: "Foreign key (format: table.column)"
 
     TableSchemaResponse:
       type: object
@@ -1183,11 +1114,6 @@ components:
                 type: string
               type:
                 type: string
-                enum:
-                  - INTEGER
-                  - TEXT
-                  - REAL
-                  - BLOB
         primaryKey:
           type: string
         foreignKeys:
@@ -1199,112 +1125,72 @@ components:
                 type: string
               references:
                 type: string
-                description: "Format: table.column"
-
-    ColumnDefinition:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - text
-            - integer
-            - real
-            - blob
-          description: Column data type
-        primaryKey:
-          type: boolean
-          default: false
-        unique:
-          type: boolean
-          default: false
-        notNull:
-          type: boolean
-          default: false
-        default:
-          description: Default value for the column
-        references:
-          type: string
-          description: "Foreign key reference (format: table.column)"
-        onDelete:
-          type: string
-          enum:
-            - no action
-            - restrict
-            - set null
-            - set default
-            - cascade
-        onUpdate:
-          type: string
-          enum:
-            - no action
-            - restrict
-            - set null
-            - set default
-            - cascade
 
     CreateTableRequest:
       type: object
       additionalProperties:
-        $ref: '#/components/schemas/ColumnDefinition'
-
-    NewColumnDefinition:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - text
-            - integer
-            - real
-            - blob
-        notNull:
-          type: boolean
-          default: false
-        default:
-          description: Default value
-        references:
-          type: string
-        onDelete:
-          type: string
-          enum:
-            - no action
-            - restrict
-            - set null
-            - set default
-            - cascade
-        onUpdate:
-          type: string
-          enum:
-            - no action
-            - restrict
-            - set null
-            - set default
-            - cascade
+        type: object
+        properties:
+          type:
+            type: string
+            enum: [text, integer, real, blob]
+          primaryKey:
+            type: boolean
+          unique:
+            type: boolean
+          notNull:
+            type: boolean
+          default: {}
+          references:
+            type: string
+          onDelete:
+            type: string
+            enum: [no action, restrict, set null, set default, cascade]
+          onUpdate:
+            type: string
+            enum: [no action, restrict, set null, set default, cascade]
 
     AlterTableRequest:
       type: object
       properties:
         newName:
           type: string
-          description: New name for the table
         renameColumns:
           type: object
           additionalProperties:
             type: string
-          description: Map of old column name to new column name
         newColumns:
           type: object
           additionalProperties:
-            $ref: '#/components/schemas/NewColumnDefinition'
-          description: New columns to add
+            type: object
         dropColumns:
           type: array
           items:
             type: string
-          description: Columns to drop
 
-    DatabaseInfo:
+    FTSIndexInfo:
+      type: object
+      properties:
+        table:
+          type: string
+        ftsTable:
+          type: string
+        columns:
+          type: array
+          items:
+            type: string
+
+    CreateFTSIndexRequest:
+      type: object
+      required: [columns]
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+
+    TenantInfo:
       type: object
       properties:
         name:
@@ -1312,59 +1198,73 @@ components:
         id:
           type: integer
 
-    CreateDatabaseRequest:
+    CreateTenantRequest:
       type: object
-      required:
-        - name
+      required: [name]
       properties:
         name:
           type: string
-          description: Database name
         group:
           type: string
           default: default
-          description: Turso database group
 
-    RegisterDatabaseRequest:
+    RegisterTenantRequest:
       type: object
-      required:
-        - name
+      required: [name]
       properties:
         name:
           type: string
-          description: Name of the existing database to register
 
-    CreateFTSIndexRequest:
+    TemplateInfo:
       type: object
-      required:
-        - columns
       properties:
-        columns:
+        name:
+          type: string
+
+    Template:
+      type: object
+      properties:
+        name:
+          type: string
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/Table'
+
+    CreateTemplateRequest:
+      type: object
+      required: [name, tables]
+      properties:
+        name:
+          type: string
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/Table'
+
+    SyncResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        changes:
           type: array
           items:
             type: string
-          minItems: 1
-          description: |
-            List of TEXT columns to include in the FTS index.
-            All columns must be TEXT type.
-          example:
-            - title
-            - content
 
-    FTSIndexInfo:
+    TenantSyncResult:
       type: object
       properties:
-        table:
+        database:
           type: string
-          description: Name of the source table
-        ftsTable:
-          type: string
-          description: Name of the FTS5 virtual table (always {table}_fts)
-        columns:
+        success:
+          type: boolean
+        changes:
           type: array
           items:
             type: string
-          description: Columns included in the FTS index
+        error:
+          type: string
 
   responses:
     BadRequest:
@@ -1373,47 +1273,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          examples:
-            invalidOperator:
-              value:
-                error: "invalid operator: foo"
-            missingWhere:
-              value:
-                error: "WHERE clause is required for DELETE"
-            invalidIdentifier:
-              value:
-                error: "invalid identifier"
 
     Unauthorized:
-      description: Unauthorized - missing or invalid API key
+      description: Unauthorized
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          examples:
-            missing:
-              value:
-                error: missing Authorization header
-            invalid:
-              value:
-                error: invalid API key
 
     NotFound:
-      description: Resource not found
+      description: Not found
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          examples:
-            table:
-              value:
-                error: table not found
-            column:
-              value:
-                error: column not found
-            database:
-              value:
-                error: database not found
 
     RateLimited:
       description: Rate limit exceeded
@@ -1421,10 +1294,7 @@ components:
         Retry-After:
           schema:
             type: integer
-          description: Seconds until rate limit resets
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example:
-            error: rate limit exceeded

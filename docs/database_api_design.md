@@ -156,13 +156,16 @@ POST /query/articles
 
 ### Schema Management
 
-| Endpoint               | Method      | Description        |
-| ---------------------- | ----------- | ------------------ |
-| `/schema`              | GET         | List all tables    |
-| `/schema/table/{name}` | POST        | Create table       |
-| `/schema/table/{name}` | PATCH       | Alter table        |
-| `/schema/table/{name}` | DELETE      | Drop table         |
-| `/schema/fts/{table}`  | POST/DELETE | Manage FTS indexes |
+| Endpoint               | Method         | Description          |
+| ---------------------- | -------------- | -------------------- |
+| `/schema`              | GET            | List all tables      |
+| `/schema/invalidate`   | POST           | Refresh schema cache |
+| `/schema/table/{name}` | GET            | Get table schema     |
+| `/schema/table/{name}` | POST           | Create table         |
+| `/schema/table/{name}` | PATCH          | Alter table          |
+| `/schema/table/{name}` | DELETE         | Drop table           |
+| `/schema/fts`          | GET            | List FTS indexes     |
+| `/schema/fts/{table}`  | POST, DELETE   | Manage FTS indexes   |
 
 **Create table:**
 
@@ -187,11 +190,13 @@ Prefer: operation=select
 {"select": ["*"]}
 ```
 
-| Endpoint          | Method | Description    |
-| ----------------- | ------ | -------------- |
-| `/tenants`        | GET    | List tenants   |
-| `/tenants`        | POST   | Create tenant  |
-| `/tenants/{name}` | DELETE | Delete tenant  |
+| Endpoint          | Method | Description                     |
+| ----------------- | ------ | ------------------------------- |
+| `/tenants`        | GET    | List tenants                    |
+| `/tenants`        | POST   | Create tenant                   |
+| `/tenants`        | PATCH  | Register existing Turso database|
+| `/tenants/all`    | PATCH  | Register all Turso databases    |
+| `/tenants/{name}` | DELETE | Delete tenant                   |
 
 ---
 
@@ -199,12 +204,19 @@ Prefer: operation=select
 
 Reusable schemas for multi-tenant apps:
 
-| Endpoint                       | Description                    |
-| ------------------------------ | ------------------------------ |
-| `POST /templates`              | Create template                |
-| `PUT /tenants/{name}/template` | Associate tenant with template |
-| `POST /tenants/{name}/sync`    | Sync tenant to template        |
-| `POST /templates/{name}/sync`  | Sync all tenants               |
+| Endpoint                          | Method | Description                      |
+| --------------------------------- | ------ | -------------------------------- |
+| `/templates`                      | GET    | List templates                   |
+| `/templates`                      | POST   | Create template                  |
+| `/templates/{name}`               | GET    | Get template                     |
+| `/templates/{name}`               | PUT    | Update template                  |
+| `/templates/{name}`               | DELETE | Delete template                  |
+| `/templates/{name}/sync`          | POST   | Sync all tenants to template     |
+| `/templates/{name}/databases`     | GET    | List tenants using template      |
+| `/tenants/{name}/template`        | GET    | Get tenant's template            |
+| `/tenants/{name}/template`        | PUT    | Associate tenant with template   |
+| `/tenants/{name}/template`        | DELETE | Remove template association      |
+| `/tenants/{name}/sync`            | POST   | Sync tenant to its template      |
 
 ---
 
@@ -405,7 +417,9 @@ await tx.commit();
 
 ---
 
-## Transactions (REST API)
+## Transactions (REST API) - Planned
+
+> **Note:** Batch and multi-request transactions are planned features, not yet implemented.
 
 ### Batch (Single Request)
 
@@ -491,22 +505,31 @@ await client
 
 ## API Reference
 
-| Category     | Endpoint                                         | Methods                  |
-| ------------ | ------------------------------------------------ | ------------------------ |
-| Query        | `/query/{table}`                                 | POST, PATCH, DELETE      |
-| Batch        | `/batch`                                         | POST                     |
-| Transactions | `/transaction`, `/transaction/{id}/commit`, `/transaction/{id}/rollback` | POST |
-| Schema       | `/schema`, `/schema/table/{table}`               | GET, POST, PATCH, DELETE |
-| FTS          | `/schema/fts/{table}`                            | POST, DELETE             |
-| Tenants      | `/tenants`, `/tenants/{name}`                    | GET, POST, DELETE        |
-| Templates    | `/templates`, `/templates/{name}`                | GET, POST, PUT, DELETE   |
-| Sync         | `/tenants/{name}/sync`, `/templates/{name}/sync` | POST                     |
+| Category     | Endpoint                                                                   | Methods                  |
+| ------------ | -------------------------------------------------------------------------- | ------------------------ |
+| Query        | `/query/{table}`                                                           | POST, PATCH, DELETE      |
+| Schema       | `/schema`, `/schema/invalidate`                                            | GET, POST                |
+| Schema       | `/schema/table/{table}`                                                    | GET, POST, PATCH, DELETE |
+| FTS          | `/schema/fts`, `/schema/fts/{table}`                                       | GET, POST, DELETE        |
+| Tenants      | `/tenants`, `/tenants/all`, `/tenants/{name}`                              | GET, POST, PATCH, DELETE |
+| Templates    | `/templates`, `/templates/{name}`, `/templates/{name}/databases`           | GET, POST, PUT, DELETE   |
+| Sync         | `/tenants/{name}/sync`, `/templates/{name}/sync`                           | POST                     |
+| Association  | `/tenants/{name}/template`                                                 | GET, PUT, DELETE         |
+| Health       | `/health`                                                                  | GET                      |
+| Docs         | `/openapi.yaml`, `/docs`                                                   | GET                      |
+
+**Planned:**
+
+| Category     | Endpoint                                                                   | Methods |
+| ------------ | -------------------------------------------------------------------------- | ------- |
+| Batch        | `/batch`                                                                   | POST    |
+| Transactions | `/transaction`, `/transaction/{id}/commit`, `/transaction/{id}/rollback`   | POST    |
 
 **Headers:**
 
 - `Authorization: Bearer <key>` - API authentication
 - `Tenant: <name>` - Target tenant database
-- `Transaction: <id>` - Execute within transaction
+- `Transaction: <id>` - Execute within transaction (planned)
 - `Prefer: operation=select` - Specify SELECT query (POST only)
 - `Prefer: on-conflict=replace` - UPSERT behavior
 - `Prefer: on-conflict=ignore` - INSERT IGNORE behavior

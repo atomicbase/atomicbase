@@ -18,15 +18,16 @@ var openapiSpec []byte
 //   - GET /health - Health check endpoint
 //   - GET /openapi.yaml - OpenAPI 3.0 specification
 //   - GET /docs - Swagger UI documentation
-//   - GET/POST/PATCH/DELETE /query/{table} - CRUD operations on table rows
+//   - POST/PATCH/DELETE /query/{table} - CRUD operations on table rows
 //   - GET /schema - List all tables in schema
-//   - POST /schema - Execute raw schema SQL
 //   - POST /schema/invalidate - Refresh schema cache
 //   - GET/POST/DELETE/PATCH /schema/table/{table} - Table schema operations
 //   - GET/POST/DELETE /schema/fts/{table} - FTS (Full-Text Search) operations
-//   - GET/POST/PATCH/DELETE /db - Database management
+//   - GET/POST/PATCH/DELETE /tenants - Tenant (database) management
+//   - GET/POST/PUT/DELETE /templates - Schema template management
+//   - GET/PUT/DELETE/POST /tenants/{name}/template, /tenants/{name}/sync - Template association
 //
-// Use DB-Name header to target external Turso databases (default: primary).
+// Use Tenant header to target external Turso databases (default: primary).
 func RegisterRoutes(app *http.ServeMux) {
 	// Health check (no auth required)
 	app.HandleFunc("GET /health", handleHealth())
@@ -55,12 +56,12 @@ func RegisterRoutes(app *http.ServeMux) {
 	app.HandleFunc("POST /schema/fts/{table}", handleCreateFTSIndex())
 	app.HandleFunc("DELETE /schema/fts/{table}", handleDropFTSIndex())
 
-	// Database management
-	app.HandleFunc("GET /db", handleListDbs())
-	app.HandleFunc("POST /db", handleCreateDb())
-	app.HandleFunc("PATCH /db", handleRegisterDb())
-	app.HandleFunc("PATCH /db/all", handleRegisterAll())
-	app.HandleFunc("DELETE /db/{name}", handleDeleteDb())
+	// Tenant (database) management
+	app.HandleFunc("GET /tenants", handleListDbs())
+	app.HandleFunc("POST /tenants", handleCreateDb())
+	app.HandleFunc("PATCH /tenants", handleRegisterDb())
+	app.HandleFunc("PATCH /tenants/all", handleRegisterAll())
+	app.HandleFunc("DELETE /tenants/{name}", handleDeleteDb())
 
 	// Schema template management
 	app.HandleFunc("GET /templates", handleListTemplates())
@@ -71,11 +72,11 @@ func RegisterRoutes(app *http.ServeMux) {
 	app.HandleFunc("POST /templates/{name}/sync", handleSyncTemplate())
 	app.HandleFunc("GET /templates/{name}/databases", handleListTemplateDBs())
 
-	// Database-template association
-	app.HandleFunc("GET /db/{name}/template", handleGetDBTemplate())
-	app.HandleFunc("PUT /db/{name}/template", handleSetDBTemplate())
-	app.HandleFunc("DELETE /db/{name}/template", handleRemoveDBTemplate())
-	app.HandleFunc("POST /db/{name}/sync", handleSyncDBToTemplate())
+	// Tenant-template association
+	app.HandleFunc("GET /tenants/{name}/template", handleGetDBTemplate())
+	app.HandleFunc("PUT /tenants/{name}/template", handleSetDBTemplate())
+	app.HandleFunc("DELETE /tenants/{name}/template", handleRemoveDBTemplate())
+	app.HandleFunc("POST /tenants/{name}/sync", handleSyncDBToTemplate())
 }
 
 // handleQueryRows handles POST /query/{table} for SELECT, INSERT, and UPSERT operations.
