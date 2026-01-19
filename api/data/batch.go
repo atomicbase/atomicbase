@@ -1,13 +1,12 @@
-package database
+package data
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-)
 
-// MaxBatchOperations is the maximum number of operations allowed in a single batch request.
-const MaxBatchOperations = 100
+	"github.com/joe-ervin05/atomicbase/tools"
+)
 
 // Batch executes multiple operations atomically within a SQL transaction.
 // Works for both primary and Turso databases via their respective connections.
@@ -17,7 +16,7 @@ func (dao *Database) Batch(ctx context.Context, req BatchRequest) (BatchResponse
 	}
 
 	if len(req.Operations) > MaxBatchOperations {
-		return BatchResponse{}, ErrBatchTooLarge
+		return BatchResponse{}, tools.ErrBatchTooLarge
 	}
 
 	tx, err := dao.Client.BeginTx(ctx, nil)

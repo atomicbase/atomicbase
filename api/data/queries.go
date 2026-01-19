@@ -1,4 +1,4 @@
-package database
+package data
 
 import (
 	"context"
@@ -7,26 +7,21 @@ import (
 	"fmt"
 
 	"github.com/joe-ervin05/atomicbase/config"
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
-// SelectResult holds the result of a Select query with optional count.
-type SelectResult struct {
-	Data  []byte
-	Count int64
-}
-
 // SelectJSON queries rows using JSON body format.
-// POST /query/{table} with Prefer: operation=select
+// POST /data/query/{table} with Prefer: operation=select
 func (dao *Database) SelectJSON(ctx context.Context, relation string, query SelectQuery, includeCount bool) (SelectResult, error) {
 	return dao.selectJSON(ctx, dao.Client, relation, query, includeCount)
 }
 
 func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation string, query SelectQuery, includeCount bool) (SelectResult, error) {
-	if err := ValidateTableName(relation); err != nil {
+	if err := tools.ValidateTableName(relation); err != nil {
 		return SelectResult{}, err
 	}
-	if dao.id == 1 && relation == ReservedTableDatabases {
-		return SelectResult{}, ErrReservedTable
+	if dao.ID == 1 && relation == ReservedTableDatabases {
+		return SelectResult{}, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -34,16 +29,32 @@ func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation str
 		return SelectResult{}, err
 	}
 
-	// Parse select clause
-	rel, err := ParseSelectFromJSON(query.Select, relation)
-	if err != nil {
-		return SelectResult{}, err
-	}
+	var sqlQuery, agg string
 
-	// Build SELECT query
-	sqlQuery, agg, err := dao.Schema.buildSelect(rel)
-	if err != nil {
-		return SelectResult{}, err
+	// Check if this is a custom join query
+	if len(query.Join) > 0 {
+		// Parse and build custom join query
+		cjq, err := dao.Schema.ParseCustomJoinQuery(relation, query)
+		if err != nil {
+			return SelectResult{}, err
+		}
+
+		sqlQuery, agg, err = dao.Schema.BuildCustomJoinSelect(cjq)
+		if err != nil {
+			return SelectResult{}, err
+		}
+	} else {
+		// Parse select clause for implicit FK-based joins
+		rel, err := ParseSelectFromJSON(query.Select, relation)
+		if err != nil {
+			return SelectResult{}, err
+		}
+
+		// Build SELECT query
+		sqlQuery, agg, err = dao.Schema.buildSelect(rel)
+		if err != nil {
+			return SelectResult{}, err
+		}
 	}
 
 	// Build WHERE clause
@@ -103,17 +114,17 @@ func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation str
 }
 
 // InsertJSON inserts a single row using JSON body format.
-// POST /query/{table} (no Prefer header)
+// POST /data/query/{table} (no Prefer header)
 func (dao *Database) InsertJSON(ctx context.Context, relation string, req InsertRequest) ([]byte, error) {
 	return dao.insertJSON(ctx, dao.Client, relation, req)
 }
 
 func (dao *Database) insertJSON(ctx context.Context, exec Executor, relation string, req InsertRequest) ([]byte, error) {
-	if err := ValidateTableName(relation); err != nil {
+	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.id == 1 && relation == ReservedTableDatabases {
-		return nil, ErrReservedTable
+	if dao.ID == 1 && relation == ReservedTableDatabases {
+		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -122,25 +133,47 @@ func (dao *Database) insertJSON(ctx context.Context, exec Executor, relation str
 	}
 
 	if len(req.Data) == 0 {
-		return nil, errors.New("insert requires at least one column")
+		return nil, errors.New("insert requires at least one row")
 	}
 
-	args := make([]any, 0, len(req.Data))
-	columns := ""
-	values := ""
+	if len(req.Data[0]) == 0 {
+		return nil, errors.New("insert rows must have at least one column")
+	}
 
-	for col, val := range req.Data {
-		_, err = table.SearchCols(col)
-		if err != nil {
+	// Build column list from first row - collect into slice for consistent ordering
+	columns := make([]string, 0, len(req.Data[0]))
+	for col := range req.Data[0] {
+		if _, err := table.SearchCols(col); err != nil {
 			return nil, err
 		}
-
-		args = append(args, val)
-		columns += fmt.Sprintf("[%s], ", col)
-		values += "?, "
+		columns = append(columns, col)
 	}
 
-	query := fmt.Sprintf("INSERT INTO [%s] (%s) VALUES (%s) ", relation, columns[:len(columns)-2], values[:len(values)-2])
+	query := fmt.Sprintf("INSERT INTO [%s] ( ", relation)
+	args := make([]any, 0, len(req.Data)*len(columns))
+	valuesTemplate := "( "
+
+	for _, col := range columns {
+		query += fmt.Sprintf("[%s], ", col)
+		valuesTemplate += "?, "
+	}
+
+	query = query[:len(query)-2] + " ) VALUES "
+	valuesTemplate = valuesTemplate[:len(valuesTemplate)-2] + " )"
+
+	// Build values for each row using consistent column order
+	for i, row := range req.Data {
+		if i > 0 {
+			query += ", "
+		}
+		query += valuesTemplate
+
+		for _, col := range columns {
+			args = append(args, row[col])
+		}
+	}
+
+	query += " "
 
 	if len(req.Returning) > 0 {
 		retQuery, err := table.BuildReturningFromJSON(req.Returning)
@@ -163,18 +196,18 @@ func (dao *Database) insertJSON(ctx context.Context, exec Executor, relation str
 	return json.Marshal(map[string]any{"last_insert_id": lastInsertId})
 }
 
-// InsertIgnoreJSON inserts a single row, ignoring conflicts.
-// POST /query/{table} with Prefer: on-conflict=ignore
+// InsertIgnoreJSON inserts row(s), ignoring conflicts.
+// POST /data/query/{table} with Prefer: operation=insert,on-conflict=ignore
 func (dao *Database) InsertIgnoreJSON(ctx context.Context, relation string, req InsertRequest) ([]byte, error) {
 	return dao.insertIgnoreJSON(ctx, dao.Client, relation, req)
 }
 
 func (dao *Database) insertIgnoreJSON(ctx context.Context, exec Executor, relation string, req InsertRequest) ([]byte, error) {
-	if err := ValidateTableName(relation); err != nil {
+	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.id == 1 && relation == ReservedTableDatabases {
-		return nil, ErrReservedTable
+	if dao.ID == 1 && relation == ReservedTableDatabases {
+		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -183,25 +216,47 @@ func (dao *Database) insertIgnoreJSON(ctx context.Context, exec Executor, relati
 	}
 
 	if len(req.Data) == 0 {
-		return nil, errors.New("insert requires at least one column")
+		return nil, errors.New("insert requires at least one row")
 	}
 
-	args := make([]any, 0, len(req.Data))
-	columns := ""
-	values := ""
+	if len(req.Data[0]) == 0 {
+		return nil, errors.New("insert rows must have at least one column")
+	}
 
-	for col, val := range req.Data {
-		_, err = table.SearchCols(col)
-		if err != nil {
+	// Build column list from first row - collect into slice for consistent ordering
+	columns := make([]string, 0, len(req.Data[0]))
+	for col := range req.Data[0] {
+		if _, err := table.SearchCols(col); err != nil {
 			return nil, err
 		}
-
-		args = append(args, val)
-		columns += fmt.Sprintf("[%s], ", col)
-		values += "?, "
+		columns = append(columns, col)
 	}
 
-	query := fmt.Sprintf("INSERT OR IGNORE INTO [%s] (%s) VALUES (%s) ", relation, columns[:len(columns)-2], values[:len(values)-2])
+	query := fmt.Sprintf("INSERT OR IGNORE INTO [%s] ( ", relation)
+	args := make([]any, 0, len(req.Data)*len(columns))
+	valuesTemplate := "( "
+
+	for _, col := range columns {
+		query += fmt.Sprintf("[%s], ", col)
+		valuesTemplate += "?, "
+	}
+
+	query = query[:len(query)-2] + " ) VALUES "
+	valuesTemplate = valuesTemplate[:len(valuesTemplate)-2] + " )"
+
+	// Build values for each row using consistent column order
+	for i, row := range req.Data {
+		if i > 0 {
+			query += ", "
+		}
+		query += valuesTemplate
+
+		for _, col := range columns {
+			args = append(args, row[col])
+		}
+	}
+
+	query += " "
 
 	if len(req.Returning) > 0 {
 		retQuery, err := table.BuildReturningFromJSON(req.Returning)
@@ -225,17 +280,17 @@ func (dao *Database) insertIgnoreJSON(ctx context.Context, exec Executor, relati
 }
 
 // UpsertJSON inserts multiple rows, updating on conflict.
-// POST /query/{table} with Prefer: on-conflict=replace
+// POST /data/query/{table} with Prefer: on-conflict=replace
 func (dao *Database) UpsertJSON(ctx context.Context, relation string, req UpsertRequest) ([]byte, error) {
 	return dao.upsertJSON(ctx, dao.Client, relation, req)
 }
 
 func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation string, req UpsertRequest) ([]byte, error) {
-	if err := ValidateTableName(relation); err != nil {
+	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.id == 1 && relation == ReservedTableDatabases {
-		return nil, ErrReservedTable
+	if dao.ID == 1 && relation == ReservedTableDatabases {
+		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -251,40 +306,46 @@ func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation str
 		return nil, errors.New("upsert rows must have at least one column")
 	}
 
-	query := fmt.Sprintf("INSERT INTO [%s] ( ", relation)
-	args := make([]any, len(req.Data)*len(req.Data[0]))
-	vals := "( "
-
-	colI := 0
+	// Collect columns into slice for consistent ordering
+	columns := make([]string, 0, len(req.Data[0]))
 	for col := range req.Data[0] {
-		_, err := table.SearchCols(col)
-		if err != nil {
+		if _, err := table.SearchCols(col); err != nil {
 			return nil, err
 		}
-
-		query += fmt.Sprintf("[%s], ", col)
-		vals += "?, "
-
-		for i, cols := range req.Data {
-			args[i*len(cols)+colI] = cols[col]
-		}
-		colI++
+		columns = append(columns, col)
 	}
 
-	vals = vals[:len(vals)-2] + "), "
+	query := fmt.Sprintf("INSERT INTO [%s] ( ", relation)
+	args := make([]any, 0, len(req.Data)*len(columns))
+	valuesTemplate := "( "
+
+	for _, col := range columns {
+		query += fmt.Sprintf("[%s], ", col)
+		valuesTemplate += "?, "
+	}
+
+	valuesTemplate = valuesTemplate[:len(valuesTemplate)-2] + " )"
 	query = query[:len(query)-2] + " ) VALUES "
 
-	for i := 0; i < len(req.Data); i++ {
-		query += vals
+	// Build values for each row
+	for i, row := range req.Data {
+		if i > 0 {
+			query += ", "
+		}
+		query += valuesTemplate
+
+		for _, col := range columns {
+			args = append(args, row[col])
+		}
 	}
 
 	if table.Pk == "" {
-		query = query[:len(query)-2] + " ON CONFLICT(rowid) DO UPDATE SET "
+		query += " ON CONFLICT(rowid) DO UPDATE SET "
 	} else {
-		query = query[:len(query)-2] + fmt.Sprintf(" ON CONFLICT([%s]) DO UPDATE SET ", table.Pk)
+		query += fmt.Sprintf(" ON CONFLICT([%s]) DO UPDATE SET ", table.Pk)
 	}
 
-	for col := range req.Data[0] {
+	for _, col := range columns {
 		query += fmt.Sprintf("[%s] = excluded.[%s], ", col, col)
 	}
 
@@ -312,17 +373,17 @@ func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation str
 }
 
 // UpdateJSON modifies rows using JSON body format.
-// PATCH /query/{table}
+// PATCH /data/query/{table}
 func (dao *Database) UpdateJSON(ctx context.Context, relation string, req UpdateRequest) ([]byte, error) {
 	return dao.updateJSON(ctx, dao.Client, relation, req)
 }
 
 func (dao *Database) updateJSON(ctx context.Context, exec Executor, relation string, req UpdateRequest) ([]byte, error) {
-	if err := ValidateTableName(relation); err != nil {
+	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.id == 1 && relation == ReservedTableDatabases {
-		return nil, ErrReservedTable
+	if dao.ID == 1 && relation == ReservedTableDatabases {
+		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -359,7 +420,7 @@ func (dao *Database) updateJSON(ctx context.Context, exec Executor, relation str
 	}
 
 	if where == "" {
-		return nil, ErrMissingWhereClause
+		return nil, tools.ErrMissingWhereClause
 	}
 	query += where
 	args = append(args, whereArgs...)
@@ -377,17 +438,17 @@ func (dao *Database) updateJSON(ctx context.Context, exec Executor, relation str
 }
 
 // DeleteJSON removes rows using JSON body format.
-// DELETE /query/{table}
+// DELETE /data/query/{table}
 func (dao *Database) DeleteJSON(ctx context.Context, relation string, req DeleteRequest) ([]byte, error) {
 	return dao.deleteJSON(ctx, dao.Client, relation, req)
 }
 
 func (dao *Database) deleteJSON(ctx context.Context, exec Executor, relation string, req DeleteRequest) ([]byte, error) {
-	if err := ValidateTableName(relation); err != nil {
+	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.id == 1 && relation == ReservedTableDatabases {
-		return nil, ErrReservedTable
+	if dao.ID == 1 && relation == ReservedTableDatabases {
+		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -403,7 +464,7 @@ func (dao *Database) deleteJSON(ctx context.Context, exec Executor, relation str
 	}
 
 	if where == "" {
-		return nil, ErrMissingWhereClause
+		return nil, tools.ErrMissingWhereClause
 	}
 	query += where
 

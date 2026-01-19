@@ -1,4 +1,4 @@
-package database
+package data
 
 import (
 	"bytes"
@@ -14,62 +14,10 @@ import (
 	"sync"
 
 	"github.com/joe-ervin05/atomicbase/config"
+	"github.com/joe-ervin05/atomicbase/tools"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
-
-// PrimaryDao wraps Database for operations on the primary/local database.
-type PrimaryDao struct {
-	Database
-}
-
-// Database represents a connection to a SQLite/Turso database with cached schema.
-type Database struct {
-	Client *sql.DB     // SQL database connection
-	Schema SchemaCache // Cached schema for validation
-	id     int32       // Internal database ID (1 = primary)
-}
-
-// SchemaCache holds cached table and foreign key information for query validation.
-type SchemaCache struct {
-	Tables    map[string]Table // Keyed by table name
-	Fks       map[string][]Fk  // Keyed by table name -> list of FKs from that table
-	FTSTables map[string]bool  // Set of tables that have FTS5 indexes
-}
-
-// Fk represents a foreign key relationship between tables.
-type Fk struct {
-	Table      string // Table containing the FK column
-	References string // Referenced table
-	From       string // FK column name
-	To         string // Referenced column name
-}
-
-// Table represents a database table's schema.
-type Table struct {
-	Name    string         `json:"name"`    // Table name
-	Pk      string         `json:"pk"`      // Primary key column name (empty if rowid)
-	Columns map[string]Col `json:"columns"` // Keyed by column name
-}
-
-// Col represents a column definition.
-type Col struct {
-	Name       string `json:"name"`                 // Column name
-	Type       string `json:"type"`                 // SQLite type (TEXT, INTEGER, REAL, BLOB)
-	NotNull    bool   `json:"notNull,omitempty"`    // NOT NULL constraint
-	Default    any    `json:"default,omitempty"`    // Default value (nil if none)
-	References string `json:"references,omitempty"` // Foreign key reference (format: "table.column")
-}
-
-// SchemaTemplate represents a reusable schema template for multi-tenant databases.
-// Daughter databases associated with a template will inherit its schema.
-type SchemaTemplate struct {
-	ID        int32   `json:"id"`
-	Name      string  `json:"name"`
-	Tables    []Table `json:"tables"`    // Table definitions for this template
-	CreatedAt string  `json:"createdAt"` // ISO timestamp
-	UpdatedAt string  `json:"updatedAt"` // ISO timestamp
-}
 
 // Primary database connection (reused across requests)
 var (
@@ -150,7 +98,7 @@ func initPrimaryDB() error {
 
 	// Load schema
 	dao := PrimaryDao{Database: Database{db, SchemaCache{}, 1}}
-	if err := dao.updateSchema(); err != nil {
+	if err := dao.Database.updateSchema(); err != nil {
 		db.Close()
 		return err
 	}
@@ -182,7 +130,7 @@ func ConnPrimary() (PrimaryDao, error) {
 		Database: Database{
 			Client: primaryDB,
 			Schema: schema,
-			id:     1,
+			ID:     1,
 		},
 	}, nil
 }
@@ -211,12 +159,12 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 	err := row.Scan(&id, &token, &sData)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Database{}, ErrDatabaseNotFound
+			return Database{}, tools.ErrDatabaseNotFound
 		}
 		return Database{}, err
 	}
 
-	schema, err := loadSchema(sData)
+	schema, err := LoadSchema(sData)
 
 	if err != nil {
 		return Database{}, err
@@ -329,4 +277,16 @@ func (dao *Database) QueryJSON(ctx context.Context, query string, args ...any) (
 	}
 
 	return json.Marshal(&m)
+}
+
+// LoadSchema deserializes a SchemaCache from gob-encoded bytes.
+func LoadSchema(data []byte) (SchemaCache, error) {
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+
+	var schema SchemaCache
+
+	err := dec.Decode(&schema)
+
+	return schema, err
 }

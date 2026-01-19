@@ -13,8 +13,10 @@ import (
 	"github.com/joe-ervin05/atomicbase/admin"
 	"github.com/joe-ervin05/atomicbase/auth"
 	"github.com/joe-ervin05/atomicbase/config"
-	"github.com/joe-ervin05/atomicbase/database"
+	"github.com/joe-ervin05/atomicbase/data"
+	"github.com/joe-ervin05/atomicbase/platform"
 	"github.com/joe-ervin05/atomicbase/storage"
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
 func logStartupInfo() {
@@ -59,17 +61,18 @@ func main() {
 	app := http.NewServeMux()
 
 	// Register routes from each module
-	database.RegisterRoutes(app)
+	data.RegisterRoutes(app)
+	platform.RegisterRoutes(app)
 	auth.RegisterRoutes(app)
 	storage.RegisterRoutes(app)
 	admin.RegisterRoutes(app)
 
 	// Apply middleware chain: logging -> timeout -> cors -> rate limit -> auth -> handler
-	handler := database.LoggingMiddleware(
-		database.TimeoutMiddleware(
-			database.CORSMiddleware(
-				database.RateLimitMiddleware(
-					database.AuthMiddleware(app)))))
+	handler := tools.LoggingMiddleware(
+		tools.TimeoutMiddleware(
+			tools.CORSMiddleware(
+				tools.RateLimitMiddleware(
+					tools.AuthMiddleware(app)))))
 
 	server := &http.Server{
 		Addr:    config.Cfg.Port,
@@ -100,7 +103,7 @@ func main() {
 	}
 
 	// Close the database connection
-	if err := database.ClosePrimaryDB(); err != nil {
+	if err := data.ClosePrimaryDB(); err != nil {
 		log.Printf("Error closing database: %v", err)
 	}
 

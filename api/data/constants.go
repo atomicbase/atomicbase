@@ -1,5 +1,4 @@
-// Package database provides constants used throughout the data access layer.
-package database
+package data
 
 // Column types for SQLite schema validation.
 const (
@@ -77,10 +76,17 @@ const (
 	OrderDesc = "desc"
 )
 
+// Join types for custom join clauses.
+const (
+	JoinTypeLeft  = "left"
+	JoinTypeInner = "inner"
+)
+
 // Query limits.
 const (
-	MaxInArraySize    = 100 // Max elements in IN/NOT IN arrays
-	MaxSelectColumns  = 50  // Max columns in SELECT (SQLite json_object limit: 100 args / 2)
+	MaxInArraySize     = 100 // Max elements in IN/NOT IN arrays
+	MaxSelectColumns   = 50  // Max columns in SELECT (SQLite json_object limit: 100 args / 2)
+	MaxBatchOperations = 100 // Max operations in a batch request
 )
 
 // InternalTablePrefix is the prefix for internal atomicbase tables.

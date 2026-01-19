@@ -1,8 +1,10 @@
-package database
+package data
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
 // BuildWhereFromJSON builds a WHERE clause from JSON filter array.
@@ -37,6 +39,31 @@ func (table Table) BuildWhereFromJSON(where []map[string]any, schema SchemaCache
 				first = false
 				query += "(" + orClause + ") "
 				args = append(args, orArgs...)
+				continue
+			}
+
+			// Handle table-wide FTS search: {"__fts": {"fts": "query"}}
+			if key == "__fts" {
+				filterMap, ok := value.(map[string]any)
+				if !ok {
+					return "", nil, fmt.Errorf("__fts value must be an object")
+				}
+				ftsQuery, ok := filterMap["fts"]
+				if !ok {
+					return "", nil, fmt.Errorf("__fts requires fts operator")
+				}
+				if !schema.HasFTSIndex(table.Name) {
+					return "", nil, fmt.Errorf("%w: %s", tools.ErrNoFTSIndex, table.Name)
+				}
+				ftsTable := table.Name + FTSSuffix
+				clause := fmt.Sprintf("rowid IN (SELECT rowid FROM [%s] WHERE [%s] MATCH ?) ", ftsTable, ftsTable)
+
+				if !first {
+					query += "AND "
+				}
+				first = false
+				query += clause
+				args = append(args, ftsQuery)
 				continue
 			}
 
@@ -93,6 +120,19 @@ func (table Table) buildOrClause(conditions []any, schema SchemaCache) (string, 
 	return strings.Join(parts, " OR "), args, nil
 }
 
+// isColumnRef checks if a value is a column reference marker {"__col": "column_name"}
+// and returns the column name if so.
+func isColumnRef(val any) (string, bool) {
+	m, ok := val.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if colName, ok := m["__col"].(string); ok {
+		return colName, true
+	}
+	return "", false
+}
+
 // buildFilterClause builds a single filter clause for a column.
 func (table Table) buildFilterClause(column string, filter map[string]any, schema SchemaCache) (string, []any, error) {
 	// Validate column exists
@@ -114,6 +154,16 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 
 	// Handle each operator
 	for op, val := range filter {
+		// Check if value is a column reference
+		if colRef, isCol := isColumnRef(val); isCol {
+			// Validate referenced column exists
+			if _, err := table.SearchCols(colRef); err != nil {
+				return "", nil, err
+			}
+			sqlOp := opToSQL(op)
+			return fmt.Sprintf("[%s].[%s] %s [%s].[%s] ", table.Name, column, sqlOp, table.Name, colRef), nil, nil
+		}
+
 		switch op {
 		case OpEq:
 			return fmt.Sprintf("[%s].[%s] = ? ", table.Name, column), []any{val}, nil
@@ -146,7 +196,7 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 				return "", nil, fmt.Errorf("in array cannot be empty")
 			}
 			if len(arr) > MaxInArraySize {
-				return "", nil, fmt.Errorf("%w: %d elements (max %d)", ErrInArrayTooLarge, len(arr), MaxInArraySize)
+				return "", nil, fmt.Errorf("%w: %d elements (max %d)", tools.ErrInArrayTooLarge, len(arr), MaxInArraySize)
 			}
 			placeholders := make([]string, len(arr))
 			for i := range arr {
@@ -160,15 +210,16 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 			}
 			return fmt.Sprintf("[%s].[%s] BETWEEN ? AND ? ", table.Name, column), arr, nil
 		case OpFts:
-			// Full-text search
+			// Full-text search on specific column
 			if !schema.HasFTSIndex(table.Name) {
-				return "", nil, fmt.Errorf("%w: %s", ErrNoFTSIndex, table.Name)
+				return "", nil, fmt.Errorf("%w: %s", tools.ErrNoFTSIndex, table.Name)
 			}
 			ftsTable := table.Name + FTSSuffix
-			query := fmt.Sprintf("rowid IN (SELECT rowid FROM [%s] WHERE [%s] MATCH ?) ", ftsTable, ftsTable)
+			// Search specific column within the FTS index
+			query := fmt.Sprintf("rowid IN (SELECT rowid FROM [%s] WHERE [%s] MATCH ?) ", ftsTable, column)
 			return query, []any{val}, nil
 		default:
-			return "", nil, fmt.Errorf("%w: %s", ErrInvalidOperator, op)
+			return "", nil, fmt.Errorf("%w: %s", tools.ErrInvalidOperator, op)
 		}
 	}
 
@@ -190,7 +241,7 @@ func (table Table) buildNotFilterClause(column string, filter map[string]any, sc
 				return "", nil, fmt.Errorf("in array cannot be empty")
 			}
 			if len(arr) > MaxInArraySize {
-				return "", nil, fmt.Errorf("%w: %d elements (max %d)", ErrInArrayTooLarge, len(arr), MaxInArraySize)
+				return "", nil, fmt.Errorf("%w: %d elements (max %d)", tools.ErrInArrayTooLarge, len(arr), MaxInArraySize)
 			}
 			placeholders := make([]string, len(arr))
 			for i := range arr {
@@ -207,7 +258,7 @@ func (table Table) buildNotFilterClause(column string, filter map[string]any, sc
 		case OpGlob:
 			return fmt.Sprintf("[%s].[%s] NOT GLOB ? ", table.Name, column), []any{val}, nil
 		default:
-			return "", nil, fmt.Errorf("%w: not.%s", ErrInvalidOperator, op)
+			return "", nil, fmt.Errorf("%w: not.%s", tools.ErrInvalidOperator, op)
 		}
 	}
 	return "", nil, nil

@@ -17,9 +17,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
-    "generate": "openapi-typescript ../api/handlers/openapi.yaml -o src/types.ts",
-    "prepublishOnly": "pnpm build"
+    "dev": "tsc --watch"
   },
   "keywords": [
     "atomicbase",
@@ -33,7 +31,6 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "openapi-typescript": "^7.0.0",
     "typescript": "^5.3.0"
   }
 }

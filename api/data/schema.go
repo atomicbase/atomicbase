@@ -1,4 +1,4 @@
-package database
+package data
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/joe-ervin05/atomicbase/config"
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
 func schemaFks(db *sql.DB) (map[string][]Fk, error) {
@@ -65,7 +66,7 @@ func schemaFTS(db *sql.DB) (map[string]bool, error) {
 	return ftsTables, rows.Err()
 }
 
-func schemaCols(db *sql.DB) (map[string]Table, error) {
+func SchemaCols(db *sql.DB) (map[string]Table, error) {
 	tbls := make(map[string]Table)
 
 	// First, fetch foreign keys and build a lookup map
@@ -160,7 +161,7 @@ func (dao *Database) saveSchema() error {
 	var client *sql.DB
 	var err error
 
-	if dao.id == 1 {
+	if dao.ID == 1 {
 		client = dao.Client
 	} else {
 		client, err = sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
@@ -183,20 +184,8 @@ func (dao *Database) saveSchema() error {
 		return err
 	}
 
-	_, err = client.Exec(fmt.Sprintf("UPDATE %s SET schema = ? WHERE id = ?", ReservedTableDatabases), buf.Bytes(), dao.id)
+	_, err = client.Exec(fmt.Sprintf("UPDATE %s SET schema = ? WHERE id = ?", ReservedTableDatabases), buf.Bytes(), dao.ID)
 	return err
-}
-
-func loadSchema(data []byte) (SchemaCache, error) {
-	buf := bytes.NewBuffer(data)
-	dec := gob.NewDecoder(buf)
-
-	var schema SchemaCache
-
-	err := dec.Decode(&schema)
-
-	return schema, err
-
 }
 
 // SearchFks searches for a foreign key from table to references.
@@ -219,7 +208,7 @@ func (schema SchemaCache) SearchFks(table string, references string) (Fk, bool) 
 func (schema SchemaCache) SearchTbls(table string) (Table, error) {
 	tbl, exists := schema.Tables[table]
 	if !exists {
-		return Table{}, TableNotFoundErr(table)
+		return Table{}, tools.TableNotFoundErr(table)
 	}
 	return tbl, nil
 }
@@ -229,7 +218,7 @@ func (schema SchemaCache) SearchTbls(table string) (Table, error) {
 func (tbl Table) SearchCols(col string) (Col, error) {
 	c, exists := tbl.Columns[col]
 	if !exists {
-		return Col{}, ColumnNotFoundErr(tbl.Name, col)
+		return Col{}, tools.ColumnNotFoundErr(tbl.Name, col)
 	}
 	return c, nil
 }
