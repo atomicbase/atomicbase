@@ -64,6 +64,10 @@ export type {
   AtomicbaseSingleResponse,
   AtomicbaseMaybeSingleResponse,
   AtomicbaseResponseWithCount,
+  // Batch types
+  BatchOperation,
+  BatchResponse,
+  AtomicbaseBatchResponse,
   // Configuration
   AtomicbaseClientOptions,
   // Query types

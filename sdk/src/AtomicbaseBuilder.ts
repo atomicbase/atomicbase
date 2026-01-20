@@ -1,9 +1,5 @@
 import { AtomicbaseError } from "./AtomicbaseError.js";
-import type {
-  AtomicbaseResponse,
-  AtomicbaseResponseWithCount,
-  QueryState,
-} from "./types.js";
+import type { AtomicbaseResponse, AtomicbaseResponseWithCount, QueryState } from "./types.js";
 
 /**
  * Base builder class that handles request execution, abort signals, and error modes.
@@ -97,12 +93,92 @@ export abstract class AtomicbaseBuilder<T> implements PromiseLike<AtomicbaseResp
   /**
    * Implements PromiseLike for lazy query execution.
    * The query only executes when awaited or .then() is called.
+   * Handles post-processing based on resultMode (single, maybeSingle, count, withCount).
    */
   then<TResult1 = AtomicbaseResponse<T>, TResult2 = never>(
     onfulfilled?: ((value: AtomicbaseResponse<T>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
-    return this.execute().then(onfulfilled, onrejected);
+    return this.executeWithResultMode().then(onfulfilled, onrejected);
+  }
+
+  /**
+   * Execute the query and apply post-processing based on resultMode.
+   */
+  private async executeWithResultMode(): Promise<AtomicbaseResponse<T>> {
+    const { resultMode } = this.state;
+
+    // For count modes, use executeWithCount
+    if (resultMode === "count" || resultMode === "withCount") {
+      const result = await this.executeWithCount();
+
+      if (result.error) {
+        if (this.shouldThrowOnError) {
+          throw result.error;
+        }
+        return { data: null, error: result.error } as AtomicbaseResponse<T>;
+      }
+
+      if (resultMode === "count") {
+        // Return just the count as data
+        return { data: (result.count ?? 0) as T, error: null };
+      }
+
+      // withCount - return as-is (data + count)
+      // Note: The type here is AtomicbaseResponseWithCount but we're returning AtomicbaseResponse
+      // The caller should use the withCount-specific types
+      return result as unknown as AtomicbaseResponse<T>;
+    }
+
+    // For default, single, maybeSingle - use regular execute
+    const result = await this.execute();
+
+    if (result.error) {
+      if (this.shouldThrowOnError) {
+        throw result.error;
+      }
+      return result;
+    }
+
+    // Post-process based on resultMode
+    if (resultMode === "single") {
+      const data = result.data as unknown[];
+      if (!data || data.length === 0) {
+        const error = new AtomicbaseError({
+          message: "No rows returned",
+          code: "NOT_FOUND",
+          status: 404,
+          hint: "The query returned no results. Check your filter conditions.",
+        });
+        if (this.shouldThrowOnError) {
+          throw error;
+        }
+        return { data: null, error };
+      }
+
+      if (data.length > 1) {
+        const error = new AtomicbaseError({
+          message: "Multiple rows returned",
+          code: "MULTIPLE_ROWS",
+          status: 400,
+          hint: "Expected a single row but got multiple. Add more specific filters.",
+        });
+        if (this.shouldThrowOnError) {
+          throw error;
+        }
+        return { data: null, error };
+      }
+
+      return { data: data[0] as T, error: null };
+    }
+
+    if (resultMode === "maybeSingle") {
+      const data = result.data as unknown[];
+      return { data: (data?.[0] ?? null) as T, error: null };
+    }
+
+    // Default mode - return as-is
+    return result;
   }
 
   // ---------------------------------------------------------------------------

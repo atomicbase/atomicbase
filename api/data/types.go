@@ -169,7 +169,8 @@ type BatchRequest struct {
 type BatchOperation struct {
 	Operation string         `json:"operation"` // select, insert, upsert, update, delete
 	Table     string         `json:"table"`
-	Body      map[string]any `json:"body"` // Operation-specific body
+	Body      map[string]any `json:"body"`  // Operation-specific body
+	Count     bool           `json:"count"` // Include count in select results (for count/withCount modes)
 }
 
 // BatchResponse represents the response from a batch request.

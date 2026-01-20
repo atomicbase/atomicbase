@@ -134,11 +134,29 @@ func isColumnRef(val any) (string, bool) {
 }
 
 // buildFilterClause builds a single filter clause for a column.
+// Supports table.column syntax for join queries.
 func (table Table) buildFilterClause(column string, filter map[string]any, schema SchemaCache) (string, []any, error) {
-	// Validate column exists
-	_, err := table.SearchCols(column)
-	if err != nil {
-		return "", nil, err
+	// Parse table.column format if present
+	tableName := table.Name
+	colName := column
+	if idx := strings.Index(column, "."); idx != -1 {
+		tableName = column[:idx]
+		colName = column[idx+1:]
+		// Validate the table exists in schema
+		tbl, err := schema.SearchTbls(tableName)
+		if err != nil {
+			return "", nil, err
+		}
+		// Validate column exists in that table
+		if _, err := tbl.SearchCols(colName); err != nil {
+			return "", nil, err
+		}
+	} else {
+		// Validate column exists in base table
+		_, err := table.SearchCols(column)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 
 	var args []any
@@ -149,7 +167,7 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 		if !ok {
 			return "", nil, fmt.Errorf("not value must be an object")
 		}
-		return table.buildNotFilterClause(column, notMap, schema)
+		return table.buildNotFilterClauseWithTable(tableName, colName, notMap, schema)
 	}
 
 	// Handle each operator
@@ -161,32 +179,32 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 				return "", nil, err
 			}
 			sqlOp := opToSQL(op)
-			return fmt.Sprintf("[%s].[%s] %s [%s].[%s] ", table.Name, column, sqlOp, table.Name, colRef), nil, nil
+			return fmt.Sprintf("[%s].[%s] %s [%s].[%s] ", tableName, colName, sqlOp, table.Name, colRef), nil, nil
 		}
 
 		switch op {
 		case OpEq:
-			return fmt.Sprintf("[%s].[%s] = ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] = ? ", tableName, colName), []any{val}, nil
 		case OpNeq:
-			return fmt.Sprintf("[%s].[%s] != ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] != ? ", tableName, colName), []any{val}, nil
 		case OpGt:
-			return fmt.Sprintf("[%s].[%s] > ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] > ? ", tableName, colName), []any{val}, nil
 		case OpGte:
-			return fmt.Sprintf("[%s].[%s] >= ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] >= ? ", tableName, colName), []any{val}, nil
 		case OpLt:
-			return fmt.Sprintf("[%s].[%s] < ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] < ? ", tableName, colName), []any{val}, nil
 		case OpLte:
-			return fmt.Sprintf("[%s].[%s] <= ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] <= ? ", tableName, colName), []any{val}, nil
 		case OpLike:
-			return fmt.Sprintf("[%s].[%s] LIKE ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] LIKE ? ", tableName, colName), []any{val}, nil
 		case OpGlob:
-			return fmt.Sprintf("[%s].[%s] GLOB ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] GLOB ? ", tableName, colName), []any{val}, nil
 		case OpIs:
 			// IS NULL, IS TRUE, IS FALSE
 			if val == nil {
-				return fmt.Sprintf("[%s].[%s] IS NULL ", table.Name, column), nil, nil
+				return fmt.Sprintf("[%s].[%s] IS NULL ", tableName, colName), nil, nil
 			}
-			return fmt.Sprintf("[%s].[%s] IS %v ", table.Name, column, val), nil, nil
+			return fmt.Sprintf("[%s].[%s] IS %v ", tableName, colName, val), nil, nil
 		case OpIn:
 			arr, ok := val.([]any)
 			if !ok {
@@ -202,21 +220,21 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 			for i := range arr {
 				placeholders[i] = "?"
 			}
-			return fmt.Sprintf("[%s].[%s] IN (%s) ", table.Name, column, strings.Join(placeholders, ", ")), arr, nil
+			return fmt.Sprintf("[%s].[%s] IN (%s) ", tableName, colName, strings.Join(placeholders, ", ")), arr, nil
 		case OpBetween:
 			arr, ok := val.([]any)
 			if !ok || len(arr) != 2 {
 				return "", nil, fmt.Errorf("between value must be an array of exactly 2 elements")
 			}
-			return fmt.Sprintf("[%s].[%s] BETWEEN ? AND ? ", table.Name, column), arr, nil
+			return fmt.Sprintf("[%s].[%s] BETWEEN ? AND ? ", tableName, colName), arr, nil
 		case OpFts:
-			// Full-text search on specific column
-			if !schema.HasFTSIndex(table.Name) {
-				return "", nil, fmt.Errorf("%w: %s", tools.ErrNoFTSIndex, table.Name)
+			// Full-text search on specific column (only supported on base table)
+			if !schema.HasFTSIndex(tableName) {
+				return "", nil, fmt.Errorf("%w: %s", tools.ErrNoFTSIndex, tableName)
 			}
-			ftsTable := table.Name + FTSSuffix
+			ftsTable := tableName + FTSSuffix
 			// Search specific column within the FTS index
-			query := fmt.Sprintf("rowid IN (SELECT rowid FROM [%s] WHERE [%s] MATCH ?) ", ftsTable, column)
+			query := fmt.Sprintf("rowid IN (SELECT rowid FROM [%s] WHERE [%s] MATCH ?) ", ftsTable, colName)
 			return query, []any{val}, nil
 		default:
 			return "", nil, fmt.Errorf("%w: %s", tools.ErrInvalidOperator, op)
@@ -228,10 +246,15 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 
 // buildNotFilterClause builds a NOT filter clause.
 func (table Table) buildNotFilterClause(column string, filter map[string]any, schema SchemaCache) (string, []any, error) {
+	return table.buildNotFilterClauseWithTable(table.Name, column, filter, schema)
+}
+
+// buildNotFilterClauseWithTable builds a NOT filter clause with explicit table name.
+func (table Table) buildNotFilterClauseWithTable(tableName, colName string, filter map[string]any, schema SchemaCache) (string, []any, error) {
 	for op, val := range filter {
 		switch op {
 		case OpEq:
-			return fmt.Sprintf("[%s].[%s] != ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] != ? ", tableName, colName), []any{val}, nil
 		case OpIn:
 			arr, ok := val.([]any)
 			if !ok {
@@ -247,16 +270,16 @@ func (table Table) buildNotFilterClause(column string, filter map[string]any, sc
 			for i := range arr {
 				placeholders[i] = "?"
 			}
-			return fmt.Sprintf("[%s].[%s] NOT IN (%s) ", table.Name, column, strings.Join(placeholders, ", ")), arr, nil
+			return fmt.Sprintf("[%s].[%s] NOT IN (%s) ", tableName, colName, strings.Join(placeholders, ", ")), arr, nil
 		case OpIs:
 			if val == nil {
-				return fmt.Sprintf("[%s].[%s] IS NOT NULL ", table.Name, column), nil, nil
+				return fmt.Sprintf("[%s].[%s] IS NOT NULL ", tableName, colName), nil, nil
 			}
-			return fmt.Sprintf("[%s].[%s] IS NOT %v ", table.Name, column, val), nil, nil
+			return fmt.Sprintf("[%s].[%s] IS NOT %v ", tableName, colName, val), nil, nil
 		case OpLike:
-			return fmt.Sprintf("[%s].[%s] NOT LIKE ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] NOT LIKE ? ", tableName, colName), []any{val}, nil
 		case OpGlob:
-			return fmt.Sprintf("[%s].[%s] NOT GLOB ? ", table.Name, column), []any{val}, nil
+			return fmt.Sprintf("[%s].[%s] NOT GLOB ? ", tableName, colName), []any{val}, nil
 		default:
 			return "", nil, fmt.Errorf("%w: not.%s", tools.ErrInvalidOperator, op)
 		}

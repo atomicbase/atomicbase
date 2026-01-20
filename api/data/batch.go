@@ -50,13 +50,20 @@ func (dao *Database) executeOperation(ctx context.Context, tx Executor, op Batch
 		if err := mapToStruct(op.Body, &query); err != nil {
 			return nil, err
 		}
-		result, err := dao.selectJSON(ctx, tx, op.Table, query, false)
+		result, err := dao.selectJSON(ctx, tx, op.Table, query, op.Count)
 		if err != nil {
 			return nil, err
 		}
 		var data []any
 		if err := json.Unmarshal(result.Data, &data); err != nil {
 			return nil, err
+		}
+		// If count was requested, return an object with data and count
+		if op.Count {
+			return map[string]any{
+				"data":  data,
+				"count": result.Count,
+			}, nil
 		}
 		return data, nil
 

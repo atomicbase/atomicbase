@@ -9,6 +9,7 @@ Atomicbase is the backend for effortless multi-tenant architecture. It provides 
 | Component        | Status   |
 | ---------------- | -------- |
 | Database API     | Beta     |
+| TypeScript SDK   | Beta     |
 | Schema Templates | Beta     |
 | Authentication   | Planning |
 | File Storage     | Planning |
@@ -16,22 +17,250 @@ Atomicbase is the backend for effortless multi-tenant architecture. It provides 
 
 ## Quick Start
 
+### API
+
 ```bash
 cd api
-go build -o atomicbase .
+CGO_ENABLED=1 go build -tags fts5 -o atomicbase .
 ./atomicbase
 ```
 
 The API runs on `http://localhost:8080` by default.
 
+### SDK
+
+```bash
+npm install @atomicbase/sdk
+```
+
+```typescript
+import { createClient, eq, fts, onEq } from '@atomicbase/sdk'
+
+const client = createClient({
+  url: 'http://localhost:8080',
+  apiKey: 'your-api-key'
+})
+
+// Select with filters
+const { data, error } = await client
+  .from('users')
+  .select('id', 'name', 'email')
+  .where(eq('status', 'active'))
+  .orderBy('created_at', 'desc')
+  .limit(10)
+
+// Insert
+const { data } = await client
+  .from('users')
+  .insert({ name: 'Alice', email: 'alice@example.com' })
+  .returning('id')
+
+// Update
+const { data } = await client
+  .from('users')
+  .update({ status: 'inactive' })
+  .where(eq('id', 5))
+
+// Delete
+const { data } = await client
+  .from('users')
+  .delete()
+  .where(eq('id', 5))
+```
+
+## TypeScript SDK
+
+### Installation
+
+```bash
+npm install @atomicbase/sdk
+# or
+pnpm add @atomicbase/sdk
+```
+
+### Client Setup
+
+```typescript
+import { createClient } from '@atomicbase/sdk'
+
+const client = createClient({
+  url: 'http://localhost:8080',
+  apiKey: 'your-api-key',        // optional
+  headers: { 'Tenant': 'mydb' }  // optional: target tenant database
+})
+```
+
+### Filtering
+
+```typescript
+import { eq, neq, gt, gte, lt, lte, like, glob, inArray, between, isNull, isNotNull, fts, not, or, and, col } from '@atomicbase/sdk'
+
+// Basic filters
+.where(eq('status', 'active'))
+.where(gt('age', 21))
+.where(like('name', '%smith%'))
+.where(inArray('role', ['admin', 'moderator']))
+.where(between('price', 10, 100))
+.where(isNull('deleted_at'))
+
+// Negation
+.where(not(eq('status', 'banned')))
+.where(isNotNull('email'))
+
+// OR conditions
+.where(or(eq('role', 'admin'), eq('role', 'moderator')))
+
+// AND conditions (multiple .where() calls are ANDed)
+.where(eq('status', 'active'))
+.where(gt('age', 18))
+
+// Column-to-column comparison
+.where(gt('updated_at', col('created_at')))
+
+// Full-text search
+.where(fts('hello world'))              // search all indexed columns
+.where(fts('title', 'hello world'))     // search specific column
+```
+
+### Nested Relations (Implicit Joins)
+
+Auto-join via foreign keys:
+
+```typescript
+const { data } = await client
+  .from('users')
+  .select('id', 'name', { posts: ['title', { comments: ['body'] }] })
+```
+
+Returns nested JSON:
+
+```json
+[{"id": 1, "name": "Alice", "posts": [{"title": "Hello", "comments": [...]}]}]
+```
+
+### Custom Joins (Explicit Joins)
+
+For joins without FK relationships or with custom conditions:
+
+```typescript
+import { onEq, onGt, onLt, onGte, onLte, onNeq } from '@atomicbase/sdk'
+
+// Left join (default) - all users, with orders if they exist
+const { data } = await client
+  .from('users')
+  .select('id', 'name', 'orders.total', 'orders.created_at')
+  .leftJoin('orders', onEq('users.id', 'orders.user_id'))
+
+// Inner join - only users with orders
+const { data } = await client
+  .from('users')
+  .select('id', 'name', 'orders.total')
+  .innerJoin('orders', onEq('users.id', 'orders.user_id'))
+
+// Multiple join conditions
+const { data } = await client
+  .from('users')
+  .select('id', 'name', 'orders.total')
+  .leftJoin('orders', [
+    onEq('users.id', 'orders.user_id'),
+    onEq('users.tenant_id', 'orders.tenant_id')
+  ])
+
+// Chained joins
+const { data } = await client
+  .from('users')
+  .select('users.id', 'users.name', 'orders.total', 'products.name')
+  .leftJoin('orders', onEq('users.id', 'orders.user_id'))
+  .leftJoin('products', onEq('orders.product_id', 'products.id'))
+
+// Flat output (no nesting)
+const { data } = await client
+  .from('users')
+  .select('id', 'name', 'orders.total')
+  .leftJoin('orders', onEq('users.id', 'orders.user_id'), { flat: true })
+// Returns: [{id: 1, name: "Alice", orders_total: 100}, {id: 1, name: "Alice", orders_total: 50}]
+```
+
+### Result Modifiers
+
+```typescript
+// Get exactly one row (errors if 0 or multiple)
+const { data, error } = await client.from('users').select().where(eq('id', 1)).single()
+
+// Get zero or one row (null if not found)
+const { data, error } = await client.from('users').select().where(eq('email', 'test@example.com')).maybeSingle()
+
+// Get count only
+const { data: count } = await client.from('users').select().where(eq('status', 'active')).count()
+
+// Get data with total count
+const { data, count } = await client.from('users').select().limit(10).withCount()
+```
+
+### Insert Operations
+
+```typescript
+// Single insert
+const { data } = await client.from('users').insert({ name: 'Alice' })
+
+// Bulk insert
+const { data } = await client.from('users').insert([
+  { name: 'Alice' },
+  { name: 'Bob' }
+])
+
+// Insert with returning
+const { data } = await client.from('users').insert({ name: 'Alice' }).returning('id', 'created_at')
+
+// Upsert (insert or update on conflict)
+const { data } = await client.from('users').upsert({ id: 1, name: 'Alice Updated' })
+
+// Insert ignore (skip on conflict)
+const { data } = await client.from('users').insert({ id: 1, name: 'Alice' }).onConflict('ignore')
+```
+
+### Batch Operations
+
+Execute multiple operations atomically in a single request:
+
+```typescript
+const { data, error } = await client.batch([
+  client.from('users').insert({ name: 'Alice' }),
+  client.from('users').insert({ name: 'Bob' }),
+  client.from('counters').update({ count: 2 }).where(eq('id', 1)),
+])
+
+// With result modifiers
+const { data, error } = await client.batch([
+  client.from('users').select().where(eq('id', 1)).single(),
+  client.from('users').select().count(),
+  client.from('posts').select().limit(10).withCount(),
+])
+// data.results[0] = { id: 1, name: 'Alice' }  (single object)
+// data.results[1] = 42  (count number)
+// data.results[2] = { data: [...], count: 100 }  (data with count)
+```
+
+### Error Handling
+
+```typescript
+const { data, error } = await client.from('users').select()
+
+if (error) {
+  console.error(error.code)    // e.g., "TABLE_NOT_FOUND"
+  console.error(error.message) // Human-readable message
+  console.error(error.hint)    // Actionable guidance
+}
+```
+
 ## REST API
 
-All CRUD operations go through `/query/{table}` with `Prefer` header and `Method` to specify behavior.
+All CRUD operations go through `/data/query/{table}` with `Prefer` header to specify behavior.
 
 **Select:**
 
 ```http
-POST /query/users
+POST /data/query/users
 Prefer: operation=select
 
 {"select": ["id", "name"], "where": [{"status": {"eq": "active"}}], "limit": 20}
@@ -40,7 +269,7 @@ Prefer: operation=select
 **Insert:**
 
 ```http
-POST /query/users
+POST /data/query/users
 
 {"data": {"name": "Alice", "email": "alice@example.com"}, "returning": ["id"]}
 ```
@@ -48,7 +277,7 @@ POST /query/users
 **Update:**
 
 ```http
-PATCH /query/users
+PATCH /data/query/users
 
 {"data": {"status": "inactive"}, "where": [{"id": {"eq": 5}}]}
 ```
@@ -56,9 +285,29 @@ PATCH /query/users
 **Delete:**
 
 ```http
-DELETE /query/users
+DELETE /data/query/users
 
 {"where": [{"id": {"eq": 5}}]}
+```
+
+### Custom Joins (REST API)
+
+```http
+POST /data/query/users
+Prefer: operation=select
+
+{
+  "select": ["id", "name", "orders.total", "orders.created_at"],
+  "join": [
+    {
+      "table": "orders",
+      "type": "left",
+      "on": [{"users.id": {"eq": "orders.user_id"}}],
+      "flat": false
+    }
+  ],
+  "where": [{"status": {"eq": "active"}}]
+}
 ```
 
 ### Filtering
@@ -84,33 +333,23 @@ DELETE /query/users
 }
 ```
 
-### Nested Relations
-
-Auto-join via foreign keys:
-
-```json
-{ "select": ["id", "name", { "posts": ["title", { "comments": ["body"] }] }] }
-```
-
-Returns nested JSON:
-
-```json
-[{"id": 1, "name": "Alice", "posts": [{"title": "Hello", "comments": [...]}]}]
-```
-
 ### Full-Text Search
 
 Create an FTS index, then query with `fts` operator:
 
 ```http
-POST /schema/fts/articles
+POST /data/schema/fts/articles
 {"columns": ["title", "content"]}
 ```
 
 ```http
-POST /query/articles
+POST /data/query/articles
 Prefer: operation=select
 
+# Search all indexed columns
+{"select": ["*"], "where": [{"__fts": {"fts": "sqlite database"}}]}
+
+# Search specific column
 {"select": ["*"], "where": [{"title": {"fts": "sqlite database"}}]}
 ```
 
@@ -119,7 +358,7 @@ Prefer: operation=select
 Execute multiple operations atomically in a single request:
 
 ```http
-POST /batch
+POST /data/batch
 
 {
   "operations": [
@@ -139,11 +378,21 @@ For complete API documentation, see [docs/database_api_design.md](./docs/databas
 ### Database API
 
 - JSON query syntax (filtering, ordering, pagination)
-- Nested relation queries with automatic joins
+- Nested relation queries with automatic FK-based joins
+- Custom explicit joins (LEFT, INNER)
 - Full-text search (FTS5)
 - Batch operations (atomic transactions)
 - Schema management (create, alter, drop tables)
 - Multi-database support (local SQLite + Turso)
+
+### TypeScript SDK
+
+- Type-safe query builder with fluent API
+- Filter functions (eq, gt, like, fts, etc.)
+- Join functions (onEq, onGt, etc.)
+- Result modifiers (single, maybeSingle, count, withCount)
+- Batch operations (atomic transactions)
+- Discriminated union responses for type-safe error handling
 
 ### Schema Templates
 
@@ -252,14 +501,14 @@ All errors return a consistent JSON structure with a stable `code` for programma
 
 | Category  | Endpoint                                         | Methods                  |
 | --------- | ------------------------------------------------ | ------------------------ |
-| Query     | `/query/{table}`                                 | POST, PATCH, DELETE      |
-| Batch     | `/batch`                                         | POST                     |
-| Schema    | `/schema`                                        | GET                      |
-| Schema    | `/schema/table/{table}`                          | GET, POST, PATCH, DELETE |
-| FTS       | `/schema/fts`, `/schema/fts/{table}`             | GET, POST, DELETE        |
-| Tenants   | `/tenants`, `/tenants/{name}`                    | GET, POST, PATCH, DELETE |
-| Templates | `/templates`, `/templates/{name}`                | GET, POST, PUT, DELETE   |
-| Sync      | `/templates/{name}/sync`, `/tenants/{name}/sync` | POST                     |
+| Query     | `/data/query/{table}`                            | POST, PATCH, DELETE      |
+| Batch     | `/data/batch`                                    | POST                     |
+| Schema    | `/data/schema`                                   | GET                      |
+| Schema    | `/data/schema/table/{table}`                     | GET, POST, PATCH, DELETE |
+| FTS       | `/data/schema/fts`, `/data/schema/fts/{table}`   | GET, POST, DELETE        |
+| Tenants   | `/platform/tenants`, `/platform/tenants/{name}`  | GET, POST, PATCH, DELETE |
+| Templates | `/platform/templates`, `/platform/templates/{name}` | GET, POST, PUT, DELETE |
+| Sync      | `/platform/templates/{name}/sync`, `/platform/tenants/{name}/sync` | POST |
 | Health    | `/health`                                        | GET                      |
 | Docs      | `/openapi.yaml`, `/docs`                         | GET                      |
 
@@ -278,18 +527,37 @@ All errors return a consistent JSON structure with a stable `code` for programma
 api/
 ├── main.go          # Entry point, server setup, graceful shutdown
 ├── config/          # Environment-based configuration
-├── database/        # Database API (queries, schema, templates, FTS)
+├── data/            # Data API (queries, schema, FTS, batch)
+├── platform/        # Platform API (tenants, templates, sync)
+├── tools/           # Shared utilities (middleware, errors, validation)
 ├── auth/            # Authentication (planned)
 ├── storage/         # File storage (planned)
 └── admin/           # Dashboard backend (planned)
+
+sdk/
+├── src/
+│   ├── AtomicbaseClient.ts       # Main client factory
+│   ├── AtomicbaseQueryBuilder.ts # Query builder with CRUD methods
+│   ├── AtomicbaseTransformBuilder.ts # Result modifiers (single, count, etc.)
+│   ├── filters.ts                # Filter functions (eq, gt, fts, onEq, etc.)
+│   ├── types.ts                  # TypeScript type definitions
+│   └── index.ts                  # Public exports
+└── package.json
 ```
 
 ## Development
 
 ```bash
+# API
 cd api
-go test ./...
-go build .
+CGO_ENABLED=1 go test -tags fts5 ./...
+CGO_ENABLED=1 go build -tags fts5 .
+
+# SDK
+cd sdk
+pnpm install
+pnpm build
+pnpm dev  # watch mode
 ```
 
 ## Coming Soon
@@ -297,7 +565,6 @@ go build .
 - **Authentication** - User management, sessions, OAuth providers
 - **File Storage** - S3-compatible object storage integration
 - **Dashboard** - Web UI for database management and monitoring
-- **TypeScript SDK** - Type-safe client library
 
 ## Contributing
 

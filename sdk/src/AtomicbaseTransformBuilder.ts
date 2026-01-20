@@ -1,13 +1,5 @@
 import { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
-import { AtomicbaseError } from "./AtomicbaseError.js";
-import type {
-  AtomicbaseResponse,
-  AtomicbaseResponseWithCount,
-  AtomicbaseSingleResponse,
-  AtomicbaseMaybeSingleResponse,
-  FilterCondition,
-  OrderDirection,
-} from "./types.js";
+import type { FilterCondition, OrderDirection } from "./types.js";
 
 /**
  * Transform builder that adds query modifiers like order, limit, range, etc.
@@ -110,6 +102,7 @@ export abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBuilder<T>
 
   /**
    * Return a single row. Errors if zero or multiple rows are returned.
+   * This is a chainable modifier - the query only executes when awaited.
    *
    * @example
    * ```ts
@@ -122,50 +115,18 @@ export abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBuilder<T>
    * // data is a single object, not an array
    * ```
    */
-  async single(): Promise<AtomicbaseSingleResponse<T extends (infer U)[] ? U : T>> {
+  single(): this {
+    this.state.resultMode = "single";
     // Fetch 2 to detect "multiple rows" error
-    this.state.limitValue = 2;
-    const result = await this.execute();
-
-    if (result.error) {
-      if (this.shouldThrowOnError) {
-        throw result.error;
-      }
-      return result as AtomicbaseSingleResponse<T extends (infer U)[] ? U : T>;
+    if (this.state.limitValue === null) {
+      this.state.limitValue = 2;
     }
-
-    const data = result.data as unknown[];
-    if (!data || data.length === 0) {
-      const error = new AtomicbaseError({
-        message: "No rows returned",
-        code: "NOT_FOUND",
-        status: 404,
-        hint: "The query returned no results. Check your filter conditions.",
-      });
-      if (this.shouldThrowOnError) {
-        throw error;
-      }
-      return { data: null, error };
-    }
-
-    if (data.length > 1) {
-      const error = new AtomicbaseError({
-        message: "Multiple rows returned",
-        code: "MULTIPLE_ROWS",
-        status: 400,
-        hint: "Expected a single row but got multiple. Add more specific filters.",
-      });
-      if (this.shouldThrowOnError) {
-        throw error;
-      }
-      return { data: null, error };
-    }
-
-    return { data: data[0] as T extends (infer U)[] ? U : T, error: null };
+    return this;
   }
 
   /**
    * Return zero or one row. Returns null if no rows found (not an error).
+   * This is a chainable modifier - the query only executes when awaited.
    *
    * @example
    * ```ts
@@ -178,22 +139,12 @@ export abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBuilder<T>
    * // data is object or null, no error for zero rows
    * ```
    */
-  async maybeSingle(): Promise<AtomicbaseMaybeSingleResponse<T extends (infer U)[] ? U : T>> {
-    this.state.limitValue = 1;
-    const result = await this.execute();
-
-    if (result.error) {
-      if (this.shouldThrowOnError) {
-        throw result.error;
-      }
-      return result as AtomicbaseMaybeSingleResponse<T extends (infer U)[] ? U : T>;
+  maybeSingle(): this {
+    this.state.resultMode = "maybeSingle";
+    if (this.state.limitValue === null) {
+      this.state.limitValue = 1;
     }
-
-    const data = result.data as unknown[];
-    return {
-      data: (data?.[0] ?? null) as (T extends (infer U)[] ? U : T) | null,
-      error: null,
-    };
+    return this;
   }
 
   // ---------------------------------------------------------------------------
@@ -202,6 +153,7 @@ export abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBuilder<T>
 
   /**
    * Return only the count of matching rows.
+   * This is a chainable modifier - the query only executes when awaited.
    *
    * @example
    * ```ts
@@ -214,23 +166,16 @@ export abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBuilder<T>
    * console.log(`${count} active users`)
    * ```
    */
-  async count(): Promise<AtomicbaseResponse<number>> {
+  count(): this {
+    this.state.resultMode = "count";
     this.state.countExact = true;
     this.state.limitValue = 0;
-    const { count, error } = await this.executeWithCount();
-
-    if (error) {
-      if (this.shouldThrowOnError) {
-        throw error;
-      }
-      return { data: null, error };
-    }
-
-    return { data: count ?? 0, error: null };
+    return this;
   }
 
   /**
    * Return both data and total count.
+   * This is a chainable modifier - the query only executes when awaited.
    *
    * @example
    * ```ts
@@ -243,14 +188,9 @@ export abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBuilder<T>
    * console.log(`Showing ${data.length} of ${count} users`)
    * ```
    */
-  async withCount(): Promise<AtomicbaseResponseWithCount<T>> {
+  withCount(): this {
+    this.state.resultMode = "withCount";
     this.state.countExact = true;
-    const result = await this.executeWithCount();
-
-    if (result.error && this.shouldThrowOnError) {
-      throw result.error;
-    }
-
-    return result;
+    return this;
   }
 }

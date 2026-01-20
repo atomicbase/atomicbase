@@ -496,7 +496,9 @@ func splitTableColumn(s string) []string {
 }
 
 // BuildCustomJoinSelect builds a SELECT query with custom joins.
-func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, string, error) {
+// Returns: (selectQuery, groupByClause, jsonAggregation, error)
+// The caller must place WHERE between selectQuery and groupByClause.
+func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, string, string, error) {
 	var aggPairs []string
 	sel := ""
 	joins := ""
@@ -504,10 +506,12 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 	// Get base table schema
 	baseTbl, err := schema.SearchTbls(cjq.BaseTable)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	// Build base table columns
+	// Note: aggPairs uses just [colname] without table prefix because it's used in the
+	// outer json_object() which selects FROM the inner subquery, not directly from tables.
 	for _, col := range cjq.BaseColumns {
 		if col.name == "*" {
 			sel += fmt.Sprintf("[%s].*, ", cjq.BaseTable)
@@ -515,12 +519,12 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 				if strings.EqualFold(c.Type, ColTypeBlob) {
 					continue
 				}
-				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", c.Name, cjq.BaseTable, c.Name))
+				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", c.Name, c.Name))
 			}
 		} else {
 			column, err := baseTbl.SearchCols(col.name)
 			if err != nil {
-				return "", "", err
+				return "", "", "", err
 			}
 			if strings.EqualFold(column.Type, ColTypeBlob) {
 				continue
@@ -530,7 +534,7 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 			if col.alias != "" {
 				key = col.alias
 			}
-			aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", key, cjq.BaseTable, col.name))
+			aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", key, col.name))
 		}
 	}
 
@@ -547,7 +551,7 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 	for _, j := range cjq.Joins {
 		joinTbl, err := schema.SearchTbls(j.table)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 
 		// Build ON clause
@@ -576,7 +580,8 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 		// Build columns for this joined table
 		joinedCols := cjq.JoinedColumns[j.alias]
 		if j.flat {
-			// Flat output: add columns directly to select
+			// Flat output: add columns directly to select with AS alias
+			// Using explicit aliases so the outer json_object can reference them
 			for _, col := range joinedCols {
 				if col.name == "*" {
 					for _, c := range joinTbl.Columns {
@@ -584,26 +589,26 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 							continue
 						}
 						// Prefix with table name for flat output to avoid conflicts
-						sel += fmt.Sprintf("[%s].[%s], ", j.alias, c.Name)
 						key := fmt.Sprintf("%s_%s", j.alias, c.Name)
-						aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", key, j.alias, c.Name))
+						sel += fmt.Sprintf("[%s].[%s] AS [%s], ", j.alias, c.Name, key)
+						aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", key, key))
 					}
 				} else {
 					column, err := joinTbl.SearchCols(col.name)
 					if err != nil {
-						return "", "", err
+						return "", "", "", err
 					}
 					if strings.EqualFold(column.Type, ColTypeBlob) {
 						continue
 					}
-					sel += fmt.Sprintf("[%s].[%s], ", j.alias, col.name)
 					key := col.name
 					if col.alias != "" {
 						key = col.alias
 					} else {
 						key = fmt.Sprintf("%s_%s", j.alias, col.name)
 					}
-					aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", key, j.alias, col.name))
+					sel += fmt.Sprintf("[%s].[%s] AS [%s], ", j.alias, col.name, key)
+					aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", key, key))
 				}
 			}
 		} else {
@@ -620,7 +625,7 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 				} else {
 					column, err := joinTbl.SearchCols(col.name)
 					if err != nil {
-						return "", "", err
+						return "", "", "", err
 					}
 					if strings.EqualFold(column.Type, ColTypeBlob) {
 						continue
@@ -647,13 +652,14 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 	}
 
 	if sel == "" {
-		return "", "", fmt.Errorf("no columns selected")
+		return "", "", "", fmt.Errorf("no columns selected")
 	}
 	sel = sel[:len(sel)-2] // Remove trailing ", "
 
 	query := fmt.Sprintf("SELECT %s FROM [%s] %s", sel, cjq.BaseTable, joins)
 
-	// Add GROUP BY for nested output
+	// Build GROUP BY for nested output (returned separately so caller can place WHERE before it)
+	var groupByClause string
 	if hasNestedJoin {
 		var groupBy []string
 		for _, col := range cjq.BaseColumns {
@@ -680,10 +686,10 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 		} else {
 			groupBy = append(groupBy, fmt.Sprintf("[%s].[rowid]", cjq.BaseTable))
 		}
-		query += "GROUP BY " + strings.Join(groupBy, ", ") + " "
+		groupByClause = "GROUP BY " + strings.Join(groupBy, ", ") + " "
 	}
 
-	return query, buildJSONAggregation(aggPairs), nil
+	return query, groupByClause, buildJSONAggregation(aggPairs), nil
 }
 
 // opToSQL converts a filter operator to SQL operator.

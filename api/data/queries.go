@@ -29,7 +29,7 @@ func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation str
 		return SelectResult{}, err
 	}
 
-	var sqlQuery, agg string
+	var sqlQuery, groupBy, agg string
 
 	// Check if this is a custom join query
 	if len(query.Join) > 0 {
@@ -39,7 +39,7 @@ func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation str
 			return SelectResult{}, err
 		}
 
-		sqlQuery, agg, err = dao.Schema.BuildCustomJoinSelect(cjq)
+		sqlQuery, groupBy, agg, err = dao.Schema.BuildCustomJoinSelect(cjq)
 		if err != nil {
 			return SelectResult{}, err
 		}
@@ -62,7 +62,9 @@ func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation str
 	if err != nil {
 		return SelectResult{}, err
 	}
-	baseQuery := sqlQuery + where
+
+	// Build query in correct SQL order: SELECT...FROM...JOIN + WHERE + GROUP BY
+	baseQuery := sqlQuery + where + groupBy
 
 	var result SelectResult
 

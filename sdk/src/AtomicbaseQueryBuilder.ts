@@ -27,6 +27,7 @@ export class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends Atomicb
       returningColumns: [],
       onConflictBehavior: null,
       countExact: false,
+      resultMode: "default",
     };
 
     super({
@@ -263,50 +264,61 @@ export class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends Atomicb
   }
 
   // ---------------------------------------------------------------------------
+  // Batch Operation Export
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Export this query as a batch operation for use with client.batch().
+   * This allows combining multiple queries into a single atomic transaction.
+   *
+   * @internal
+   */
+  toBatchOperation(): {
+    operation: string;
+    table: string;
+    body: Record<string, unknown>;
+    count?: boolean;
+    resultMode?: string;
+  } {
+    if (!this.state.operation) {
+      throw new Error("No operation specified. Call select(), insert(), update(), or delete() first.");
+    }
+
+    const operation = this.state.operation;
+    const body = this.buildBody();
+    const result: {
+      operation: string;
+      table: string;
+      body: Record<string, unknown>;
+      count?: boolean;
+      resultMode?: string;
+    } = {
+      operation,
+      table: this.state.table,
+      body,
+    };
+
+    // Include count flag for select operations that need it
+    if (this.state.countExact) {
+      result.count = true;
+    }
+
+    // Include resultMode for client-side post-processing
+    if (this.state.resultMode !== "default") {
+      result.resultMode = this.state.resultMode;
+    }
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
   // Request Building
   // ---------------------------------------------------------------------------
 
-  protected buildRequest(): {
-    url: string;
-    headers: Record<string, string>;
-    body: Record<string, unknown>;
-  } {
-    const url = `${this.baseUrl}/data/query/${encodeURIComponent(this.state.table)}`;
-    const headers = this.buildCommonHeaders();
-
-    // Build Prefer header
-    const preferParts: string[] = [];
-
-    switch (this.state.operation) {
-      case "select":
-        preferParts.push("operation=select");
-        if (this.state.countExact) {
-          preferParts.push("count=exact");
-        }
-        break;
-      case "insert":
-        preferParts.push("operation=insert");
-        if (this.state.onConflictBehavior === "ignore") {
-          preferParts.push("on-conflict=ignore");
-        }
-        break;
-      case "upsert":
-        preferParts.push("operation=insert");
-        preferParts.push("on-conflict=replace");
-        break;
-      case "update":
-        preferParts.push("operation=update");
-        break;
-      case "delete":
-        preferParts.push("operation=delete");
-        break;
-    }
-
-    if (preferParts.length > 0) {
-      headers["Prefer"] = preferParts.join(",");
-    }
-
-    // Build body
+  /**
+   * Build the request body based on operation type.
+   */
+  private buildBody(): Record<string, unknown> {
     const body: Record<string, unknown> = {};
 
     if (this.state.operation === "select") {
@@ -348,6 +360,49 @@ export class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends Atomicb
       }
     }
 
-    return { url, headers, body };
+    return body;
+  }
+
+  protected buildRequest(): {
+    url: string;
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+  } {
+    const url = `${this.baseUrl}/data/query/${encodeURIComponent(this.state.table)}`;
+    const headers = this.buildCommonHeaders();
+
+    // Build Prefer header
+    const preferParts: string[] = [];
+
+    switch (this.state.operation) {
+      case "select":
+        preferParts.push("operation=select");
+        if (this.state.countExact) {
+          preferParts.push("count=exact");
+        }
+        break;
+      case "insert":
+        preferParts.push("operation=insert");
+        if (this.state.onConflictBehavior === "ignore") {
+          preferParts.push("on-conflict=ignore");
+        }
+        break;
+      case "upsert":
+        preferParts.push("operation=insert");
+        preferParts.push("on-conflict=replace");
+        break;
+      case "update":
+        preferParts.push("operation=update");
+        break;
+      case "delete":
+        preferParts.push("operation=delete");
+        break;
+    }
+
+    if (preferParts.length > 0) {
+      headers["Prefer"] = preferParts.join(",");
+    }
+
+    return { url, headers, body: this.buildBody() };
   }
 }

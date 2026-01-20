@@ -108,6 +108,8 @@ export interface JoinClause {
 
 export type QueryOperation = "select" | "insert" | "upsert" | "update" | "delete";
 
+export type ResultMode = "default" | "single" | "maybeSingle" | "count" | "withCount";
+
 export interface QueryState {
   table: string;
   operation: QueryOperation | null;
@@ -121,4 +123,36 @@ export interface QueryState {
   returningColumns: string[];
   onConflictBehavior: "ignore" | null;
   countExact: boolean;
+  resultMode: ResultMode;
 }
+
+// =============================================================================
+// Batch Types
+// =============================================================================
+
+/**
+ * A single operation in a batch request.
+ */
+export interface BatchOperation {
+  operation: string;
+  table: string;
+  body: Record<string, unknown>;
+  /** Whether to include count in the result (for select operations) */
+  count?: boolean;
+  /** Result mode for client-side post-processing */
+  resultMode?: ResultMode;
+}
+
+/**
+ * Response from a batch request.
+ */
+export interface BatchResponse<T extends unknown[] = unknown[]> {
+  results: T;
+}
+
+/**
+ * Batch response with potential error.
+ */
+export type AtomicbaseBatchResponse<T extends unknown[] = unknown[]> =
+  | { data: BatchResponse<T>; error: null }
+  | { data: null; error: AtomicbaseError };
