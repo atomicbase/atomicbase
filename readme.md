@@ -6,14 +6,15 @@ Atomicbase is the backend for effortless multi-tenant architecture. It provides 
 
 ## Status
 
-| Component        | Status   |
-| ---------------- | -------- |
-| Database API     | Beta     |
-| TypeScript SDK   | Beta     |
-| Schema Templates | Beta     |
-| Authentication   | Planning |
-| File Storage     | Planning |
-| Dashboard        | Planning |
+| Component        | Status      |
+| ---------------- | ----------- |
+| Database API     | ✓ Complete  |
+| TypeScript SDK   | ✓ Complete  |
+| Schema Templates | → Next      |
+| CLI              | → Next      |
+| Authentication   | Planning    |
+| File Storage     | Planning    |
+| Dashboard        | Planning    |
 
 ## Quick Start
 
@@ -562,6 +563,7 @@ pnpm dev  # watch mode
 
 ## Coming Soon
 
+- **Schema Templates + CLI** _(next)_ - Define reusable schemas and sync them across unlimited tenant databases. CLI for template management, schema syncing, and migrations at scale.
 - **Authentication** - User management, sessions, OAuth providers
 - **File Storage** - S3-compatible object storage integration
 - **Dashboard** - Web UI for database management and monitoring
