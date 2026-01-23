@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joe-ervin05/atomicbase/tools"
@@ -341,10 +342,14 @@ func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation str
 		}
 	}
 
-	if table.Pk == "" {
+	if len(table.Pk) == 0 {
 		query += " ON CONFLICT(rowid) DO UPDATE SET "
 	} else {
-		query += fmt.Sprintf(" ON CONFLICT([%s]) DO UPDATE SET ", table.Pk)
+		pkCols := make([]string, len(table.Pk))
+		for i, col := range table.Pk {
+			pkCols[i] = fmt.Sprintf("[%s]", col)
+		}
+		query += fmt.Sprintf(" ON CONFLICT(%s) DO UPDATE SET ", strings.Join(pkCols, ", "))
 	}
 
 	for _, col := range columns {

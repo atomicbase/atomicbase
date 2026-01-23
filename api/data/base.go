@@ -56,7 +56,6 @@ func initPrimaryDB() error {
 	(
 		id INTEGER PRIMARY KEY,
 		name TEXT UNIQUE NOT NULL,
-		tables BLOB NOT NULL,
 		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 		updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 	);
@@ -94,15 +93,72 @@ func initPrimaryDB() error {
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
+	// Create templates_history table for version tracking
+	_, err = db.Exec(fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s
+	(
+		id INTEGER PRIMARY KEY,
+		template_id INTEGER NOT NULL REFERENCES %s(id),
+		version INTEGER NOT NULL,
+		schema BLOB NOT NULL,
+		checksum TEXT NOT NULL,
+		changes TEXT,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(template_id, version)
+	);
+	CREATE INDEX IF NOT EXISTS idx_templates_history_template ON %s(template_id);
+	`, ReservedTableTemplatesHistory, ReservedTableTemplates, ReservedTableTemplatesHistory))
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("failed to create templates_history table: %w", err)
+	}
+
+	// Migration: Add current_version column to templates table
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN current_version INTEGER DEFAULT 1`,
+		ReservedTableTemplates))
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		db.Close()
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	// Migration: Add schema_version column to databases table
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN schema_version INTEGER DEFAULT 1`,
+		ReservedTableDatabases))
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		db.Close()
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	// Migration: Rename tables column to schema in templates_history
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME COLUMN tables TO schema`,
+		ReservedTableTemplatesHistory))
+	if err != nil && !strings.Contains(err.Error(), "no such column") {
+		db.Close()
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
 	primaryDB = db
 
-	// Load schema
-	dao := PrimaryDao{Database: Database{db, SchemaCache{}, 1}}
+	// Load schema for primary database
+	dao := PrimaryDao{Database: Database{
+		Client:        db,
+		Schema:        SchemaCache{},
+		ID:            1,
+		TemplateID:    0, // Primary database doesn't use templates
+		SchemaVersion: 0,
+	}}
 	if err := dao.Database.updateSchema(); err != nil {
+		primaryDB = nil
 		db.Close()
 		return err
 	}
 	primarySchema = dao.Schema
+
+	// Preload template schemas into cache
+	if err := PreloadSchemaCache(db); err != nil {
+		// Non-fatal - cache will be populated on demand
+		log.Printf("Warning: failed to preload schema cache: %v", err)
+	}
 
 	return nil
 }
@@ -128,9 +184,11 @@ func ConnPrimary() (PrimaryDao, error) {
 
 	return PrimaryDao{
 		Database: Database{
-			Client: primaryDB,
-			Schema: schema,
-			ID:     1,
+			Client:        primaryDB,
+			Schema:        schema,
+			ID:            1,
+			TemplateID:    0,
+			SchemaVersion: 0,
 		},
 	}, nil
 }
@@ -150,13 +208,16 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, errors.New("TURSO_ORGANIZATION environment variable is not set but is required to access external databases")
 	}
 
-	row := dao.Client.QueryRow(fmt.Sprintf("SELECT id, token, schema from %s WHERE name = ?", ReservedTableDatabases), dbName)
+	row := dao.Client.QueryRow(fmt.Sprintf(
+		"SELECT id, token, COALESCE(template_id, 0), COALESCE(schema_version, 1) FROM %s WHERE name = ?",
+		ReservedTableDatabases), dbName)
 
 	var id sql.NullInt32
 	var token sql.NullString
-	var sData []byte
+	var templateID int32
+	var schemaVersion int
 
-	err := row.Scan(&id, &token, &sData)
+	err := row.Scan(&id, &token, &templateID, &schemaVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Database{}, tools.ErrDatabaseNotFound
@@ -164,10 +225,14 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, err
 	}
 
-	schema, err := LoadSchema(sData)
+	if !token.Valid {
+		return Database{}, errors.New("database token is missing")
+	}
 
+	// Get schema from cache (uses template_id and version)
+	schema, err := GetCachedSchema(dao.Client, templateID, schemaVersion)
 	if err != nil {
-		return Database{}, err
+		return Database{}, fmt.Errorf("failed to load schema: %w", err)
 	}
 
 	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", dbName, org, token.String))
@@ -176,13 +241,17 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 	}
 
 	err = client.Ping()
-
 	if err != nil {
+		client.Close()
 		return Database{}, err
 	}
 
 	return Database{
-		client, schema, id.Int32,
+		Client:        client,
+		Schema:        schema,
+		ID:            id.Int32,
+		TemplateID:    templateID,
+		SchemaVersion: schemaVersion,
 	}, nil
 }
 

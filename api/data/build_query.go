@@ -192,10 +192,12 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			}
 		}
 		// Also group by rowid if table has no explicit PK
-		if tbl.Pk == "" {
+		if len(tbl.Pk) == 0 {
 			rootGroupBy += fmt.Sprintf("[%s].[rowid], ", rel.name)
 		} else {
-			rootGroupBy += fmt.Sprintf("[%s].[%s], ", rel.name, tbl.Pk)
+			for _, pkCol := range tbl.Pk {
+				rootGroupBy += fmt.Sprintf("[%s].[%s], ", rel.name, pkCol)
+			}
 		}
 		if rootGroupBy != "" {
 			query += "GROUP BY " + rootGroupBy[:len(rootGroupBy)-2] + " "
@@ -671,17 +673,19 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 				groupBy = append(groupBy, fmt.Sprintf("[%s].[%s]", cjq.BaseTable, col.name))
 			}
 		}
-		// Add primary key to group by if not already included
-		if baseTbl.Pk != "" {
-			pkIncluded := false
-			for _, col := range cjq.BaseColumns {
-				if col.name == baseTbl.Pk || col.name == "*" {
-					pkIncluded = true
-					break
+		// Add primary key columns to group by if not already included
+		if len(baseTbl.Pk) > 0 {
+			for _, pkCol := range baseTbl.Pk {
+				pkIncluded := false
+				for _, col := range cjq.BaseColumns {
+					if col.name == pkCol || col.name == "*" {
+						pkIncluded = true
+						break
+					}
 				}
-			}
-			if !pkIncluded {
-				groupBy = append(groupBy, fmt.Sprintf("[%s].[%s]", cjq.BaseTable, baseTbl.Pk))
+				if !pkIncluded {
+					groupBy = append(groupBy, fmt.Sprintf("[%s].[%s]", cjq.BaseTable, pkCol))
+				}
 			}
 		} else {
 			groupBy = append(groupBy, fmt.Sprintf("[%s].[rowid]", cjq.BaseTable))

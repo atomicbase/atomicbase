@@ -1,0 +1,34 @@
+{
+  "name": "@atomicbase/cli",
+  "version": "0.1.0",
+  "description": "CLI for Atomicbase schema management",
+  "type": "module",
+  "bin": {
+    "atomicbase": "./bin/atomicbase.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@atomicbase/schema": "workspace:*",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "atomicbase",
+    "cli",
+    "schema",
+    "database"
+  ],
+  "license": "MIT"
+}

@@ -487,3 +487,119 @@ func schemaFTS(db *sql.DB) (map[string]bool, error) {
 
 	return ftsTables, rows.Err()
 }
+
+// SyncTenant migrates a tenant database to the latest template version.
+// Returns the migration plan that was applied.
+func SyncTenant(ctx context.Context, dao data.PrimaryDao, tenantName string) (MigrationPlan, error) {
+	// Get tenant database info
+	var dbID int32
+	var templateID int32
+	var currentVersion int
+	var token string
+
+	err := dao.Client.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT d.id, d.template_id, COALESCE(d.schema_version, 1), d.token
+		FROM %s d
+		WHERE d.name = ?
+	`, data.ReservedTableDatabases), tenantName).Scan(&dbID, &templateID, &currentVersion, &token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return MigrationPlan{}, fmt.Errorf("tenant %s not found", tenantName)
+		}
+		return MigrationPlan{}, err
+	}
+
+	if templateID == 0 {
+		return MigrationPlan{}, fmt.Errorf("tenant %s has no associated template", tenantName)
+	}
+
+	// Get template current version
+	var targetVersion int
+	err = dao.Client.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT COALESCE(current_version, 1) FROM %s WHERE id = ?
+	`, data.ReservedTableTemplates), templateID).Scan(&targetVersion)
+	if err != nil {
+		return MigrationPlan{}, fmt.Errorf("failed to get template version: %w", err)
+	}
+
+	if currentVersion >= targetVersion {
+		// Already up to date
+		return MigrationPlan{}, nil
+	}
+
+	// Get the schemas for current and target versions
+	oldTables, err := getVersionTables(ctx, dao, templateID, currentVersion)
+	if err != nil {
+		return MigrationPlan{}, fmt.Errorf("failed to get current schema: %w", err)
+	}
+
+	newTables, err := getVersionTables(ctx, dao, templateID, targetVersion)
+	if err != nil {
+		return MigrationPlan{}, fmt.Errorf("failed to get target schema: %w", err)
+	}
+
+	// Generate migration plan
+	plan := GenerateMigrationPlan(oldTables, newTables)
+
+	if len(plan.MigrationSQL) == 0 {
+		// No actual changes needed, just update version
+		_, err = dao.Client.ExecContext(ctx, fmt.Sprintf(`
+			UPDATE %s SET schema_version = ? WHERE id = ?
+		`, data.ReservedTableDatabases), targetVersion, dbID)
+		return plan, err
+	}
+
+	// Connect to tenant database
+	org := config.Cfg.TursoOrganization
+	dbURL := fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s", org, tenantName)
+
+	// Get database hostname
+	client := &http.Client{}
+	request, err := http.NewRequestWithContext(ctx, "GET", dbURL, nil)
+	if err != nil {
+		return plan, err
+	}
+	request.Header.Set("Authorization", "Bearer "+config.Cfg.TursoAPIKey)
+
+	res, err := client.Do(request)
+	if err != nil {
+		return plan, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		return plan, readAPIError(res)
+	}
+
+	var dbResp struct {
+		Database struct {
+			Hostname string `json:"Hostname"`
+		} `json:"database"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&dbResp); err != nil {
+		return plan, err
+	}
+
+	// Connect to tenant database
+	connStr := fmt.Sprintf("libsql://%s?authToken=%s", dbResp.Database.Hostname, token)
+	tenantDB, err := sql.Open("libsql", connStr)
+	if err != nil {
+		return plan, fmt.Errorf("failed to connect to tenant database: %w", err)
+	}
+	defer tenantDB.Close()
+
+	// Apply migration
+	if err := MigrateDatabase(ctx, tenantDB, plan); err != nil {
+		return plan, fmt.Errorf("migration failed: %w", err)
+	}
+
+	// Update schema_version in primary database
+	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s SET schema_version = ? WHERE id = ?
+	`, data.ReservedTableDatabases), targetVersion, dbID)
+	if err != nil {
+		return plan, fmt.Errorf("migration succeeded but failed to update version: %w", err)
+	}
+
+	return plan, nil
+}

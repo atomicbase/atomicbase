@@ -98,3 +98,6 @@ const ReservedTableDatabases = "atomicbase_databases"
 
 // ReservedTableTemplates stores schema templates for multi-tenant database management.
 const ReservedTableTemplates = "atomicbase_schema_templates"
+
+// ReservedTableTemplatesHistory stores version history for schema templates.
+const ReservedTableTemplatesHistory = "atomicbase_templates_history"

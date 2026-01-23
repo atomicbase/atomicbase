@@ -14,9 +14,11 @@ type PrimaryDao struct {
 
 // Database represents a connection to a SQLite/Turso database with cached schema.
 type Database struct {
-	Client *sql.DB     // SQL database connection
-	Schema SchemaCache // Cached schema for validation
-	ID     int32       // Internal database ID (1 = primary)
+	Client        *sql.DB     // SQL database connection
+	Schema        SchemaCache // Cached schema for validation
+	ID            int32       // Internal database ID (1 = primary)
+	TemplateID    int32       // Template ID (0 for primary database)
+	SchemaVersion int         // Schema version from template history
 }
 
 // SchemaCache holds cached table and foreign key information for query validation.
@@ -36,28 +38,73 @@ type Fk struct {
 
 // Table represents a database table's schema.
 type Table struct {
-	Name    string         `json:"name"`    // Table name
-	Pk      string         `json:"pk"`      // Primary key column name (empty if rowid)
-	Columns map[string]Col `json:"columns"` // Keyed by column name
+	Name       string         `json:"name"`                 // Table name
+	Pk         []string       `json:"pk"`                   // Primary key column name(s) - supports composite keys
+	Columns    map[string]Col `json:"columns"`              // Keyed by column name
+	Indexes    []Index        `json:"indexes,omitempty"`    // Table indexes
+	FTSColumns []string       `json:"ftsColumns,omitempty"` // Columns for FTS5 full-text search
+}
+
+// Index represents a database index definition.
+type Index struct {
+	Name    string   `json:"name"`    // Index name
+	Columns []string `json:"columns"` // Columns included in index
+	Unique  bool     `json:"unique,omitempty"`
 }
 
 // Col represents a column definition.
 type Col struct {
-	Name       string `json:"name"`                 // Column name
-	Type       string `json:"type"`                 // SQLite type (TEXT, INTEGER, REAL, BLOB)
-	NotNull    bool   `json:"notNull,omitempty"`    // NOT NULL constraint
-	Default    any    `json:"default,omitempty"`    // Default value (nil if none)
-	References string `json:"references,omitempty"` // Foreign key reference (format: "table.column")
+	Name       string     `json:"name"`                 // Column name
+	Type       string     `json:"type"`                 // SQLite type (TEXT, INTEGER, REAL, BLOB)
+	NotNull    bool       `json:"notNull,omitempty"`    // NOT NULL constraint
+	Unique     bool       `json:"unique,omitempty"`     // UNIQUE constraint
+	Default    any        `json:"default,omitempty"`    // Default value (nil if none)
+	Collate    string     `json:"collate,omitempty"`    // COLLATE: BINARY, NOCASE, RTRIM
+	Check      string     `json:"check,omitempty"`      // CHECK constraint expression
+	Generated  *Generated `json:"generated,omitempty"`  // Generated column definition
+	References string     `json:"references,omitempty"` // Foreign key reference (format: "table.column")
+	OnDelete   string     `json:"onDelete,omitempty"`   // FK action: CASCADE, SET NULL, RESTRICT, NO ACTION
+	OnUpdate   string     `json:"onUpdate,omitempty"`   // FK action: CASCADE, SET NULL, RESTRICT, NO ACTION
+}
+
+// Generated represents a generated/computed column.
+type Generated struct {
+	Expr   string `json:"expr"`             // Expression to compute value
+	Stored bool   `json:"stored,omitempty"` // true=STORED, false=VIRTUAL (default)
 }
 
 // SchemaTemplate represents a reusable schema template for multi-tenant databases.
 // Daughter databases associated with a template will inherit its schema.
 type SchemaTemplate struct {
-	ID        int32   `json:"id"`
-	Name      string  `json:"name"`
-	Tables    []Table `json:"tables"`    // Table definitions for this template
-	CreatedAt string  `json:"createdAt"` // ISO timestamp
-	UpdatedAt string  `json:"updatedAt"` // ISO timestamp
+	ID             int32   `json:"id"`
+	Name           string  `json:"name"`
+	Tables         []Table `json:"tables"`         // Table definitions for this template
+	CurrentVersion int     `json:"currentVersion"` // Current schema version
+	CreatedAt      string  `json:"createdAt"`      // ISO timestamp
+	UpdatedAt      string  `json:"updatedAt"`      // ISO timestamp
+}
+
+// TemplateVersion represents a historical version of a schema template.
+type TemplateVersion struct {
+	ID         int32   `json:"id"`
+	TemplateID int32   `json:"templateId"`
+	Version    int     `json:"version"`
+	Tables     []Table `json:"tables"`
+	Checksum   string  `json:"checksum"`
+	Changes    string  `json:"changes,omitempty"` // JSON description of changes from previous version
+	CreatedAt  string  `json:"createdAt"`
+}
+
+// SchemaChange represents a single change between schema versions.
+type SchemaChange struct {
+	Type        string `json:"type"`                // add_table, drop_table, add_column, drop_column, modify_column, rename_column, rename_table
+	Table       string `json:"table"`               // Table name
+	Column      string `json:"column,omitempty"`    // Column name (for column changes)
+	SQL         string `json:"sql,omitempty"`       // SQL statement to apply this change
+	RequiresMig bool   `json:"requiresMigration"`   // Whether this change requires data migration
+	Ambiguous   bool   `json:"ambiguous,omitempty"` // Whether this change needs user confirmation
+	OldName     string `json:"oldName,omitempty"`   // For potential renames, the old name
+	Reason      string `json:"reason,omitempty"`    // Explanation for ambiguous changes
 }
 
 // Executor is an interface that both *sql.DB and *sql.Tx implement.

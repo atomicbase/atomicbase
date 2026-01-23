@@ -1,12 +1,8 @@
 package data
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/gob"
-	"fmt"
 
-	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
@@ -132,9 +128,13 @@ func SchemaCols(db *sql.DB) (map[string]Table, error) {
 
 		// pk > 0 means this column is part of the primary key
 		// For composite keys, pk indicates position (1, 2, etc.)
-		// We only track the first column as the "primary key" for simplicity
-		if pk.Int64 == 1 {
-			tbl.Pk = col.String
+		if pk.Int64 > 0 {
+			// Ensure Pk slice is large enough
+			pos := int(pk.Int64)
+			for len(tbl.Pk) < pos {
+				tbl.Pk = append(tbl.Pk, "")
+			}
+			tbl.Pk[pos-1] = col.String
 		}
 
 		tbls[name.String] = tbl
@@ -155,37 +155,6 @@ func parseDefaultValue(val string) any {
 	}
 	// Return as-is for expressions like CURRENT_TIMESTAMP
 	return val
-}
-
-func (dao *Database) saveSchema() error {
-	var client *sql.DB
-	var err error
-
-	if dao.ID == 1 {
-		client = dao.Client
-	} else {
-		client, err = sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
-		if err != nil {
-			return fmt.Errorf("failed to open primary database for schema save: %w", err)
-		}
-		defer client.Close()
-	}
-
-	err = client.Ping()
-	if err != nil {
-		return fmt.Errorf("failed to ping database for schema save: %w", err)
-	}
-
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-
-	err = enc.Encode(dao.Schema)
-	if err != nil {
-		return err
-	}
-
-	_, err = client.Exec(fmt.Sprintf("UPDATE %s SET schema = ? WHERE id = ?", ReservedTableDatabases), buf.Bytes(), dao.ID)
-	return err
 }
 
 // SearchFks searches for a foreign key from table to references.

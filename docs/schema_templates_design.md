@@ -188,8 +188,6 @@ atomicbase jobs show <job_id>
 atomicbase jobs show <job_id> --failed    # Show only failed databases
 atomicbase jobs show <job_id> --follow    # Live progress updates
 
-# Retry failed migrations in a job
-atomicbase jobs retry <job_id>
 
 # Resume a stopped job (processes stopped + failed tasks)
 atomicbase jobs resume <job_id>
@@ -409,6 +407,60 @@ type SyncWorkerPool struct {
 - Turso rate limits: ~100 requests/second per org (adjust workers accordingly)
 - Memory: Each connection is lightweight, 50+ concurrent is safe
 - Default 10 workers = ~1000 databases in ~2 minutes (assuming 1s per migration)
+
+### Scale Optimization: Batched Version Updates
+
+At 1M+ tenants, updating `schema_version` one row at a time creates write contention on the primary SQLite database. Workers send completed migrations to a batching goroutine:
+
+```go
+type VersionUpdate struct {
+    DatabaseID    int
+    SchemaVersion int
+}
+
+// Workers send updates to channel instead of writing directly
+var versionUpdateChan = make(chan VersionUpdate, 1000)
+
+// Single goroutine batches and writes
+func versionUpdateBatcher() {
+    batch := make([]VersionUpdate, 0, 500)
+    ticker := time.NewTicker(100 * time.Millisecond)
+
+    for {
+        select {
+        case update := <-versionUpdateChan:
+            batch = append(batch, update)
+            if len(batch) >= 500 {
+                flushBatch(batch)
+                batch = batch[:0]
+            }
+        case <-ticker.C:
+            if len(batch) > 0 {
+                flushBatch(batch)
+                batch = batch[:0]
+            }
+        }
+    }
+}
+
+func flushBatch(batch []VersionUpdate) {
+    // Single UPDATE with multiple IDs
+    // UPDATE __databases SET schema_version = ? WHERE id IN (?, ?, ?, ...)
+    // Groups by version, executes one query per version
+    tx, _ := primaryDB.Begin()
+    for version, ids := range groupByVersion(batch) {
+        tx.Exec(`UPDATE __databases SET schema_version = ? WHERE id IN (`+placeholders(len(ids))+`)`,
+            append([]any{version}, ids...)...)
+    }
+    tx.Commit()
+}
+```
+
+**Result:**
+- Workers don't block on DB writes
+- 500 row updates batched into 1 query
+- 1M databases = ~2000 batch writes instead of 1M individual writes
+- SQLite easily handles this
 
 ### Job API
 
@@ -706,21 +758,120 @@ The server automatically generates migration SQL:
 Templates are versioned in the primary database:
 
 ```sql
--- Template versions table
+-- Template versions table (schema stored ONCE per version)
 CREATE TABLE __templates_history (
   id INTEGER PRIMARY KEY,
   template_id INTEGER NOT NULL REFERENCES __templates(id),
   version INTEGER NOT NULL,
   tables BLOB NOT NULL,        -- gob-encoded table definitions
+  schema BLOB NOT NULL,        -- gob-encoded SchemaCache for this version
   checksum TEXT NOT NULL,      -- Schema checksum
   changes TEXT,                -- JSON array of changes from previous version
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(template_id, version)
 );
 
--- Track which version each tenant is on
+-- Databases reference version (no per-database schema blob needed)
+-- schema_version tells us which __templates_history.schema to use
 ALTER TABLE __databases ADD COLUMN schema_version INTEGER DEFAULT 1;
 ```
+
+## Schema Cache (Performance Critical)
+
+Every query requires schema validation. Schemas are ~10KB each and require gob deserialization. We cache them in memory to avoid repeated DB transfers and deserialization.
+
+### Why Cache Schemas (Not Tenant Info)
+
+**Tenant info** (template_id, schema_version): ~100 bytes, fast indexed lookup
+- Query from primary DB every request - it's fine
+
+**Schemas**: ~10KB gob-encoded blobs
+- Without cache: 10KB transfer + gob decode per request
+- With cache: sync.Map lookup (nanoseconds)
+
+At 1000 req/s:
+| Approach | Data Transfer | Gob Decodes |
+|----------|---------------|-------------|
+| No cache | 10MB/s | 1000/s |
+| Schema cache | 100KB/s | 0 |
+
+### Implementation
+
+```go
+// Global schema cache - keyed by template:version
+var schemaCache sync.Map  // "templateID:version" → *SchemaCache
+
+func getSchema(templateID int, version int) (*data.SchemaCache, error) {
+    key := fmt.Sprintf("%d:%d", templateID, version)
+
+    // Fast path - already cached
+    if schema, ok := schemaCache.Load(key); ok {
+        return schema.(*data.SchemaCache), nil
+    }
+
+    // Cold path - load from DB and decode (happens once per version)
+    row := primaryDB.QueryRow(`
+        SELECT schema FROM __templates_history
+        WHERE template_id = ? AND version = ?
+    `, templateID, version)
+
+    var schemaBlob []byte
+    if err := row.Scan(&schemaBlob); err != nil {
+        return nil, err
+    }
+
+    schema, err := decodeSchema(schemaBlob)  // gob decode
+    if err != nil {
+        return nil, err
+    }
+
+    schemaCache.Store(key, schema)
+    return schema, nil
+}
+```
+
+### Request Path
+
+```go
+func handleQuery(tenantName string, query Query) {
+    // 1. Query tenant info from primary DB (~0.1ms, ~100 bytes)
+    //    Primary DB uses WAL mode - fast concurrent reads, OS caches hot pages
+    row := primaryDB.QueryRow(`
+        SELECT template_id, schema_version, token
+        FROM __databases WHERE name = ?
+    `, tenantName)
+    var templateID, schemaVersion int
+    var token string
+    row.Scan(&templateID, &schemaVersion, &token)
+
+    // 2. Get schema from cache (nanoseconds, no DB hit)
+    schema := getSchema(templateID, schemaVersion)
+
+    // 3. Validate and execute against tenant's Turso DB (~10-50ms)
+    validateQuery(query, schema)
+    execute(query, token)
+}
+```
+
+### Primary Database Configuration
+
+```go
+// WAL mode for fast concurrent reads
+db, _ := sql.Open("sqlite3", "file:primary.db?_journal_mode=WAL&_synchronous=NORMAL")
+```
+
+- **WAL mode**: Concurrent reads don't block writes
+- **OS page cache**: Frequently accessed rows stay in memory automatically
+- **No complexity**: No manual caching or sync logic needed
+
+Network latency to Turso (10-50ms) dwarfs local SQLite reads (~0.1ms). Optimizing further adds complexity without meaningful benefit.
+
+### Cache Lifecycle
+
+- **Populated on first access** - lazy loading, one gob decode per version ever
+- **Never invalidated** - new version = new cache key, old entries unused
+- **Cleared on server restart** - repopulates lazily
+- **Memory**: ~50 versions × ~10KB = ~500KB (negligible)
 
 ## Generated Types
 
