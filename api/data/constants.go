@@ -94,7 +94,7 @@ const (
 const InternalTablePrefix = "atomicbase_"
 
 // ReservedTableDatabases is the internal table name that cannot be queried by users.
-const ReservedTableDatabases = "atomicbase_databases"
+const ReservedTableDatabases = "atomicbase_tenants"
 
 // ReservedTableTemplates stores schema templates for multi-tenant database management.
 const ReservedTableTemplates = "atomicbase_schema_templates"

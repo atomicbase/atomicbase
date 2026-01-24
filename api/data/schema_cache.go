@@ -12,7 +12,7 @@ import (
 )
 
 // GetCachedSchema retrieves a schema from cache, loading it from DB if not present.
-// For tenant databases, this uses template_id and schema_version.
+// For tenant databases, this uses template_id and template_version.
 // For the primary database (templateID=0), it returns the primary schema.
 func GetCachedSchema(db *sql.DB, templateID int32, version int) (SchemaCache, error) {
 	// Primary database has its own schema management

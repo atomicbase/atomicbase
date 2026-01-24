@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,10 +28,39 @@ func readAPIError(res *http.Response) error {
 	return fmt.Errorf("turso API error: %s", res.Status)
 }
 
+// deleteTursoDB deletes a database from Turso. Used for cleanup on CreateDB failure.
+func deleteTursoDB(ctx context.Context, name string) error {
+	org := config.Cfg.TursoOrganization
+	token := config.Cfg.TursoAPIKey
+
+	client := &http.Client{}
+	request, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s", org, name), nil)
+	if err != nil {
+		return err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		return readAPIError(res)
+	}
+
+	return nil
+}
+
 // ListDBs returns all tenant databases.
 func ListDBs(ctx context.Context, dao data.PrimaryDao) ([]byte, error) {
 	// Exclude primary database (id=1, name=NULL) from the list
-	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf("SELECT json_group_array(json_object('name', name, 'id', id)) AS data FROM (SELECT name, id from %s WHERE name IS NOT NULL ORDER BY id)", data.ReservedTableDatabases))
+	row := dao.Client.QueryRowContext(ctx, fmt.Sprintf(`SELECT 
+	json_group_array(json_object('id', id, 'name', name, 'template_id', template_id, 'template_version', template_version)) 
+	AS data FROM (SELECT id, name, template_id, template_version from %s WHERE name IS NOT NULL ORDER BY id)`, data.ReservedTableDatabases))
 
 	if row.Err() != nil {
 		return nil, row.Err()
@@ -123,6 +151,15 @@ func CreateDB(ctx context.Context, dao data.PrimaryDao, body io.ReadCloser) ([]b
 		return nil, fmt.Errorf("failed to parse Turso response: %w", err)
 	}
 
+	// Track if we need to cleanup the Turso database on failure
+	var success bool
+	defer func() {
+		if !success {
+			// Best-effort cleanup - ignore errors since we're already returning an error
+			_ = deleteTursoDB(ctx, bod.Name)
+		}
+	}()
+
 	// Create auth token for the new database
 	newToken, err := createDBToken(ctx, bod.Name)
 	if err != nil {
@@ -149,36 +186,16 @@ func CreateDB(ctx context.Context, dao data.PrimaryDao, body io.ReadCloser) ([]b
 		return nil, fmt.Errorf("failed to apply template schema: %w", err)
 	}
 
-	// Get the schema cache from the new database
-	tbls, err := data.SchemaCols(targetDB.Client)
-	if err != nil {
-		return nil, err
-	}
-	fks, err := schemaFks(targetDB.Client)
-	if err != nil {
-		return nil, err
-	}
-	ftsTables, err := schemaFTS(targetDB.Client)
-	if err != nil {
-		return nil, err
-	}
-
-	buf.Reset()
-	schema := data.SchemaCache{Tables: tbls, Fks: fks, FTSTables: ftsTables}
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(schema); err != nil {
-		return nil, err
-	}
-
 	// Insert database record with template association
 	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (name, token, schema, template_id)
-		VALUES (?, ?, ?, (SELECT id FROM %s WHERE name = ?))
-	`, data.ReservedTableDatabases, data.ReservedTableTemplates), bod.Name, newToken, buf.Bytes(), bod.Template)
+		INSERT INTO %s (name, token, template_id, template_version)
+		VALUES (?, ?, (SELECT id FROM %s WHERE name = ?), 1)
+	`, data.ReservedTableDatabases, data.ReservedTableTemplates), bod.Name, newToken, bod.Template)
 	if err != nil {
 		return nil, err
 	}
 
+	success = true
 	return []byte(fmt.Sprintf(`{"message":"database %s created with template %s"}`, bod.Name, bod.Template)), nil
 }
 
@@ -285,28 +302,11 @@ func ImportDB(ctx context.Context, dao data.PrimaryDao, body io.ReadCloser) ([]b
 		return nil, fmt.Errorf("schema mismatch: %v", mismatches)
 	}
 
-	// Schema matches - register the database
-	fks, err := schemaFks(dbClient)
-	if err != nil {
-		return nil, err
-	}
-	ftsTables, err := schemaFTS(dbClient)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	schema := data.SchemaCache{Tables: currentTables, Fks: fks, FTSTables: ftsTables}
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(schema); err != nil {
-		return nil, err
-	}
-
 	// Insert database record with template association
 	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (name, token, schema, template_id)
-		VALUES (?, ?, ?, (SELECT id FROM %s WHERE name = ?))
-	`, data.ReservedTableDatabases, data.ReservedTableTemplates), bod.Database, dbToken, buf.Bytes(), bod.Template)
+		INSERT INTO %s (name, token, template_id, template_version)
+		VALUES (?, ?, (SELECT id FROM %s WHERE name = ?), 1)
+	`, data.ReservedTableDatabases, data.ReservedTableTemplates), bod.Database, dbToken, bod.Template)
 	if err != nil {
 		return nil, err
 	}
@@ -430,64 +430,6 @@ func createDBToken(ctx context.Context, dbName string) (string, error) {
 	return jwtBod.Jwt, nil
 }
 
-// schemaFks fetches foreign keys from a database.
-func schemaFks(db *sql.DB) (map[string][]data.Fk, error) {
-	fks := make(map[string][]data.Fk)
-
-	rows, err := db.Query(`
-		SELECT m.name as "table", p."table" as "references", p."from", p."to"
-		FROM sqlite_master m
-		JOIN pragma_foreign_key_list(m.name) p ON m.name != p."table"
-		WHERE m.type = 'table';
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var from, to, references, table sql.NullString
-
-		err := rows.Scan(&table, &references, &from, &to)
-		if err != nil {
-			return nil, err
-		}
-
-		fk := data.Fk{Table: table.String, References: references.String, From: from.String, To: to.String}
-		fks[table.String] = append(fks[table.String], fk)
-	}
-
-	return fks, rows.Err()
-}
-
-// schemaFTS discovers FTS5 virtual tables.
-func schemaFTS(db *sql.DB) (map[string]bool, error) {
-	ftsTables := make(map[string]bool)
-
-	rows, err := db.Query(`
-		SELECT name FROM sqlite_master
-		WHERE type = 'table' AND sql LIKE '%fts5%';
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		// Remove _fts suffix to get base table name
-		suffix := "_fts"
-		if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
-			ftsTables[name[:len(name)-len(suffix)]] = true
-		}
-	}
-
-	return ftsTables, rows.Err()
-}
-
 // SyncTenant migrates a tenant database to the latest template version.
 // Returns the migration plan that was applied.
 func SyncTenant(ctx context.Context, dao data.PrimaryDao, tenantName string) (MigrationPlan, error) {
@@ -498,7 +440,7 @@ func SyncTenant(ctx context.Context, dao data.PrimaryDao, tenantName string) (Mi
 	var token string
 
 	err := dao.Client.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT d.id, d.template_id, COALESCE(d.schema_version, 1), d.token
+		SELECT d.id, d.template_id, COALESCE(d.template_version, 1), d.token
 		FROM %s d
 		WHERE d.name = ?
 	`, data.ReservedTableDatabases), tenantName).Scan(&dbID, &templateID, &currentVersion, &token)
@@ -544,7 +486,7 @@ func SyncTenant(ctx context.Context, dao data.PrimaryDao, tenantName string) (Mi
 	if len(plan.MigrationSQL) == 0 {
 		// No actual changes needed, just update version
 		_, err = dao.Client.ExecContext(ctx, fmt.Sprintf(`
-			UPDATE %s SET schema_version = ? WHERE id = ?
+			UPDATE %s SET template_version = ? WHERE id = ?
 		`, data.ReservedTableDatabases), targetVersion, dbID)
 		return plan, err
 	}
@@ -593,9 +535,9 @@ func SyncTenant(ctx context.Context, dao data.PrimaryDao, tenantName string) (Mi
 		return plan, fmt.Errorf("migration failed: %w", err)
 	}
 
-	// Update schema_version in primary database
+	// Update template_version in primary database
 	_, err = dao.Client.ExecContext(ctx, fmt.Sprintf(`
-		UPDATE %s SET schema_version = ? WHERE id = ?
+		UPDATE %s SET template_version = ? WHERE id = ?
 	`, data.ReservedTableDatabases), targetVersion, dbID)
 	if err != nil {
 		return plan, fmt.Errorf("migration succeeded but failed to update version: %w", err)

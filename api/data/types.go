@@ -18,7 +18,7 @@ type Database struct {
 	Schema        SchemaCache // Cached schema for validation
 	ID            int32       // Internal database ID (1 = primary)
 	TemplateID    int32       // Template ID (0 for primary database)
-	SchemaVersion int         // Schema version from template history
+	SchemaVersion int         // Template version from template history (stored in template_version column)
 }
 
 // SchemaCache holds cached table and foreign key information for query validation.

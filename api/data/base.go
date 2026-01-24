@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/joe-ervin05/atomicbase/config"
@@ -54,6 +53,50 @@ func isTestMode() bool {
 	return false
 }
 
+const PRAGMA = `
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -64000;
+PRAGMA temp_store = MEMORY;
+PRAGMA busy_timeout = 10000;
+PRAGMA foreign_keys = ON;
+PRAGMA journal_size_limit = 200000000;
+`
+
+const TEMPLATES_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableTemplates +
+	`(
+	id INTEGER PRIMARY KEY,
+	name TEXT UNIQUE NOT NULL,
+	current_version INTEGER DEFAULT 1,
+	created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+` +
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_templates_name ON ` + ReservedTableTemplates + `(name);`
+
+const DATABASES_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableDatabases +
+	`(
+	id INTEGER PRIMARY KEY,
+	name TEXT UNIQUE,
+	token TEXT,
+	template_id INTEGER REFERENCES ` + ReservedTableTemplates + `(id),
+	template_version INTEGER DEFAULT 1
+);` +
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_databases_name ON ` + ReservedTableDatabases + `(name);`
+
+const TEMPLATES_HISTORY_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableTemplatesHistory +
+	`(
+	id INTEGER PRIMARY KEY,
+	template_id INTEGER NOT NULL REFERENCES ` + ReservedTableTemplates + `(id),
+	version INTEGER NOT NULL,
+	schema BLOB NOT NULL,
+	checksum TEXT NOT NULL,
+	changes TEXT,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(template_id, version)
+);` +
+	`CREATE INDEX IF NOT EXISTS idx_templates_history_template ON ` + ReservedTableTemplatesHistory + `(template_id);`
+
 func initPrimaryDB() error {
 	if err := os.MkdirAll(config.Cfg.DataDir, os.ModePerm); err != nil {
 		return err
@@ -66,18 +109,11 @@ func initPrimaryDB() error {
 
 	if err := db.Ping(); err != nil {
 		db.Close()
+		fmt.Println("failed primary db connection")
 		return err
 	}
 
-	_, err = db.Exec(`
-		PRAGMA journal_mode = WAL;
-		PRAGMA synchronous = NORMAL;
-		PRAGMA cache_size = -64000;
-		PRAGMA temp_store = MEMORY;
-		PRAGMA busy_timeout = 10000;
-		PRAGMA foreign_keys = ON;
-		PRAGMA journal_size_limit = 200000000;
-	`)
+	_, err = db.Exec(PRAGMA)
 
 	if err != nil {
 		db.Close()
@@ -88,97 +124,31 @@ func initPrimaryDB() error {
 	gob.NewEncoder(&buf).Encode(SchemaCache{})
 
 	// Create templates table first (referenced by databases)
-	_, err = db.Exec(fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s
-	(
-		id INTEGER PRIMARY KEY,
-		name TEXT UNIQUE NOT NULL,
-		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-		updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_templates_name ON %s(name);
-	`, ReservedTableTemplates, ReservedTableTemplates))
+	_, err = db.Exec(TEMPLATES_SQL)
 	if err != nil {
 		db.Close()
-		return err
+		return fmt.Errorf("failed to create templates table: %w", err)
 	}
 
 	// Create databases table with template_id reference
-	_, err = db.Exec(fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s
-	(
-		id INTEGER PRIMARY KEY,
-		name TEXT UNIQUE,
-		token TEXT,
-		schema BLOB,
-		template_id INTEGER REFERENCES %s(id)
-	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_databases_name ON %s(name);
-	INSERT INTO %s (id, schema) values(1, ?) ON CONFLICT (id) DO NOTHING;
-	`, ReservedTableDatabases, ReservedTableTemplates, ReservedTableDatabases, ReservedTableDatabases), buf.Bytes())
+	_, err = db.Exec(DATABASES_SQL, buf.Bytes())
 	if err != nil {
 		db.Close()
-		return err
-	}
-
-	// Migration: Add template_id column if it doesn't exist (for existing databases)
-	// SQLite doesn't have IF NOT EXISTS for ALTER TABLE, so we check for the expected error
-	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN template_id INTEGER REFERENCES %s(id)`,
-		ReservedTableDatabases, ReservedTableTemplates))
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		db.Close()
-		return fmt.Errorf("migration failed: %w", err)
+		return fmt.Errorf("failed to create databases table: %w", err)
 	}
 
 	// Create templates_history table for version tracking
-	_, err = db.Exec(fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s
-	(
-		id INTEGER PRIMARY KEY,
-		template_id INTEGER NOT NULL REFERENCES %s(id),
-		version INTEGER NOT NULL,
-		schema BLOB NOT NULL,
-		checksum TEXT NOT NULL,
-		changes TEXT,
-		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(template_id, version)
-	);
-	CREATE INDEX IF NOT EXISTS idx_templates_history_template ON %s(template_id);
-	`, ReservedTableTemplatesHistory, ReservedTableTemplates, ReservedTableTemplatesHistory))
+	_, err = db.Exec(TEMPLATES_HISTORY_SQL)
 	if err != nil {
 		db.Close()
 		return fmt.Errorf("failed to create templates_history table: %w", err)
-	}
-
-	// Migration: Add current_version column to templates table
-	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN current_version INTEGER DEFAULT 1`,
-		ReservedTableTemplates))
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		db.Close()
-		return fmt.Errorf("migration failed: %w", err)
-	}
-
-	// Migration: Add schema_version column to databases table
-	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN schema_version INTEGER DEFAULT 1`,
-		ReservedTableDatabases))
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		db.Close()
-		return fmt.Errorf("migration failed: %w", err)
-	}
-
-	// Migration: Rename tables column to schema in templates_history
-	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME COLUMN tables TO schema`,
-		ReservedTableTemplatesHistory))
-	if err != nil && !strings.Contains(err.Error(), "no such column") {
-		db.Close()
-		return fmt.Errorf("migration failed: %w", err)
 	}
 
 	primaryDB = db
 
 	// Prepare cached statement for tenant lookup (runs on every tenant request)
 	tenantLookupStmt, err = db.Prepare(fmt.Sprintf(
-		"SELECT id, token, COALESCE(template_id, 0), COALESCE(schema_version, 1) FROM %s WHERE name = ?",
+		"SELECT id, token, COALESCE(template_id, 0), COALESCE(template_version, 1) FROM %s WHERE name = ?",
 		ReservedTableDatabases))
 	if err != nil {
 		primaryDB = nil
