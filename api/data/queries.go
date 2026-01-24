@@ -187,7 +187,7 @@ func (dao *Database) insertJSON(ctx context.Context, exec Executor, relation str
 		return dao.queryJSONWithExec(ctx, exec, query, args...)
 	}
 
-	result, err := exec.ExecContext(ctx, query, args...)
+	result, err := ExecContextWithRetry(ctx, exec, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (dao *Database) insertIgnoreJSON(ctx context.Context, exec Executor, relati
 		return dao.queryJSONWithExec(ctx, exec, query, args...)
 	}
 
-	result, err := exec.ExecContext(ctx, query, args...)
+	result, err := ExecContextWithRetry(ctx, exec, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +367,7 @@ func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation str
 		return dao.queryJSONWithExec(ctx, exec, query, args...)
 	}
 
-	result, err := exec.ExecContext(ctx, query, args...)
+	result, err := ExecContextWithRetry(ctx, exec, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +432,7 @@ func (dao *Database) updateJSON(ctx context.Context, exec Executor, relation str
 	query += where
 	args = append(args, whereArgs...)
 
-	result, err := exec.ExecContext(ctx, query, args...)
+	result, err := ExecContextWithRetry(ctx, exec, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -475,7 +475,7 @@ func (dao *Database) deleteJSON(ctx context.Context, exec Executor, relation str
 	}
 	query += where
 
-	result, err := exec.ExecContext(ctx, query, args...)
+	result, err := ExecContextWithRetry(ctx, exec, query, args...)
 	if err != nil {
 		return nil, err
 	}

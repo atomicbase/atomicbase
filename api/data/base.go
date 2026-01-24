@@ -70,10 +70,13 @@ func initPrimaryDB() error {
 	}
 
 	_, err = db.Exec(`
-	  PRAGMA journal_mode = WAL;                                                                
-      PRAGMA synchronous = NORMAL;                                                              
-      PRAGMA cache_size = -64000;  -- 64MB cache                                                
-      PRAGMA temp_store = MEMORY; 
+		PRAGMA journal_mode = WAL;
+		PRAGMA synchronous = NORMAL;
+		PRAGMA cache_size = -64000;
+		PRAGMA temp_store = MEMORY;
+		PRAGMA busy_timeout = 10000;
+		PRAGMA foreign_keys = ON;
+		PRAGMA journal_size_limit = 200000000;
 	`)
 
 	if err != nil {
