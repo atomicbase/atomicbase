@@ -25,8 +25,8 @@ type Config struct {
 	DefaultLimit     int      // Default limit when not specified (default 100, 0 = unlimited)
 
 	// Turso configuration (for multi-tenant external databases)
-	TursoOrganization   string // Turso organization name
-	TursoAPIKey         string // Turso API key for management operations
+	TursoOrganization    string // Turso organization name
+	TursoAPIKey          string // Turso API key for management operations
 	TursoTokenExpiration string // Token expiration (e.g., "7d", "30d", "never")
 }
 

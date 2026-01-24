@@ -12,8 +12,8 @@ import (
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
-//go:embed openapi.yaml
-var openapiSpec []byte
+// //go:embed openapi.yaml
+// var openapiSpec []byte
 
 // DbHandler is a handler that operates on a Database.
 type DbHandler func(ctx context.Context, db *Database, req *http.Request) ([]byte, error)
@@ -27,7 +27,7 @@ func RegisterRoutes(app *http.ServeMux) {
 	// Health check (no auth required)
 	app.HandleFunc("GET /health", handleHealth())
 	// OpenAPI documentation (no auth required)
-	app.HandleFunc("GET /openapi.yaml", handleOpenAPISpec())
+	// app.HandleFunc("GET /openapi.yaml", handleOpenAPISpec())
 	app.HandleFunc("GET /docs", handleSwaggerUI())
 
 	// Data API routes
@@ -231,13 +231,13 @@ func handleHealth() http.HandlerFunc {
 	}
 }
 
-func handleOpenAPISpec() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/x-yaml")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write(openapiSpec)
-	}
-}
+// func handleOpenAPISpec() http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		w.Header().Set("Content-Type", "application/x-yaml")
+// 		w.Header().Set("Access-Control-Allow-Origin", "*")
+// 		w.Write(openapiSpec)
+// 	}
+// }
 
 func handleSwaggerUI() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

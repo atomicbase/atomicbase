@@ -27,9 +27,30 @@ var (
 )
 
 func init() {
+	// Skip initialization during tests - tests use in-memory databases
+	if isTestMode() {
+		return
+	}
 	if err := initPrimaryDB(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// isTestMode checks if we're running in test mode
+func isTestMode() bool {
+	// Check for test binary suffix or -test flag
+	for _, arg := range os.Args {
+		if len(arg) >= 5 && arg[len(arg)-5:] == ".test" {
+			return true
+		}
+		if arg == "-test.v" || arg == "-test.run" {
+			return true
+		}
+		if len(arg) >= 6 && arg[:6] == "-test." {
+			return true
+		}
+	}
+	return false
 }
 
 func initPrimaryDB() error {

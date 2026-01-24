@@ -311,22 +311,11 @@ func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation str
 
 	// Collect columns into slice for consistent ordering
 	columns := make([]string, 0, len(req.Data[0]))
-	colSet := make(map[string]bool)
 	for col := range req.Data[0] {
 		if _, err := table.SearchCols(col); err != nil {
 			return nil, err
 		}
 		columns = append(columns, col)
-		colSet[col] = true
-	}
-
-	// Upsert requires all primary key columns in the insert (or use rowid)
-	if len(table.Pk) > 0 {
-		for _, pkCol := range table.Pk {
-			if !colSet[pkCol] {
-				return nil, fmt.Errorf("upsert requires all primary key columns in data; missing: %s", pkCol)
-			}
-		}
 	}
 
 	query := fmt.Sprintf("INSERT INTO [%s] ( ", relation)
