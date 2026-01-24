@@ -61,12 +61,13 @@ func main() {
 	data.RegisterRoutes(app)
 	platform.RegisterRoutes(app)
 
-	// Apply middleware chain: logging -> timeout -> cors -> rate limit -> auth -> handler
-	handler := tools.LoggingMiddleware(
-		tools.TimeoutMiddleware(
-			tools.CORSMiddleware(
-				tools.RateLimitMiddleware(
-					tools.AuthMiddleware(app)))))
+	// Apply middleware chain: panic recovery -> logging -> timeout -> cors -> rate limit -> auth -> handler
+	handler := tools.PanicRecoveryMiddleware(
+		tools.LoggingMiddleware(
+			tools.TimeoutMiddleware(
+				tools.CORSMiddleware(
+					tools.RateLimitMiddleware(
+						tools.AuthMiddleware(app))))))
 
 	server := &http.Server{
 		Addr:    config.Cfg.Port,
