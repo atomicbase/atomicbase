@@ -65,6 +65,7 @@ When tests are warranted, follow this structure:
 2. **Descriptive comments** - Explain what edge case each fixture tests
 3. **Table-driven tests** - For functions with many input variations
 4. **Helper functions** - `setupTestDB`, `parseJSONArray`, etc.
+5. **Real-world testing** - Use real in-memory sqlite databases to test against
 
 ## When to Delete Tests
 

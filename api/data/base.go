@@ -21,9 +21,10 @@ import (
 
 // Primary database connection (reused across requests)
 var (
-	primaryDB     *sql.DB
-	primarySchema SchemaCache
-	schemaMu      sync.RWMutex
+	primaryDB        *sql.DB
+	primarySchema    SchemaCache
+	schemaMu         sync.RWMutex
+	tenantLookupStmt *sql.Stmt // Cached prepared statement for tenant lookup
 )
 
 func init() {
@@ -64,6 +65,18 @@ func initPrimaryDB() error {
 	}
 
 	if err := db.Ping(); err != nil {
+		db.Close()
+		return err
+	}
+
+	_, err = db.Exec(`
+	  PRAGMA journal_mode = WAL;                                                                
+      PRAGMA synchronous = NORMAL;                                                              
+      PRAGMA cache_size = -64000;  -- 64MB cache                                                
+      PRAGMA temp_store = MEMORY; 
+	`)
+
+	if err != nil {
 		db.Close()
 		return err
 	}
@@ -160,6 +173,16 @@ func initPrimaryDB() error {
 
 	primaryDB = db
 
+	// Prepare cached statement for tenant lookup (runs on every tenant request)
+	tenantLookupStmt, err = db.Prepare(fmt.Sprintf(
+		"SELECT id, token, COALESCE(template_id, 0), COALESCE(schema_version, 1) FROM %s WHERE name = ?",
+		ReservedTableDatabases))
+	if err != nil {
+		primaryDB = nil
+		db.Close()
+		return fmt.Errorf("failed to prepare tenant lookup statement: %w", err)
+	}
+
 	// Load schema for primary database
 	dao := PrimaryDao{Database: Database{
 		Client:        db,
@@ -186,6 +209,9 @@ func initPrimaryDB() error {
 
 // ClosePrimaryDB closes the primary database connection. Call on shutdown.
 func ClosePrimaryDB() error {
+	if tenantLookupStmt != nil {
+		tenantLookupStmt.Close()
+	}
 	if primaryDB != nil {
 		return primaryDB.Close()
 	}
@@ -229,9 +255,7 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, errors.New("TURSO_ORGANIZATION environment variable is not set but is required to access external databases")
 	}
 
-	row := dao.Client.QueryRow(fmt.Sprintf(
-		"SELECT id, token, COALESCE(template_id, 0), COALESCE(schema_version, 1) FROM %s WHERE name = ?",
-		ReservedTableDatabases), dbName)
+	row := tenantLookupStmt.QueryRow(dbName)
 
 	var id sql.NullInt32
 	var token sql.NullString
