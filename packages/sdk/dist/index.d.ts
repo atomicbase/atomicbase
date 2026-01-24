@@ -1,4 +1,4 @@
-export { AtomicbaseClient, createClient } from "./AtomicbaseClient.js";
+export { AtomicbaseClient, TenantClient, createClient } from "./AtomicbaseClient.js";
 export { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
 export { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 export { AtomicbaseError } from "./AtomicbaseError.js";

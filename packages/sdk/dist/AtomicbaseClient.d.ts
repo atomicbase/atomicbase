@@ -2,7 +2,62 @@ import { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 import { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
 import type { AtomicbaseClientOptions, AtomicbaseBatchResponse } from "./types.js";
 /**
- * Atomicbase client for database operations.
+ * Tenant-scoped client for database operations.
+ * Created by calling `client.tenant('tenant-name')`.
+ *
+ * @example
+ * ```ts
+ * const tenantClient = client.tenant('acme-corp')
+ *
+ * // Query with fluent filters
+ * const { data, error } = await tenantClient
+ *   .from('users')
+ *   .select('id', 'name')
+ *   .eq('status', 'active')
+ *   .limit(10)
+ *
+ * // Insert data
+ * const { data } = await tenantClient
+ *   .from('users')
+ *   .insert({ name: 'Alice', email: 'alice@example.com' })
+ * ```
+ */
+export declare class TenantClient {
+    readonly baseUrl: string;
+    readonly apiKey?: string;
+    readonly headers: Record<string, string>;
+    readonly tenantId: string;
+    private readonly fetchFn;
+    constructor(options: AtomicbaseClientOptions & {
+        tenantId: string;
+    });
+    /**
+     * Start a query on a table.
+     *
+     * @example
+     * ```ts
+     * const { data } = await tenantClient.from('users').select()
+     * ```
+     */
+    from<T = Record<string, unknown>>(table: string): AtomicbaseQueryBuilder<T>;
+    /**
+     * Execute multiple operations in a single atomic transaction.
+     * All operations succeed or all fail together.
+     *
+     * @example
+     * ```ts
+     * const { data, error } = await tenantClient.batch([
+     *   tenantClient.from('users').insert({ name: 'Alice' }),
+     *   tenantClient.from('users').insert({ name: 'Bob' }),
+     *   tenantClient.from('counters').update({ count: 2 }).eq('id', 1),
+     * ])
+     * ```
+     */
+    batch<T extends unknown[] = unknown[]>(queries: AtomicbaseBuilder<unknown>[]): Promise<AtomicbaseBatchResponse<T>>;
+}
+/**
+ * Atomicbase client for multi-tenant database operations.
+ * Use `.tenant()` to get a tenant-scoped client for querying.
  *
  * @example
  * ```ts
@@ -13,19 +68,15 @@ import type { AtomicbaseClientOptions, AtomicbaseBatchResponse } from "./types.j
  *   apiKey: 'your-api-key',
  * })
  *
- * // Query with fluent filters
- * const { data, error } = await client
+ * // Get a tenant-scoped client
+ * const acme = client.tenant('acme-corp')
+ *
+ * // Query the tenant's database
+ * const { data, error } = await acme
  *   .from('users')
  *   .select('id', 'name')
  *   .eq('status', 'active')
- *   .gt('age', 18)
- *   .orderBy('created_at', 'desc')
  *   .limit(10)
- *
- * // Insert data
- * const { data } = await client
- *   .from('users')
- *   .insert({ name: 'Alice', email: 'alice@example.com' })
  * ```
  */
 export declare class AtomicbaseClient {
@@ -35,17 +86,7 @@ export declare class AtomicbaseClient {
     private readonly fetchFn;
     constructor(options: AtomicbaseClientOptions);
     /**
-     * Start a query on a table.
-     *
-     * @example
-     * ```ts
-     * const { data } = await client.from('users').select()
-     * ```
-     */
-    from<T = Record<string, unknown>>(table: string): AtomicbaseQueryBuilder<T>;
-    /**
-     * Create a new client with a different tenant.
-     * Useful for multi-tenant applications.
+     * Create a tenant-scoped client for database operations.
      *
      * @example
      * ```ts
@@ -53,29 +94,7 @@ export declare class AtomicbaseClient {
      * const { data } = await tenantClient.from('users').select()
      * ```
      */
-    tenant(tenantId: string): AtomicbaseClient & {
-        readonly tenantId: string;
-    };
-    /**
-     * Execute multiple operations in a single atomic transaction.
-     * All operations succeed or all fail together.
-     *
-     * @example
-     * ```ts
-     * const { data, error } = await client.batch([
-     *   client.from('users').insert({ name: 'Alice' }),
-     *   client.from('users').insert({ name: 'Bob' }),
-     *   client.from('counters').update({ count: 2 }).eq('id', 1),
-     * ])
-     *
-     * // With result modifiers
-     * const { data, error } = await client.batch([
-     *   client.from('users').select().eq('id', 1).single(),
-     *   client.from('users').select().count(),
-     * ])
-     * ```
-     */
-    batch<T extends unknown[] = unknown[]>(queries: AtomicbaseBuilder<unknown>[]): Promise<AtomicbaseBatchResponse<T>>;
+    tenant(tenantId: string): TenantClient;
 }
 /**
  * Create an Atomicbase client.
@@ -86,6 +105,9 @@ export declare class AtomicbaseClient {
  *   url: 'http://localhost:8080',
  *   apiKey: 'your-api-key',
  * })
+ *
+ * // Get a tenant client and query
+ * const { data } = await client.tenant('my-tenant').from('users').select()
  * ```
  */
 export declare function createClient(options: AtomicbaseClientOptions): AtomicbaseClient;

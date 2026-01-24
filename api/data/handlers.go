@@ -95,27 +95,26 @@ func withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 	}
 }
 
-// connDb returns a database connection and a boolean indicating if it's an external (non-pooled) connection.
-// External connections should be closed after use; pooled connections should not.
+// connDb returns a database connection for the specified tenant.
+// The Tenant header is required - the internal tenants.db cannot be queried directly.
+// Returns the connection and a boolean indicating if it should be closed after use.
 func connDb(req *http.Request) (Database, bool, error) {
 	dbName := req.Header.Get("Tenant")
+	if dbName == "" {
+		return Database{}, false, tools.ErrMissingTenant
+	}
 
 	dao, err := ConnPrimary()
 	if err != nil {
 		return Database{}, false, err
 	}
 
-	if dbName != "" {
-		db, err := dao.ConnTurso(dbName)
-		if err != nil {
-			return Database{}, false, err
-		}
-		// Return external connection - should be closed after use
-		return db, true, nil
+	db, err := dao.ConnTurso(dbName)
+	if err != nil {
+		return Database{}, false, err
 	}
 
-	// Return pooled primary connection - should NOT be closed
-	return dao.Database, false, nil
+	return db, true, nil
 }
 
 // handleBatch handles POST /data/batch for atomic multi-operation requests.

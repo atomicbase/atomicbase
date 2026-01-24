@@ -30,6 +30,7 @@ const (
 	CodeNotNullViolation    = "NOT_NULL_VIOLATION"
 	CodeNoFTSIndex          = "NO_FTS_INDEX"
 	CodeBatchTooLarge       = "BATCH_TOO_LARGE"
+	CodeMissingTenant       = "MISSING_TENANT"
 	CodeInternalError       = "INTERNAL_ERROR"
 
 	// Turso-specific error codes
@@ -76,6 +77,7 @@ var (
 	ErrTemplateInUse      = errors.New("template is in use by one or more databases")
 	ErrInArrayTooLarge    = errors.New("IN array exceeds maximum size")
 	ErrBatchTooLarge      = errors.New("batch exceeds maximum number of operations")
+	ErrMissingTenant      = errors.New("Tenant header is required")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.

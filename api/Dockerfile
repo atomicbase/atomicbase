@@ -35,7 +35,7 @@ EXPOSE 8080
 
 # Set default environment
 ENV PORT=:8080
-ENV DB_PATH=/app/atomicdata/primary.db
+ENV DB_PATH=/app/atomicdata/tenants.db
 ENV DATA_DIR=/app/atomicdata
 
 # Run

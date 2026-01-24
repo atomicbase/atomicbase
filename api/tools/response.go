@@ -124,6 +124,12 @@ func BuildAPIError(err error) (int, APIError) {
 			Message: err.Error(),
 			Hint:    fmt.Sprintf("Split the batch into multiple requests with at most %d operations each.", MaxBatchOperations),
 		}
+	case errors.Is(err, ErrMissingTenant):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeMissingTenant,
+			Message: err.Error(),
+			Hint:    "Add a 'Tenant' header with the database name. Use GET /platform/tenants to list available databases.",
+		}
 	case errors.Is(err, ErrReservedTable):
 		return http.StatusForbidden, APIError{
 			Code:    CodeReservedTable,

@@ -2,7 +2,7 @@
 // Client
 // =============================================================================
 
-export { AtomicbaseClient, createClient } from "./AtomicbaseClient.js";
+export { AtomicbaseClient, TenantClient, createClient } from "./AtomicbaseClient.js";
 
 // =============================================================================
 // Builders (for advanced usage / extension)

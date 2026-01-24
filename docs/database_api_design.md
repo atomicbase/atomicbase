@@ -186,7 +186,7 @@ atomicbase tenants delete <name>  # Requires confirmation
 
 **Auto-handled:** Add table, add column, rename column/table
 
-**Requires `--allow-destructive`:** Drop table, drop column
+**Requires Confirmation:** Drop table, drop column
 
 **Ambiguous (interactive prompt):**
 

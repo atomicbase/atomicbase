@@ -7,7 +7,7 @@ services:
       - atomicbase-data:/app/atomicdata
     environment:
       - PORT=:8080
-      - DB_PATH=/app/atomicdata/primary.db
+      - DB_PATH=/app/atomicdata/tenants.db
       - DATA_DIR=/app/atomicdata
       # Security settings (uncomment for production)
       # - ATOMICBASE_API_KEY=your-secret-key
