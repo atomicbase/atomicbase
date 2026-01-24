@@ -307,18 +307,18 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 
 // CustomJoinQuery represents a SELECT query with custom joins.
 type CustomJoinQuery struct {
-	BaseTable     string                   // Primary table to query from
-	BaseColumns   []column                 // Columns from base table
-	Joins         []customJoin             // Custom join definitions
-	JoinedColumns map[string][]column      // Columns per joined table: table -> columns
+	BaseTable     string              // Primary table to query from
+	BaseColumns   []column            // Columns from base table
+	Joins         []customJoin        // Custom join definitions
+	JoinedColumns map[string][]column // Columns per joined table: table -> columns
 }
 
 type customJoin struct {
-	table      string           // Table to join
-	alias      string           // Optional alias (defaults to table name)
-	joinType   string           // "left" or "inner"
-	conditions []joinCondition  // ON conditions
-	flat       bool             // If true, flatten output
+	table      string          // Table to join
+	alias      string          // Optional alias (defaults to table name)
+	joinType   string          // "left" or "inner"
+	conditions []joinCondition // ON conditions
+	flat       bool            // If true, flatten output
 }
 
 type joinCondition struct {

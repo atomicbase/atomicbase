@@ -10,12 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joe-ervin05/atomicbase/admin"
-	"github.com/joe-ervin05/atomicbase/auth"
 	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joe-ervin05/atomicbase/data"
 	"github.com/joe-ervin05/atomicbase/platform"
-	"github.com/joe-ervin05/atomicbase/storage"
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
@@ -63,9 +60,6 @@ func main() {
 	// Register routes from each module
 	data.RegisterRoutes(app)
 	platform.RegisterRoutes(app)
-	auth.RegisterRoutes(app)
-	storage.RegisterRoutes(app)
-	admin.RegisterRoutes(app)
 
 	// Apply middleware chain: logging -> timeout -> cors -> rate limit -> auth -> handler
 	handler := tools.LoggingMiddleware(
