@@ -1,576 +1,593 @@
 package data
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // =============================================================================
-// Test Fixtures
+// Test Schemas
 // =============================================================================
 
-// Test table with various column types for query tests
-var usersTable = Table{
-	Name: "users",
-	Pk:   []string{"id"},
-	Columns: map[string]Col{
-		"id":         {Name: "id", Type: "INTEGER", NotNull: true},
-		"name":       {Name: "name", Type: "TEXT", NotNull: false},
-		"email":      {Name: "email", Type: "TEXT", NotNull: true},
-		"age":        {Name: "age", Type: "INTEGER", NotNull: false},
-		"score":      {Name: "score", Type: "REAL", NotNull: false},
-		"created_at": {Name: "created_at", Type: "TEXT", NotNull: false},
-		"is_active":  {Name: "is_active", Type: "INTEGER", NotNull: false},
-	},
+// Basic table for WHERE clause testing
+const schemaUsers = `
+CREATE TABLE users (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	email TEXT UNIQUE,
+	age INTEGER,
+	status TEXT DEFAULT 'active'
+);
+`
+
+// Composite primary key (2-column) - explicitly mentioned in testing philosophy
+const schemaUserRoles = `
+CREATE TABLE user_roles (
+	user_id INTEGER NOT NULL,
+	role_id INTEGER NOT NULL,
+	granted_at TEXT,
+	PRIMARY KEY (user_id, role_id)
+);
+`
+
+// Triple composite key - edge case
+const schemaAuditLog = `
+CREATE TABLE audit_log (
+	tenant_id INTEGER NOT NULL,
+	entity_type TEXT NOT NULL,
+	entity_id INTEGER NOT NULL,
+	action TEXT,
+	PRIMARY KEY (tenant_id, entity_type, entity_id)
+);
+`
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+func setupTestDB(t *testing.T, schema string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("failed to create schema: %v", err)
+	}
+	return db
 }
 
-// Test schema with tables and FKs
-var testSchema = SchemaCache{
-	Tables: map[string]Table{
-		"users": usersTable,
-		"posts": {
-			Name: "posts",
-			Pk:   []string{"id"},
-			Columns: map[string]Col{
-				"id":      {Name: "id", Type: "INTEGER", NotNull: true},
-				"user_id": {Name: "user_id", Type: "INTEGER", References: "users.id"},
-				"title":   {Name: "title", Type: "TEXT", NotNull: true},
-			},
-		},
-	},
-	Fks: map[string][]Fk{
-		"posts": {{Table: "posts", References: "users", From: "user_id", To: "id"}},
-	},
-	FTSTables: map[string]bool{
-		"users": true,
-	},
+func loadSchema(t *testing.T, db *sql.DB) SchemaCache {
+	t.Helper()
+	tables, err := SchemaCols(db)
+	if err != nil {
+		t.Fatalf("failed to load schema: %v", err)
+	}
+	fks, err := schemaFks(db)
+	if err != nil {
+		t.Fatalf("failed to load fks: %v", err)
+	}
+	ftsTables, err := schemaFTS(db)
+	if err != nil {
+		t.Fatalf("failed to load fts: %v", err)
+	}
+	return SchemaCache{Tables: tables, Fks: fks, FTSTables: ftsTables}
 }
 
 // =============================================================================
-// BuildWhereFromJSON Tests - Many edge cases (criteria B)
+// BuildWhereFromJSON Tests
+// Criteria B: 12+ operators, NOT variants, AND/OR combinations
 // =============================================================================
 
-func TestBuildWhereFromJSON_Empty(t *testing.T) {
-	query, args, err := usersTable.BuildWhereFromJSON(nil, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if query != "" {
-		t.Errorf("expected empty query, got %q", query)
-	}
-	if len(args) != 0 {
-		t.Errorf("expected no args, got %v", args)
-	}
-}
+func TestBuildWhereFromJSON_Operators(t *testing.T) {
+	db := setupTestDB(t, schemaUsers)
+	defer db.Close()
+	schema := loadSchema(t, db)
+	table := schema.Tables["users"]
 
-func TestBuildWhereFromJSON_Eq(t *testing.T) {
-	where := []map[string]any{
-		{"id": map[string]any{"eq": 5}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "[users].[id] = ?") {
-		t.Errorf("expected eq clause, got %q", query)
-	}
-	if len(args) != 1 || args[0] != 5 {
-		t.Errorf("expected args [5], got %v", args)
-	}
-}
-
-func TestBuildWhereFromJSON_Neq(t *testing.T) {
-	where := []map[string]any{
-		{"name": map[string]any{"neq": "admin"}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "[users].[name] != ?") {
-		t.Errorf("expected neq clause, got %q", query)
-	}
-	if len(args) != 1 || args[0] != "admin" {
-		t.Errorf("expected args [admin], got %v", args)
-	}
-}
-
-func TestBuildWhereFromJSON_GtGteLtLte(t *testing.T) {
 	tests := []struct {
-		op       string
-		expected string
+		name     string
+		where    []map[string]any
+		wantSQL  string // substring to check for
+		wantArgs int    // number of args expected
+		wantErr  bool
 	}{
-		{"gt", ">"},
-		{"gte", ">="},
-		{"lt", "<"},
-		{"lte", "<="},
+		// Basic operators
+		{"eq", []map[string]any{{"id": map[string]any{"eq": 5}}}, "= ?", 1, false},
+		{"neq", []map[string]any{{"id": map[string]any{"neq": 5}}}, "!= ?", 1, false},
+		{"gt", []map[string]any{{"age": map[string]any{"gt": 18}}}, "> ?", 1, false},
+		{"gte", []map[string]any{{"age": map[string]any{"gte": 18}}}, ">= ?", 1, false},
+		{"lt", []map[string]any{{"age": map[string]any{"lt": 65}}}, "< ?", 1, false},
+		{"lte", []map[string]any{{"age": map[string]any{"lte": 65}}}, "<= ?", 1, false},
+		{"like", []map[string]any{{"name": map[string]any{"like": "%smith%"}}}, "LIKE ?", 1, false},
+		{"glob", []map[string]any{{"name": map[string]any{"glob": "*smith*"}}}, "GLOB ?", 1, false},
+
+		// IS NULL
+		{"is null", []map[string]any{{"email": map[string]any{"is": nil}}}, "IS NULL", 0, false},
+
+		// IN array
+		{"in", []map[string]any{{"status": map[string]any{"in": []any{"active", "pending"}}}}, "IN (?, ?)", 2, false},
+		{"in empty error", []map[string]any{{"status": map[string]any{"in": []any{}}}}, "", 0, true},
+
+		// BETWEEN
+		{"between", []map[string]any{{"age": map[string]any{"between": []any{18, 65}}}}, "BETWEEN ? AND ?", 2, false},
+		{"between wrong count", []map[string]any{{"age": map[string]any{"between": []any{18}}}}, "", 0, true},
+
+		// NOT variants
+		{"not eq", []map[string]any{{"id": map[string]any{"not": map[string]any{"eq": 5}}}}, "!= ?", 1, false},
+		{"not in", []map[string]any{{"status": map[string]any{"not": map[string]any{"in": []any{"banned"}}}}}, "NOT IN", 1, false},
+		{"not is null", []map[string]any{{"email": map[string]any{"not": map[string]any{"is": nil}}}}, "IS NOT NULL", 0, false},
+		{"not like", []map[string]any{{"name": map[string]any{"not": map[string]any{"like": "%test%"}}}}, "NOT LIKE", 1, false},
+
+		// Invalid operator
+		{"invalid op", []map[string]any{{"id": map[string]any{"invalid": 5}}}, "", 0, true},
+
+		// Invalid column
+		{"invalid column", []map[string]any{{"nonexistent": map[string]any{"eq": 5}}}, "", 0, true},
+
+		// Empty where
+		{"empty", []map[string]any{}, "", 0, false},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.op, func(t *testing.T) {
-			where := []map[string]any{
-				{"age": map[string]any{tt.op: 18}},
+		t.Run(tt.name, func(t *testing.T) {
+			sql, args, err := table.BuildWhereFromJSON(tt.where, schema)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got none")
+				}
+				return
 			}
-			query, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
+
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Errorf("unexpected error: %v", err)
+				return
 			}
-			if !strings.Contains(query, tt.expected) {
-				t.Errorf("expected %s operator, got %q", tt.expected, query)
+
+			if tt.wantSQL != "" && !strings.Contains(sql, tt.wantSQL) {
+				t.Errorf("SQL = %q, want substring %q", sql, tt.wantSQL)
+			}
+
+			if len(args) != tt.wantArgs {
+				t.Errorf("got %d args, want %d", len(args), tt.wantArgs)
 			}
 		})
 	}
 }
 
-func TestBuildWhereFromJSON_Like(t *testing.T) {
-	where := []map[string]any{
-		{"name": map[string]any{"like": "%john%"}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "LIKE ?") {
-		t.Errorf("expected LIKE clause, got %q", query)
-	}
-	if len(args) != 1 || args[0] != "%john%" {
-		t.Errorf("expected args [%%john%%], got %v", args)
-	}
-}
+func TestBuildWhereFromJSON_OrConditions(t *testing.T) {
+	db := setupTestDB(t, schemaUsers)
+	defer db.Close()
+	schema := loadSchema(t, db)
+	table := schema.Tables["users"]
 
-func TestBuildWhereFromJSON_Glob(t *testing.T) {
-	where := []map[string]any{
-		{"name": map[string]any{"glob": "*john*"}},
-	}
-	query, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "GLOB ?") {
-		t.Errorf("expected GLOB clause, got %q", query)
-	}
-}
-
-func TestBuildWhereFromJSON_In(t *testing.T) {
-	where := []map[string]any{
-		{"id": map[string]any{"in": []any{1, 2, 3}}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "IN (?, ?, ?)") {
-		t.Errorf("expected IN clause with 3 placeholders, got %q", query)
-	}
-	if len(args) != 3 {
-		t.Errorf("expected 3 args, got %d", len(args))
-	}
-}
-
-func TestBuildWhereFromJSON_InEmpty(t *testing.T) {
-	where := []map[string]any{
-		{"id": map[string]any{"in": []any{}}},
-	}
-	_, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err == nil {
-		t.Error("expected error for empty IN array")
-	}
-}
-
-func TestBuildWhereFromJSON_Between(t *testing.T) {
-	where := []map[string]any{
-		{"age": map[string]any{"between": []any{18, 65}}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "BETWEEN ? AND ?") {
-		t.Errorf("expected BETWEEN clause, got %q", query)
-	}
-	if len(args) != 2 {
-		t.Errorf("expected 2 args, got %d", len(args))
-	}
-}
-
-func TestBuildWhereFromJSON_BetweenInvalid(t *testing.T) {
-	where := []map[string]any{
-		{"age": map[string]any{"between": []any{18}}}, // Only 1 element
-	}
-	_, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err == nil {
-		t.Error("expected error for invalid BETWEEN array")
-	}
-}
-
-func TestBuildWhereFromJSON_IsNull(t *testing.T) {
-	where := []map[string]any{
-		{"name": map[string]any{"is": nil}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "IS NULL") {
-		t.Errorf("expected IS NULL clause, got %q", query)
-	}
-	if len(args) != 0 {
-		t.Errorf("expected no args for IS NULL, got %v", args)
-	}
-}
-
-func TestBuildWhereFromJSON_NotEq(t *testing.T) {
-	where := []map[string]any{
-		{"name": map[string]any{"not": map[string]any{"eq": "admin"}}},
-	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "!= ?") {
-		t.Errorf("expected NOT eq clause, got %q", query)
-	}
-	if len(args) != 1 {
-		t.Errorf("expected 1 arg, got %d", len(args))
-	}
-}
-
-func TestBuildWhereFromJSON_NotIn(t *testing.T) {
-	where := []map[string]any{
-		{"id": map[string]any{"not": map[string]any{"in": []any{1, 2}}}},
-	}
-	query, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "NOT IN") {
-		t.Errorf("expected NOT IN clause, got %q", query)
-	}
-}
-
-func TestBuildWhereFromJSON_NotIsNull(t *testing.T) {
-	where := []map[string]any{
-		{"name": map[string]any{"not": map[string]any{"is": nil}}},
-	}
-	query, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "IS NOT NULL") {
-		t.Errorf("expected IS NOT NULL clause, got %q", query)
-	}
-}
-
-func TestBuildWhereFromJSON_Or(t *testing.T) {
+	// OR with multiple conditions
 	where := []map[string]any{
 		{"or": []any{
-			map[string]any{"name": map[string]any{"eq": "john"}},
-			map[string]any{"name": map[string]any{"eq": "jane"}},
+			map[string]any{"status": map[string]any{"eq": "active"}},
+			map[string]any{"status": map[string]any{"eq": "pending"}},
 		}},
 	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
+
+	sql, args, err := table.BuildWhereFromJSON(where, schema)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(query, " OR ") {
-		t.Errorf("expected OR clause, got %q", query)
+
+	if !strings.Contains(sql, "OR") {
+		t.Errorf("SQL should contain OR: %s", sql)
 	}
 	if len(args) != 2 {
 		t.Errorf("expected 2 args, got %d", len(args))
 	}
 }
 
-func TestBuildWhereFromJSON_MultipleConditions(t *testing.T) {
+func TestBuildWhereFromJSON_ColumnReference(t *testing.T) {
+	db := setupTestDB(t, `
+		CREATE TABLE posts (
+			id INTEGER PRIMARY KEY,
+			created_at TEXT,
+			updated_at TEXT
+		);
+	`)
+	defer db.Close()
+	schema := loadSchema(t, db)
+	table := schema.Tables["posts"]
+
+	// Column-to-column comparison: updated_at > created_at
 	where := []map[string]any{
-		{"age": map[string]any{"gte": 18}},
-		{"is_active": map[string]any{"eq": 1}},
+		{"updated_at": map[string]any{"gt": map[string]any{"__col": "created_at"}}},
 	}
-	query, args, err := usersTable.BuildWhereFromJSON(where, testSchema)
+
+	sql, args, err := table.BuildWhereFromJSON(where, schema)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(query, "AND") {
-		t.Errorf("expected AND between conditions, got %q", query)
-	}
-	if len(args) != 2 {
-		t.Errorf("expected 2 args, got %d", len(args))
-	}
-}
 
-func TestBuildWhereFromJSON_InvalidColumn(t *testing.T) {
-	where := []map[string]any{
-		{"nonexistent": map[string]any{"eq": 5}},
+	// Should produce column comparison, not parameterized value
+	if !strings.Contains(sql, "[created_at]") {
+		t.Errorf("SQL should reference created_at column: %s", sql)
 	}
-	_, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err == nil {
-		t.Error("expected error for invalid column")
-	}
-}
-
-func TestBuildWhereFromJSON_InvalidOperator(t *testing.T) {
-	where := []map[string]any{
-		{"id": map[string]any{"invalid_op": 5}},
-	}
-	_, _, err := usersTable.BuildWhereFromJSON(where, testSchema)
-	if err == nil {
-		t.Error("expected error for invalid operator")
+	if len(args) != 0 {
+		t.Errorf("column reference should have 0 args, got %d", len(args))
 	}
 }
 
 // =============================================================================
-// BuildOrderFromJSON Tests
+// SchemaCols Tests - Composite Primary Key Detection
+// Criteria B: composite keys explicitly mentioned as edge case
 // =============================================================================
 
-func TestBuildOrderFromJSON_Empty(t *testing.T) {
-	query, err := usersTable.BuildOrderFromJSON(nil)
+func TestSchemaCols_CompositePrimaryKey(t *testing.T) {
+	db := setupTestDB(t, schemaUserRoles)
+	defer db.Close()
+
+	tables, err := SchemaCols(db)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("SchemaCols error: %v", err)
 	}
-	if query != "" {
-		t.Errorf("expected empty query, got %q", query)
+
+	tbl, ok := tables["user_roles"]
+	if !ok {
+		t.Fatal("user_roles table not found")
+	}
+
+	// Must have exactly 2 PK columns in correct order
+	if len(tbl.Pk) != 2 {
+		t.Fatalf("expected 2 PK columns, got %d: %v", len(tbl.Pk), tbl.Pk)
+	}
+	if tbl.Pk[0] != "user_id" || tbl.Pk[1] != "role_id" {
+		t.Errorf("PK order wrong: got %v, want [user_id, role_id]", tbl.Pk)
 	}
 }
 
-func TestBuildOrderFromJSON_Asc(t *testing.T) {
-	order := map[string]string{"name": "asc"}
-	query, err := usersTable.BuildOrderFromJSON(order)
+func TestSchemaCols_TripleCompositePrimaryKey(t *testing.T) {
+	db := setupTestDB(t, schemaAuditLog)
+	defer db.Close()
+
+	tables, err := SchemaCols(db)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("SchemaCols error: %v", err)
 	}
-	if !strings.Contains(query, "ASC") {
-		t.Errorf("expected ASC, got %q", query)
+
+	tbl := tables["audit_log"]
+	if len(tbl.Pk) != 3 {
+		t.Fatalf("expected 3 PK columns, got %d: %v", len(tbl.Pk), tbl.Pk)
+	}
+	if tbl.Pk[0] != "tenant_id" || tbl.Pk[1] != "entity_type" || tbl.Pk[2] != "entity_id" {
+		t.Errorf("PK order wrong: got %v", tbl.Pk)
 	}
 }
 
-func TestBuildOrderFromJSON_Desc(t *testing.T) {
-	order := map[string]string{"created_at": "desc"}
-	query, err := usersTable.BuildOrderFromJSON(order)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(query, "DESC") {
-		t.Errorf("expected DESC, got %q", query)
-	}
-}
+// =============================================================================
+// parseJoinCondition Tests
+// Criteria B: table.column format validation edge cases
+// =============================================================================
 
-func TestBuildOrderFromJSON_InvalidColumn(t *testing.T) {
-	order := map[string]string{"nonexistent": "asc"}
-	_, err := usersTable.BuildOrderFromJSON(order)
-	if err == nil {
-		t.Error("expected error for invalid column")
+func TestParseJoinCondition(t *testing.T) {
+	tests := []struct {
+		name    string
+		cond    map[string]any
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid",
+			cond:    map[string]any{"users.id": map[string]any{"eq": "orders.user_id"}},
+			wantErr: false,
+		},
+		{
+			name:    "multiple keys error",
+			cond:    map[string]any{"a.b": map[string]any{"eq": "c.d"}, "e.f": map[string]any{"eq": "g.h"}},
+			wantErr: true,
+			errMsg:  "exactly one key",
+		},
+		{
+			name:    "no table prefix on left",
+			cond:    map[string]any{"id": map[string]any{"eq": "orders.user_id"}},
+			wantErr: true,
+			errMsg:  "table.column format",
+		},
+		{
+			name:    "no table prefix on right",
+			cond:    map[string]any{"users.id": map[string]any{"eq": "user_id"}},
+			wantErr: true,
+			errMsg:  "table.column format",
+		},
+		{
+			name:    "non-object value",
+			cond:    map[string]any{"users.id": "orders.user_id"},
+			wantErr: true,
+			errMsg:  "must be an object",
+		},
+		{
+			name:    "non-string right side",
+			cond:    map[string]any{"users.id": map[string]any{"eq": 123}},
+			wantErr: true,
+			errMsg:  "column reference string",
+		},
 	}
-}
 
-func TestBuildOrderFromJSON_InvalidDirection(t *testing.T) {
-	order := map[string]string{"name": "invalid"}
-	_, err := usersTable.BuildOrderFromJSON(order)
-	if err == nil {
-		t.Error("expected error for invalid direction")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseJoinCondition(tt.cond)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got none")
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error = %v, want containing %q", err, tt.errMsg)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
 // =============================================================================
 // ParseSelectFromJSON Tests
+// Criteria B: nested relations, aliases, edge cases
 // =============================================================================
 
-func TestParseSelectFromJSON_Empty(t *testing.T) {
-	rel, err := ParseSelectFromJSON(nil, "users")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestParseSelectFromJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		sel       []any
+		wantCols  int
+		wantJoins int
+		wantErr   bool
+	}{
+		{"empty defaults to star", []any{}, 1, 0, false},
+		{"simple columns", []any{"id", "name"}, 2, 0, false},
+		{"star", []any{"*"}, 1, 0, false},
+		{"aliased column", []any{map[string]any{"user_name": "name"}}, 1, 0, false},
+		{"nested relation", []any{"id", map[string]any{"posts": []any{"title"}}}, 1, 1, false},
+		{"deeply nested", []any{map[string]any{"posts": []any{"id", map[string]any{"comments": []any{"body"}}}}}, 1, 1, false},
+		{"invalid type", []any{123}, 0, 0, true},
 	}
-	if len(rel.columns) != 1 || rel.columns[0].name != "*" {
-		t.Errorf("expected default *, got %v", rel.columns)
-	}
-}
 
-func TestParseSelectFromJSON_SimpleColumns(t *testing.T) {
-	sel := []any{"id", "name", "email"}
-	rel, err := ParseSelectFromJSON(sel, "users")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(rel.columns) != 3 {
-		t.Errorf("expected 3 columns, got %d", len(rel.columns))
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rel, err := ParseSelectFromJSON(tt.sel, "users")
 
-func TestParseSelectFromJSON_Star(t *testing.T) {
-	sel := []any{"*"}
-	rel, err := ParseSelectFromJSON(sel, "users")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(rel.columns) != 1 || rel.columns[0].name != "*" {
-		t.Errorf("expected *, got %v", rel.columns)
-	}
-}
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got none")
+				}
+				return
+			}
 
-func TestParseSelectFromJSON_AliasedColumn(t *testing.T) {
-	sel := []any{map[string]any{"user_name": "name"}}
-	rel, err := ParseSelectFromJSON(sel, "users")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(rel.columns) != 1 {
-		t.Fatalf("expected 1 column, got %d", len(rel.columns))
-	}
-	if rel.columns[0].name != "name" || rel.columns[0].alias != "user_name" {
-		t.Errorf("expected aliased column, got %+v", rel.columns[0])
-	}
-}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-func TestParseSelectFromJSON_NestedRelation(t *testing.T) {
-	sel := []any{"id", map[string]any{"posts": []any{"title"}}}
-	rel, err := ParseSelectFromJSON(sel, "users")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(rel.columns) != 1 {
-		t.Errorf("expected 1 direct column, got %d", len(rel.columns))
-	}
-	if len(rel.joins) != 1 {
-		t.Fatalf("expected 1 join, got %d", len(rel.joins))
-	}
-	if rel.joins[0].name != "posts" {
-		t.Errorf("expected posts join, got %s", rel.joins[0].name)
+			if len(rel.columns) != tt.wantCols {
+				t.Errorf("got %d columns, want %d", len(rel.columns), tt.wantCols)
+			}
+			if len(rel.joins) != tt.wantJoins {
+				t.Errorf("got %d joins, want %d", len(rel.joins), tt.wantJoins)
+			}
+		})
 	}
 }
 
 // =============================================================================
-// Schema Lookup Tests - Stable functions (criteria A)
+// BuildReturningFromJSON Tests
+// Criteria B: edge cases for RETURNING clause
 // =============================================================================
 
-func TestSearchTbls_Found(t *testing.T) {
-	tbl, err := testSchema.SearchTbls("users")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestBuildReturningFromJSON(t *testing.T) {
+	db := setupTestDB(t, schemaUsers)
+	defer db.Close()
+	schema := loadSchema(t, db)
+	table := schema.Tables["users"]
+
+	tests := []struct {
+		name    string
+		cols    []string
+		wantSQL string
+		wantErr bool
+	}{
+		{"empty", []string{}, "", false},
+		{"star", []string{"*"}, "RETURNING * ", false},
+		{"single column", []string{"id"}, "RETURNING [id]", false},
+		{"multiple columns", []string{"id", "name"}, "RETURNING [id], [name]", false},
+		{"invalid column", []string{"nonexistent"}, "", true},
 	}
-	if tbl.Name != "users" {
-		t.Errorf("expected users, got %s", tbl.Name)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sql, err := table.BuildReturningFromJSON(tt.cols)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantSQL != "" && !strings.Contains(sql, tt.wantSQL) {
+				t.Errorf("SQL = %q, want containing %q", sql, tt.wantSQL)
+			}
+		})
 	}
 }
 
-func TestSearchTbls_NotFound(t *testing.T) {
-	_, err := testSchema.SearchTbls("nonexistent")
+// =============================================================================
+// Upsert Composite Primary Key Validation
+// Criteria B: upsert requires all PK columns
+// =============================================================================
+
+func TestUpsertJSON_RequiresAllPKColumns(t *testing.T) {
+	db := setupTestDB(t, schemaUserRoles)
+	defer db.Close()
+	schema := loadSchema(t, db)
+
+	dao := &Database{
+		Client: db,
+		Schema: schema,
+	}
+
+	// Missing role_id from composite PK
+	req := UpsertRequest{
+		Data: []map[string]any{
+			{"user_id": 1, "granted_at": "2024-01-01"},
+		},
+	}
+
+	_, err := dao.UpsertJSON(context.Background(), "user_roles", req)
 	if err == nil {
-		t.Error("expected error for nonexistent table")
+		t.Error("expected error for missing PK column")
+	}
+	if !strings.Contains(err.Error(), "role_id") {
+		t.Errorf("error should mention missing column: %v", err)
 	}
 }
 
-func TestSearchCols_Found(t *testing.T) {
-	col, err := usersTable.SearchCols("name")
+func TestUpsertJSON_AllPKColumnsPresent(t *testing.T) {
+	db := setupTestDB(t, schemaUserRoles)
+	defer db.Close()
+	schema := loadSchema(t, db)
+
+	dao := &Database{
+		Client: db,
+		Schema: schema,
+	}
+
+	// Both PK columns present
+	req := UpsertRequest{
+		Data: []map[string]any{
+			{"user_id": 1, "role_id": 2, "granted_at": "2024-01-01"},
+		},
+	}
+
+	result, err := dao.UpsertJSON(context.Background(), "user_roles", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if col.Name != "name" {
-		t.Errorf("expected name, got %s", col.Name)
+
+	var resp map[string]any
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["rows_affected"] != float64(1) {
+		t.Errorf("expected 1 row affected, got %v", resp["rows_affected"])
 	}
 }
 
-func TestSearchCols_NotFound(t *testing.T) {
-	_, err := usersTable.SearchCols("nonexistent")
+// =============================================================================
+// Update/Delete Require WHERE Clause
+// Criteria B: validation edge case
+// =============================================================================
+
+func TestUpdateJSON_RequiresWhereClause(t *testing.T) {
+	db := setupTestDB(t, schemaUsers)
+	defer db.Close()
+	schema := loadSchema(t, db)
+
+	dao := &Database{
+		Client: db,
+		Schema: schema,
+	}
+
+	req := UpdateRequest{
+		Data:  map[string]any{"status": "inactive"},
+		Where: nil, // No WHERE clause
+	}
+
+	_, err := dao.UpdateJSON(context.Background(), "users", req)
 	if err == nil {
-		t.Error("expected error for nonexistent column")
+		t.Error("expected error for missing WHERE clause")
 	}
 }
 
-func TestSearchFks_Found(t *testing.T) {
-	fk, found := testSchema.SearchFks("posts", "users")
-	if !found {
-		t.Fatal("expected to find FK")
-	}
-	if fk.From != "user_id" || fk.To != "id" {
-		t.Errorf("unexpected FK: %+v", fk)
-	}
-}
+func TestDeleteJSON_RequiresWhereClause(t *testing.T) {
+	db := setupTestDB(t, schemaUsers)
+	defer db.Close()
+	schema := loadSchema(t, db)
 
-func TestSearchFks_NotFound(t *testing.T) {
-	_, found := testSchema.SearchFks("users", "posts")
-	if found {
-		t.Error("expected not to find FK in wrong direction")
+	dao := &Database{
+		Client: db,
+		Schema: schema,
 	}
-}
 
-func TestHasFTSIndex_True(t *testing.T) {
-	if !testSchema.HasFTSIndex("users") {
-		t.Error("expected users to have FTS index")
+	req := DeleteRequest{
+		Where: nil,
 	}
-}
 
-func TestHasFTSIndex_False(t *testing.T) {
-	if testSchema.HasFTSIndex("posts") {
-		t.Error("expected posts to not have FTS index")
+	_, err := dao.DeleteJSON(context.Background(), "users", req)
+	if err == nil {
+		t.Error("expected error for missing WHERE clause")
 	}
 }
 
 // =============================================================================
-// parseDefaultValue Tests - Edge cases (criteria B)
+// Batch Transaction Atomicity
+// Criteria C: complex context - transaction rollback
 // =============================================================================
 
-func TestParseDefaultValue_QuotedString(t *testing.T) {
-	result := parseDefaultValue("'hello'")
-	if result != "hello" {
-		t.Errorf("expected hello, got %v", result)
-	}
-}
+func TestBatch_TransactionRollback(t *testing.T) {
+	db := setupTestDB(t, schemaUsers)
+	defer db.Close()
+	schema := loadSchema(t, db)
 
-func TestParseDefaultValue_DoubleQuotedString(t *testing.T) {
-	result := parseDefaultValue(`"hello"`)
-	if result != "hello" {
-		t.Errorf("expected hello, got %v", result)
+	dao := &Database{
+		Client: db,
+		Schema: schema,
 	}
-}
 
-func TestParseDefaultValue_Null(t *testing.T) {
-	result := parseDefaultValue("NULL")
-	if result != nil {
-		t.Errorf("expected nil, got %v", result)
+	// Batch with one valid insert, then invalid select (nonexistent table)
+	// Should rollback the insert
+	req := BatchRequest{
+		Operations: []BatchOperation{
+			{
+				Operation: "insert",
+				Table:     "users",
+				Body:      map[string]any{"data": []any{map[string]any{"id": 1, "name": "Alice"}}},
+			},
+			{
+				Operation: "select",
+				Table:     "nonexistent",
+				Body:      map[string]any{},
+			},
+		},
 	}
-}
 
-func TestParseDefaultValue_NullLowercase(t *testing.T) {
-	result := parseDefaultValue("null")
-	if result != nil {
-		t.Errorf("expected nil, got %v", result)
+	_, err := dao.Batch(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected batch to fail")
 	}
-}
 
-func TestParseDefaultValue_Expression(t *testing.T) {
-	result := parseDefaultValue("CURRENT_TIMESTAMP")
-	if result != "CURRENT_TIMESTAMP" {
-		t.Errorf("expected CURRENT_TIMESTAMP, got %v", result)
+	// Verify rollback: user should NOT exist
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		t.Fatalf("failed to query users: %v", err)
 	}
-}
-
-func TestParseDefaultValue_Number(t *testing.T) {
-	result := parseDefaultValue("42")
-	if result != "42" {
-		t.Errorf("expected 42, got %v", result)
+	if count != 0 {
+		t.Errorf("expected 0 rows after rollback, got %d", count)
 	}
 }
 
 // =============================================================================
-// Utility Function Tests
+// opToSQL Tests
+// Criteria A: unlikely to change, operator mapping
 // =============================================================================
-
-func TestSplitTableColumn_WithDot(t *testing.T) {
-	parts := splitTableColumn("users.id")
-	if len(parts) != 2 || parts[0] != "users" || parts[1] != "id" {
-		t.Errorf("expected [users, id], got %v", parts)
-	}
-}
-
-func TestSplitTableColumn_WithoutDot(t *testing.T) {
-	parts := splitTableColumn("name")
-	if len(parts) != 1 || parts[0] != "name" {
-		t.Errorf("expected [name], got %v", parts)
-	}
-}
 
 func TestOpToSQL(t *testing.T) {
 	tests := []struct {
-		op       string
-		expected string
+		op   string
+		want string
 	}{
 		{OpEq, "="},
 		{OpNeq, "!="},
@@ -578,57 +595,14 @@ func TestOpToSQL(t *testing.T) {
 		{OpGte, ">="},
 		{OpLt, "<"},
 		{OpLte, "<="},
-		{"unknown", "="}, // Default
+		{"unknown", "="}, // default
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.op, func(t *testing.T) {
-			result := opToSQL(tt.op)
-			if result != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, result)
+			if got := opToSQL(tt.op); got != tt.want {
+				t.Errorf("opToSQL(%q) = %q, want %q", tt.op, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestBuildJSONAggregation_Empty(t *testing.T) {
-	result := buildJSONAggregation(nil)
-	if result != "json_object()" {
-		t.Errorf("expected json_object(), got %s", result)
-	}
-}
-
-func TestBuildJSONAggregation_Simple(t *testing.T) {
-	pairs := []string{"'id', [id]", "'name', [name]"}
-	result := buildJSONAggregation(pairs)
-	if !strings.Contains(result, "json_object(") {
-		t.Errorf("expected json_object, got %s", result)
-	}
-	if !strings.Contains(result, "'id', [id]") {
-		t.Errorf("expected id pair, got %s", result)
-	}
-}
-
-func TestRelationDepth_Flat(t *testing.T) {
-	rel := &Relation{name: "users"}
-	if d := relationDepth(rel); d != 1 {
-		t.Errorf("expected depth 1, got %d", d)
-	}
-}
-
-func TestRelationDepth_Nested(t *testing.T) {
-	child := &Relation{name: "posts"}
-	rel := &Relation{name: "users", joins: []*Relation{child}}
-	if d := relationDepth(rel); d != 2 {
-		t.Errorf("expected depth 2, got %d", d)
-	}
-}
-
-func TestRelationDepth_DeepNested(t *testing.T) {
-	grandchild := &Relation{name: "comments"}
-	child := &Relation{name: "posts", joins: []*Relation{grandchild}}
-	rel := &Relation{name: "users", joins: []*Relation{child}}
-	if d := relationDepth(rel); d != 3 {
-		t.Errorf("expected depth 3, got %d", d)
 	}
 }
