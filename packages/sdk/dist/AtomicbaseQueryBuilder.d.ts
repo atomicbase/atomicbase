@@ -1,18 +1,34 @@
-import { AtomicbaseTransformBuilder } from "./AtomicbaseTransformBuilder.js";
+import { AtomicbaseBuilder, type BuilderConfig } from "./AtomicbaseBuilder.js";
 import type { SelectColumn, FilterCondition } from "./types.js";
 /**
  * Query builder for database operations.
  * Provides select, insert, upsert, update, and delete methods.
+ *
+ * @example
+ * ```ts
+ * // Select with fluent filters
+ * const { data } = await client
+ *   .from('users')
+ *   .select('id', 'name')
+ *   .eq('status', 'active')
+ *   .gt('age', 18)
+ *   .orderBy('name')
+ *   .limit(10)
+ *
+ * // Insert
+ * const { data } = await client
+ *   .from('users')
+ *   .insert({ name: 'Alice', email: 'alice@example.com' })
+ *
+ * // Update with filter
+ * const { data } = await client
+ *   .from('users')
+ *   .update({ status: 'inactive' })
+ *   .eq('id', 1)
+ * ```
  */
-export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends AtomicbaseTransformBuilder<T> {
-    constructor(config: {
-        table: string;
-        baseUrl: string;
-        apiKey?: string;
-        tenant?: string;
-        fetch: typeof fetch;
-        headers?: Record<string, string>;
-    });
+export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends AtomicbaseBuilder<T> {
+    constructor(config: BuilderConfig);
     /**
      * Select rows from the table.
      *
@@ -31,35 +47,13 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
     select(...columns: SelectColumn[]): AtomicbaseQueryBuilder<T[]>;
     /**
      * Add a LEFT JOIN to the query.
-     * Use this for explicit joins where FK relationships don't exist or custom conditions are needed.
-     * Returns all rows from the base table, with NULL for non-matching joined rows.
      *
      * @example
      * ```ts
-     * // Basic left join with nested output (default)
      * const { data } = await client
      *   .from('users')
      *   .select('id', 'name', 'orders.total')
      *   .leftJoin('orders', onEq('users.id', 'orders.user_id'))
-     *
-     * // Left join with flat output
-     * const { data } = await client
-     *   .from('users')
-     *   .select('id', 'name', 'orders.total')
-     *   .leftJoin('orders', onEq('users.id', 'orders.user_id'), { flat: true })
-     *
-     * // Multiple joins
-     * const { data } = await client
-     *   .from('users')
-     *   .select('users.id', 'users.name', 'orders.total', 'products.name')
-     *   .leftJoin('orders', onEq('users.id', 'orders.user_id'))
-     *   .leftJoin('products', onEq('orders.product_id', 'products.id'))
-     *
-     * // Multiple conditions (AND)
-     * const { data } = await client
-     *   .from('users')
-     *   .select('id', 'name', 'orders.total')
-     *   .leftJoin('orders', [onEq('users.id', 'orders.user_id'), onEq('users.tenant_id', 'orders.tenant_id')])
      * ```
      */
     leftJoin(table: string, onConditions: FilterCondition | FilterCondition[], options?: {
@@ -68,22 +62,13 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
     }): this;
     /**
      * Add an INNER JOIN to the query.
-     * Use this for explicit joins where FK relationships don't exist or custom conditions are needed.
-     * Returns only rows that have matches in both tables.
      *
      * @example
      * ```ts
-     * // Inner join - only users with orders
      * const { data } = await client
      *   .from('users')
      *   .select('id', 'name', 'orders.total')
      *   .innerJoin('orders', onEq('users.id', 'orders.user_id'))
-     *
-     * // Inner join with flat output
-     * const { data } = await client
-     *   .from('users')
-     *   .select('id', 'name', 'orders.total')
-     *   .innerJoin('orders', onEq('users.id', 'orders.user_id'), { flat: true })
      * ```
      */
     innerJoin(table: string, onConditions: FilterCondition | FilterCondition[], options?: {
@@ -99,14 +84,6 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
      * const { data } = await client
      *   .from('users')
      *   .insert({ name: 'Alice', email: 'alice@example.com' })
-     *
-     * // Insert multiple rows
-     * const { data } = await client
-     *   .from('users')
-     *   .insert([
-     *     { name: 'Alice', email: 'alice@example.com' },
-     *     { name: 'Bob', email: 'bob@example.com' },
-     *   ])
      *
      * // Insert with returning
      * const { data } = await client
@@ -124,18 +101,9 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
      *
      * @example
      * ```ts
-     * // Upsert single row
      * const { data } = await client
      *   .from('users')
      *   .upsert({ id: 1, name: 'Alice Updated' })
-     *
-     * // Upsert multiple rows
-     * const { data } = await client
-     *   .from('users')
-     *   .upsert([
-     *     { id: 1, name: 'Alice Updated' },
-     *     { id: 2, name: 'Bob Updated' },
-     *   ])
      * ```
      */
     upsert(data: Partial<T> | Partial<T>[]): AtomicbaseQueryBuilder<{
@@ -143,14 +111,14 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
     }>;
     /**
      * Update rows matching the filter conditions.
-     * Requires a where() clause to prevent accidental full-table updates.
+     * Requires a filter to prevent accidental full-table updates.
      *
      * @example
      * ```ts
      * const { data } = await client
      *   .from('users')
      *   .update({ status: 'inactive' })
-     *   .where(eq('last_login', null))
+     *   .eq('id', 1)
      * ```
      */
     update(data: Partial<T>): AtomicbaseQueryBuilder<{
@@ -158,14 +126,14 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
     }>;
     /**
      * Delete rows matching the filter conditions.
-     * Requires a where() clause to prevent accidental full-table deletes.
+     * Requires a filter to prevent accidental full-table deletes.
      *
      * @example
      * ```ts
      * const { data } = await client
      *   .from('users')
      *   .delete()
-     *   .where(eq('status', 'deleted'))
+     *   .eq('status', 'deleted')
      * ```
      */
     delete(): AtomicbaseQueryBuilder<{
@@ -176,7 +144,6 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
      *
      * @example
      * ```ts
-     * // Ignore conflicts (INSERT OR IGNORE)
      * const { data } = await client
      *   .from('users')
      *   .insert({ id: 1, name: 'Alice' })
@@ -184,27 +151,6 @@ export declare class AtomicbaseQueryBuilder<T = Record<string, unknown>> extends
      * ```
      */
     onConflict(behavior: "ignore"): this;
-    /**
-     * Export this query as a batch operation for use with client.batch().
-     * This allows combining multiple queries into a single atomic transaction.
-     *
-     * @internal
-     */
-    toBatchOperation(): {
-        operation: string;
-        table: string;
-        body: Record<string, unknown>;
-        count?: boolean;
-        resultMode?: string;
-    };
-    /**
-     * Build the request body based on operation type.
-     */
-    private buildBody;
-    protected buildRequest(): {
-        url: string;
-        headers: Record<string, string>;
-        body: Record<string, unknown>;
-    };
+    protected buildBody(): Record<string, unknown>;
 }
 //# sourceMappingURL=AtomicbaseQueryBuilder.d.ts.map

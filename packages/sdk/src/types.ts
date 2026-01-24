@@ -37,20 +37,6 @@ export type AtomicbaseResponse<T> =
   | AtomicbaseResponseFailure;
 
 /**
- * Response for single() - returns one row or error.
- */
-export type AtomicbaseSingleResponse<T> =
-  | AtomicbaseResponseSuccess<T>
-  | AtomicbaseResponseFailure;
-
-/**
- * Response for maybeSingle() - returns one row, null, or error.
- */
-export type AtomicbaseMaybeSingleResponse<T> =
-  | AtomicbaseResponseSuccess<T | null>
-  | AtomicbaseResponseFailure;
-
-/**
  * Response with count - includes total count alongside data.
  */
 export interface AtomicbaseResponseWithCount<T> {
@@ -86,6 +72,10 @@ export type OrderDirection = "asc" | "desc";
 
 export type JoinType = "left" | "inner";
 
+export type QueryOperation = "select" | "insert" | "upsert" | "update" | "delete";
+
+export type ResultMode = "default" | "single" | "maybeSingle" | "count" | "withCount";
+
 /**
  * Custom join clause for explicit joins.
  */
@@ -100,30 +90,6 @@ export interface JoinClause {
   alias?: string;
   /** If true, flatten output instead of nesting (default: false) */
   flat?: boolean;
-}
-
-// =============================================================================
-// Internal Types
-// =============================================================================
-
-export type QueryOperation = "select" | "insert" | "upsert" | "update" | "delete";
-
-export type ResultMode = "default" | "single" | "maybeSingle" | "count" | "withCount";
-
-export interface QueryState {
-  table: string;
-  operation: QueryOperation | null;
-  selectColumns: SelectColumn[];
-  joinClauses: JoinClause[];
-  whereConditions: FilterCondition[];
-  orderByClause: Record<string, OrderDirection> | null;
-  limitValue: number | null;
-  offsetValue: number | null;
-  data: unknown;
-  returningColumns: string[];
-  onConflictBehavior: "ignore" | null;
-  countExact: boolean;
-  resultMode: ResultMode;
 }
 
 // =============================================================================

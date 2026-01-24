@@ -1,5 +1,5 @@
 import { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
-import type { FilterCondition, OrderDirection } from "./types.js";
+import type { FilterCondition, OrderDirection, WithCountPromiseLike, Unwrap, BatchableQuery } from "./types.js";
 /**
  * Transform builder that adds query modifiers like order, limit, range, etc.
  * Extends the base builder with result transformation methods.
@@ -74,7 +74,7 @@ export declare abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBu
      * // data is a single object, not an array
      * ```
      */
-    single(): this;
+    single(): AtomicbaseBuilder<Unwrap<T>> & BatchableQuery;
     /**
      * Return zero or one row. Returns null if no rows found (not an error).
      * This is a chainable modifier - the query only executes when awaited.
@@ -90,7 +90,7 @@ export declare abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBu
      * // data is object or null, no error for zero rows
      * ```
      */
-    maybeSingle(): this;
+    maybeSingle(): AtomicbaseBuilder<Unwrap<T> | null> & BatchableQuery;
     /**
      * Return only the count of matching rows.
      * This is a chainable modifier - the query only executes when awaited.
@@ -106,7 +106,7 @@ export declare abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBu
      * console.log(`${count} active users`)
      * ```
      */
-    count(): this;
+    count(): AtomicbaseBuilder<number> & BatchableQuery;
     /**
      * Return both data and total count.
      * This is a chainable modifier - the query only executes when awaited.
@@ -122,6 +122,6 @@ export declare abstract class AtomicbaseTransformBuilder<T> extends AtomicbaseBu
      * console.log(`Showing ${data.length} of ${count} users`)
      * ```
      */
-    withCount(): this;
+    withCount(): WithCountPromiseLike<T> & BatchableQuery;
 }
 //# sourceMappingURL=AtomicbaseTransformBuilder.d.ts.map

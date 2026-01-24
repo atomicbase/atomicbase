@@ -11,14 +11,16 @@
 .claude
 
 # Go
-api/atomicbase
 api/atomicdata
 api/bin
 *.exe
 
 # Node/TypeScript
 node_modules
-sdk/dist
+packages/sdk/dist
+packages/schema/dist
+packages/cli/dist
+packages/cli/bin
 *.log
 
 # Test artifacts

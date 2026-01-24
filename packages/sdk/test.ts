@@ -10,6 +10,28 @@ import {
   onEq,
 } from "./src/index.js";
 
+interface RowSdkTest {
+  id: number;
+  name: string;
+  email: string;
+  age: number;
+  status: string;
+}
+
+interface RowUser {
+  id: number;                                                   
+  name: string;                                                               
+  email: string;                                                             
+  age: number;  
+}
+
+interface RowPost {
+  id: number;
+  title: string;
+  content: string;
+  user_id: number;
+}
+
 const client = createClient({
   url: "http://localhost:8080",
 });
@@ -167,8 +189,10 @@ async function run() {
       .where(eq("id", 1))
       .single();
 
+    const tData = data as RowSdkTest | null;
+
     if (error) throw new Error(error.message);
-    if (!data || data.id !== 1) {
+    if (!tData || tData.id !== 1) {
       throw new Error("Expected single row with id=1");
     }
   });
@@ -289,8 +313,11 @@ async function run() {
       .where(eq("id", 1))
       .single();
 
+    const tData = data as RowSdkTest | null;
+
     if (error) throw new Error(error.message);
-    if (data?.status !== "inactive") {
+    
+    if (! tData || tData?.status !== "inactive") {
       throw new Error(`Expected status=inactive, got ${data?.status}`);
     }
   });

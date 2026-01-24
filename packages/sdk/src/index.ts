@@ -9,7 +9,6 @@ export { AtomicbaseClient, createClient } from "./AtomicbaseClient.js";
 // =============================================================================
 
 export { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
-export { AtomicbaseTransformBuilder } from "./AtomicbaseTransformBuilder.js";
 export { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 
 // =============================================================================
@@ -19,7 +18,7 @@ export { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 export { AtomicbaseError } from "./AtomicbaseError.js";
 
 // =============================================================================
-// Filter Functions
+// Filter Functions (for complex conditions with where())
 // =============================================================================
 
 export {
@@ -32,7 +31,7 @@ export {
   onGte,
   onLt,
   onLte,
-  // WHERE filter functions
+  // WHERE filter functions (for use with .where())
   eq,
   neq,
   gt,
@@ -61,8 +60,6 @@ export type {
   AtomicbaseResponse,
   AtomicbaseResponseSuccess,
   AtomicbaseResponseFailure,
-  AtomicbaseSingleResponse,
-  AtomicbaseMaybeSingleResponse,
   AtomicbaseResponseWithCount,
   // Batch types
   BatchOperation,

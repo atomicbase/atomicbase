@@ -11,12 +11,12 @@ Atomicbase uses multiple SQLite databases to separate concerns, isolate failure 
 │                                                                          │
 │   sessions.db          tenants.db           storage.db      logs.db      │
 │   ┌────────────┐      ┌──────────────┐       ┌──────────┐    ┌─────────┐ │
-│   │ __sessions │      │ __users      │       │ __files  │    │ __logs  │ │
-│   └────────────┘      │ __user_dbs   │       │ __chunks │    │ __audit │ │
-│                       │ __orgs       │       └──────────┘    └─────────┘ │
-│   Ephemeral           │ __org_members│         Future          Future    │
-│   Redis-swappable     │ __databases  │                                   │
-│                       │ __templates  │                                   │
+│   │  sessions  │      │  users       │       │  files   │    │  logs   │ │
+│   └────────────┘      │  user_dbs    │       │  chunks  │    │  audit  │ │
+│                       │  orgs        │       └──────────┘    └─────────┘ │
+│   Ephemeral           │  org_members │         Future          Future    │
+│   Redis-swappable     │  databases   │                                   │
+│                       │  templates   │                                   │
 │                       └──────────────┘                                   │
 │                        Permanent                                         │
 │                        Relational                                        │
@@ -42,7 +42,7 @@ Atomicbase uses multiple SQLite databases to separate concerns, isolate failure 
 
 **Tables:**
 ```sql
-CREATE TABLE __sessions (
+CREATE TABLE atomicbase_sessions (
   id TEXT PRIMARY KEY,              -- SHA-256 hash of token
   public_id TEXT UNIQUE NOT NULL,   -- For session management API
   user_id TEXT NOT NULL,            -- References _users in tenants.db
@@ -52,8 +52,8 @@ CREATE TABLE __sessions (
   ip_address TEXT
 );
 
-CREATE INDEX __sessions_expires_at ON __sessions(expires_at);
-CREATE INDEX __sessions_user_id ON __sessions(user_id);
+CREATE INDEX atomicbase_sessions_expires_at ON atomicbase_sessions(expires_at);
+CREATE INDEX atomicbase_sessions_user_id ON atomicbase_sessions(user_id);
 ```
 
 **Characteristics:**
@@ -78,7 +78,7 @@ CREATE INDEX __sessions_user_id ON __sessions(user_id);
 **Tables:**
 ```sql
 -- Identity
-CREATE TABLE __users (
+CREATE TABLE atomicbase_users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL COLLATE NOCASE,
   email_verified INTEGER DEFAULT 0,
@@ -88,47 +88,47 @@ CREATE TABLE __users (
 );
 
 -- Access control
-CREATE TABLE __user_databases (
+CREATE TABLE atomicbase_user_databases (
   id INTEGER PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES __users(id) ON DELETE CASCADE,
-  database_id INTEGER NOT NULL REFERENCES __databases(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES atomicbase_users(id) ON DELETE CASCADE,
+  database_id INTEGER NOT NULL REFERENCES atomicbase_databases(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'member',
   created_at INTEGER NOT NULL,
   UNIQUE(user_id, database_id)
 );
 
-CREATE INDEX __user_databases_user ON __user_databases(user_id);
-CREATE INDEX __user_databases_database ON __user_databases(database_id);
+CREATE INDEX atomicbase_user_databases_user ON atomicbase_user_databases(user_id);
+CREATE INDEX atomicbase_user_databases_database ON atomicbase_user_databases(database_id);
 
 -- Organizations (optional)
-CREATE TABLE __organizations (
+CREATE TABLE atomicbase_organizations (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE __organization_members (
+CREATE TABLE atomicbase_organization_members (
   id INTEGER PRIMARY KEY,
-  organization_id TEXT NOT NULL REFERENCES __organizations(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES __users(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL REFERENCES atomicbase_organizations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES atomicbase_users(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'member',
   created_at INTEGER NOT NULL,
   UNIQUE(organization_id, user_id)
 );
 
 -- Tenant databases
-CREATE TABLE __databases (
+CREATE TABLE atomicbase_databases (
   id INTEGER PRIMARY KEY,
   name TEXT UNIQUE NOT NULL,
-  template_id INTEGER REFERENCES __templates(id),
+  template_id INTEGER REFERENCES atomicbase_templates(id),
   schema_version INTEGER DEFAULT 1,
   token TEXT NOT NULL,              -- Turso auth token
-  organization_id TEXT REFERENCES __organizations(id),
+  organization_id TEXT REFERENCES atomicbase_organizations(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Schema templates
-CREATE TABLE __templates (
+CREATE TABLE atomicbase_templates (
   id INTEGER PRIMARY KEY,
   name TEXT UNIQUE NOT NULL,
   current_version INTEGER DEFAULT 1,
@@ -136,9 +136,9 @@ CREATE TABLE __templates (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE __templates_history (
+CREATE TABLE atomicbase_templates_history (
   id INTEGER PRIMARY KEY,
-  template_id INTEGER NOT NULL REFERENCES __templates(id),
+  template_id INTEGER NOT NULL REFERENCES atomicbase_templates(id),
   version INTEGER NOT NULL,
   tables BLOB NOT NULL,             -- Gob-encoded table definitions
   schema BLOB NOT NULL,             -- Gob-encoded SchemaCache
@@ -149,9 +149,9 @@ CREATE TABLE __templates_history (
 );
 
 -- Sync jobs
-CREATE TABLE __sync_jobs (
+CREATE TABLE atomicbase_sync_jobs (
   id TEXT PRIMARY KEY,
-  template_id INTEGER NOT NULL REFERENCES __templates(id),
+  template_id INTEGER NOT NULL REFERENCES atomicbase_templates(id),
   target_version INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'running',
   total_count INTEGER NOT NULL,
@@ -161,10 +161,10 @@ CREATE TABLE __sync_jobs (
   completed_at TEXT
 );
 
-CREATE TABLE __sync_tasks (
+CREATE TABLE atomicbase_sync_tasks (
   id INTEGER PRIMARY KEY,
-  job_id TEXT NOT NULL REFERENCES __sync_jobs(id),
-  database_id INTEGER NOT NULL REFERENCES __databases(id),
+  job_id TEXT NOT NULL REFERENCES atomicbase_sync_jobs(id),
+  database_id INTEGER NOT NULL REFERENCES atomicbase_databases(id),
   status TEXT NOT NULL DEFAULT 'pending',
   attempts INTEGER DEFAULT 0,
   error TEXT,
@@ -179,12 +179,12 @@ CREATE TABLE __sync_tasks (
 - Relational (access control joins users ↔ databases)
 - Small-medium size
 
-**Why `__users` and `__databases` are together:**
+**Why `atomicbase_users` and `atomicbase_databases` are together:**
 ```sql
 -- Hot path query: check access + get tenant info in ONE query
 SELECT d.template_id, d.schema_version, d.token, ud.role
-FROM __user_databases ud
-JOIN __databases d ON d.id = ud.database_id
+FROM atomicbase_user_databases ud
+JOIN atomicbase_databases d ON d.id = ud.database_id
 WHERE ud.user_id = ? AND d.name = ?
 ```
 
@@ -198,7 +198,7 @@ Splitting would require 2 queries and lose FK constraints.
 
 **Tables:**
 ```sql
-CREATE TABLE __files (
+CREATE TABLE atomicbase_files (
   id TEXT PRIMARY KEY,
   database_id INTEGER NOT NULL,     -- Which tenant owns this
   path TEXT NOT NULL,
@@ -210,7 +210,7 @@ CREATE TABLE __files (
   UNIQUE(database_id, path)
 );
 
-CREATE INDEX __files_database ON __files(database_id);
+CREATE INDEX atomicbase_files_database ON atomicbase_files(database_id);
 ```
 
 **Characteristics:**
@@ -231,7 +231,7 @@ CREATE INDEX __files_database ON __files(database_id);
 
 **Tables:**
 ```sql
-CREATE TABLE _request_logs (
+CREATE TABLE atomicbase_request_logs (
   id INTEGER PRIMARY KEY,
   database_id INTEGER,
   user_id TEXT,
@@ -242,7 +242,7 @@ CREATE TABLE _request_logs (
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE _audit_logs (
+CREATE TABLE atomicbase_audit_logs (
   id INTEGER PRIMARY KEY,
   database_id INTEGER NOT NULL,
   user_id TEXT,
@@ -253,8 +253,8 @@ CREATE TABLE _audit_logs (
   created_at INTEGER NOT NULL
 );
 
-CREATE INDEX _request_logs_created ON _request_logs(created_at);
-CREATE INDEX _audit_logs_database ON _audit_logs(database_id, created_at);
+CREATE INDEX atomicbase_request_logs_created ON atomicbase_request_logs(created_at);
+CREATE INDEX atomicbase_audit_logs_database ON atomicbase_audit_logs(database_id, created_at);
 ```
 
 **Characteristics:**
