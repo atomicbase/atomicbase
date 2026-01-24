@@ -42,41 +42,19 @@ export declare abstract class AtomicbaseBuilder<T> implements PromiseLike<Atomic
     protected signal?: AbortSignal;
     protected shouldThrowOnError: boolean;
     constructor(config: BuilderConfig);
-    /** Equality filter: column = value */
-    eq(column: string, value: unknown): this;
-    /** Not equal filter: column != value */
-    neq(column: string, value: unknown): this;
-    /** Greater than filter: column > value */
-    gt(column: string, value: unknown): this;
-    /** Greater than or equal filter: column >= value */
-    gte(column: string, value: unknown): this;
-    /** Less than filter: column < value */
-    lt(column: string, value: unknown): this;
-    /** Less than or equal filter: column <= value */
-    lte(column: string, value: unknown): this;
-    /** LIKE filter: column LIKE pattern */
-    like(column: string, pattern: string): this;
-    /** GLOB filter: column GLOB pattern */
-    glob(column: string, pattern: string): this;
-    /** IN filter: column IN (values) */
-    in(column: string, values: unknown[]): this;
-    /** IS NULL filter */
-    isNull(column: string): this;
-    /** IS NOT NULL filter */
-    isNotNull(column: string): this;
-    /** BETWEEN filter: column BETWEEN min AND max */
-    between(column: string, min: unknown, max: unknown): this;
     /**
-     * Add filter conditions using helper functions.
-     * Use this for complex conditions like OR, NOT, or nested filters.
+     * Add filter conditions to the query.
      *
      * @example
      * ```ts
-     * // Simple filters - use fluent methods
-     * .eq('status', 'active').gt('age', 18)
+     * // Single condition
+     * .where(eq('status', 'active'))
      *
-     * // Complex filters - use where() with helpers
-     * .where(or(eq('role', 'admin'), eq('role', 'mod')))
+     * // Multiple conditions (AND)
+     * .where(eq('status', 'active'), gt('age', 18))
+     *
+     * // OR conditions
+     * .where(or(eq('role', 'admin'), eq('role', 'moderator')))
      * ```
      */
     where(...conditions: FilterCondition[]): this;
