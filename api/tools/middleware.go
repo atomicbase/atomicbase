@@ -35,6 +35,7 @@ func generateRequestID() string {
 
 // LoggingMiddleware logs all HTTP requests with structured JSON output.
 // Logs: method, path, status, duration, client IP, and request ID.
+// Also logs to activity database if activity logging is enabled.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -52,23 +53,50 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		// Process request
 		next.ServeHTTP(wrapped, r)
 
+		duration := time.Since(start)
+
 		// Get client IP
 		clientIP := r.RemoteAddr
 		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 			clientIP = strings.Split(forwarded, ",")[0]
 		}
+		clientIP = strings.TrimSpace(clientIP)
 
-		// Log the request
+		// Log the request to stdout
 		Logger.Info("request",
 			"request_id", requestID,
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", wrapped.status,
-			"duration", time.Since(start),
-			"client_ip", strings.TrimSpace(clientIP),
+			"duration", duration,
+			"client_ip", clientIP,
 			"user_agent", r.UserAgent(),
 		)
+
+		// Log to activity database
+		LogActivity(
+			detectAPIType(r.URL.Path),
+			r.Method,
+			r.URL.Path,
+			wrapped.status,
+			duration.Milliseconds(),
+			clientIP,
+			r.Header.Get("Tenant"),
+			requestID,
+			"", // error field
+		)
 	})
+}
+
+// detectAPIType determines whether a request is for the data or platform API.
+func detectAPIType(path string) string {
+	if strings.HasPrefix(path, "/platform") {
+		return "platform"
+	}
+	if strings.HasPrefix(path, "/data") {
+		return "data"
+	}
+	return "other"
 }
 
 // rateLimiter tracks request counts per IP address.

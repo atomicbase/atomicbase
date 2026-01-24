@@ -28,6 +28,11 @@ type Config struct {
 	TursoOrganization    string // Turso organization name
 	TursoAPIKey          string // Turso API key for management operations
 	TursoTokenExpiration string // Token expiration (e.g., "7d", "30d", "never")
+
+	// Activity logging
+	ActivityLogEnabled   bool   // Whether activity logging is enabled
+	ActivityLogPath      string // Path to activity log database
+	ActivityLogRetention int    // Days to retain logs (0 = forever)
 }
 
 // Cfg is the global configuration instance, loaded at startup.
@@ -104,6 +109,10 @@ func Load() Config {
 		TursoOrganization:    os.Getenv("TURSO_ORGANIZATION"),
 		TursoAPIKey:          os.Getenv("TURSO_API_KEY"),
 		TursoTokenExpiration: getEnv("TURSO_TOKEN_EXPIRATION", "7d"),
+
+		ActivityLogEnabled:   strings.ToLower(os.Getenv("ATOMICBASE_ACTIVITY_LOG_ENABLED")) == "true",
+		ActivityLogPath:      getEnv("ATOMICBASE_ACTIVITY_LOG_PATH", "atomicdata/logs.db"),
+		ActivityLogRetention: parseIntEnv("ATOMICBASE_ACTIVITY_LOG_RETENTION", 30),
 	}
 }
 
@@ -111,6 +120,16 @@ func Load() Config {
 func getEnv(key, defaultVal string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
+	}
+	return defaultVal
+}
+
+// parseIntEnv returns the environment variable as int or a default if not set/invalid.
+func parseIntEnv(key string, defaultVal int) int {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
 	}
 	return defaultVal
 }

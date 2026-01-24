@@ -46,6 +46,13 @@ func logStartupInfo() {
 		fmt.Printf("[OK]   CORS origins: %v\n", config.Cfg.CORSOrigins)
 	}
 
+	if config.Cfg.ActivityLogEnabled {
+		fmt.Printf("[OK]   Activity logging: %s (retention: %d days)\n",
+			config.Cfg.ActivityLogPath, config.Cfg.ActivityLogRetention)
+	} else {
+		fmt.Println("[INFO] Activity logging disabled")
+	}
+
 	if warnings > 0 {
 		fmt.Printf("\n[!] %d security warning(s) - review before production\n", warnings)
 	}
@@ -54,6 +61,11 @@ func logStartupInfo() {
 
 func main() {
 	logStartupInfo()
+
+	// Initialize activity logger if enabled
+	if err := tools.InitActivityLogger(); err != nil {
+		log.Fatalf("Failed to initialize activity logger: %v", err)
+	}
 
 	app := http.NewServeMux()
 
@@ -101,6 +113,9 @@ func main() {
 	if err := data.ClosePrimaryDB(); err != nil {
 		log.Printf("Error closing database: %v", err)
 	}
+
+	// Close activity logger
+	tools.CloseActivityLogger()
 
 	fmt.Println("Server stopped")
 }
