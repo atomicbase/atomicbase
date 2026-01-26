@@ -41,7 +41,7 @@ CREATE TABLE atomicbase_tenants (
 );
 
 CREATE TABLE atomicbase_migrations (
-	id TEXT PRIMARY KEY,
+	id INTEGER PRIMARY KEY,
 	template_id INTEGER NOT NULL,
 	from_version INTEGER NOT NULL,
 	to_version INTEGER NOT NULL,
