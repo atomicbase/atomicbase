@@ -49,7 +49,7 @@ func InitDB() error {
 	// Create migrations table if it doesn't exist
 	_, err = conn.Exec(`
 		CREATE TABLE IF NOT EXISTS ` + TableMigrations + ` (
-			id TEXT PRIMARY KEY,
+			id INTEGER PRIMARY KEY,
 			template_id INTEGER NOT NULL REFERENCES ` + TableTemplates + `(id),
 			from_version INTEGER NOT NULL,
 			to_version INTEGER NOT NULL,
@@ -74,7 +74,7 @@ func InitDB() error {
 	// Create tenant_migrations table if it doesn't exist
 	_, err = conn.Exec(`
 		CREATE TABLE IF NOT EXISTS ` + TableTenantMigrations + ` (
-			migration_id TEXT NOT NULL REFERENCES ` + TableMigrations + `(id),
+			migration_id INTEGER NOT NULL REFERENCES ` + TableMigrations + `(id),
 			tenant_id INTEGER NOT NULL REFERENCES ` + TableTenants + `(id),
 			status TEXT NOT NULL,
 			error TEXT,

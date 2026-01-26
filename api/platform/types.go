@@ -73,7 +73,7 @@ type MigrationPlan struct {
 
 // Migration tracks both the SQL and execution state.
 type Migration struct {
-	ID           string     `json:"id"`
+	ID           int64      `json:"id"`
 	TemplateID   int32      `json:"templateId"`
 	FromVersion  int        `json:"fromVersion"`
 	ToVersion    int        `json:"toVersion"`
@@ -105,7 +105,7 @@ const (
 
 // TenantMigration tracks per-tenant migration outcome.
 type TenantMigration struct {
-	MigrationID string    `json:"migrationId"`
+	MigrationID int64     `json:"migrationId"`
 	TenantID    int32     `json:"tenantId"`
 	Status      string    `json:"status"` // success, failed
 	Error       string    `json:"error,omitempty"`
@@ -185,7 +185,7 @@ type MigrateRequest struct {
 
 // MigrateResponse is the response for POST /platform/templates/{name}/migrate.
 type MigrateResponse struct {
-	JobID string `json:"jobId"`
+	JobID int64 `json:"jobId"`
 }
 
 // RollbackRequest is the request body for POST /platform/templates/{name}/rollback.
@@ -195,7 +195,7 @@ type RollbackRequest struct {
 
 // RollbackResponse is the response for POST /platform/templates/{name}/rollback.
 type RollbackResponse struct {
-	JobID string `json:"jobId"`
+	JobID int64 `json:"jobId"`
 }
 
 // CreateTenantRequest is the request body for POST /platform/tenants.
@@ -212,6 +212,6 @@ type SyncTenantResponse struct {
 
 // RetryJobResponse is the response for POST /platform/jobs/{id}/retry.
 type RetryJobResponse struct {
-	RetriedCount int    `json:"retriedCount"`
-	JobID        string `json:"jobId"`
+	RetriedCount int   `json:"retriedCount"`
+	JobID        int64 `json:"jobId"`
 }
