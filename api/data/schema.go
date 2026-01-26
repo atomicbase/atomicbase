@@ -2,7 +2,6 @@ package data
 
 import (
 	"database/sql"
-	"log"
 
 	"github.com/joe-ervin05/atomicbase/tools"
 )
@@ -126,19 +125,19 @@ func SchemaCols(db *sql.DB) (map[string]CacheTable, error) {
 	return tbls, rows.Err()
 }
 
-// parseDefaultValue converts SQLite's default value string to appropriate Go type
-func parseDefaultValue(val string) any {
-	// Remove quotes from string defaults
-	if len(val) >= 2 && ((val[0] == '\'' && val[len(val)-1] == '\'') || (val[0] == '"' && val[len(val)-1] == '"')) {
-		return val[1 : len(val)-1]
-	}
-	// Try to parse as number
-	if val == "NULL" || val == "null" {
-		return nil
-	}
-	// Return as-is for expressions like CURRENT_TIMESTAMP
-	return val
-}
+// // parseDefaultValue converts SQLite's default value string to appropriate Go type
+// func parseDefaultValue(val string) any {
+// 	// Remove quotes from string defaults
+// 	if len(val) >= 2 && ((val[0] == '\'' && val[len(val)-1] == '\'') || (val[0] == '"' && val[len(val)-1] == '"')) {
+// 		return val[1 : len(val)-1]
+// 	}
+// 	// Try to parse as number
+// 	if val == "NULL" || val == "null" {
+// 		return nil
+// 	}
+// 	// Return as-is for expressions like CURRENT_TIMESTAMP
+// 	return val
+// }
 
 // SearchFks searches for a foreign key from table to references.
 // Returns the Fk and true if found, or empty Fk and false if not found.
@@ -170,8 +169,6 @@ func (schema SchemaCache) SearchTbls(table string) (CacheTable, error) {
 func (tbl CacheTable) SearchCols(col string) (string, error) {
 	c, exists := tbl.Columns[col]
 	if !exists {
-		log.Printf("DEBUG SearchCols: table=%q, looking for col=%q, columns=%v",
-			tbl.Name, col, tbl.Columns)
 		return "", tools.ColumnNotFoundErr(tbl.Name, col)
 	}
 	return c, nil
