@@ -12,6 +12,7 @@ const (
 	CodeTableNotFound       = "TABLE_NOT_FOUND"
 	CodeColumnNotFound      = "COLUMN_NOT_FOUND"
 	CodeDatabaseNotFound    = "DATABASE_NOT_FOUND"
+	CodeDatabaseOutOfSync   = "DATABASE_OUT_OF_SYNC"
 	CodeTemplateNotFound    = "TEMPLATE_NOT_FOUND"
 	CodeNoRelationship      = "NO_RELATIONSHIP"
 	CodeInvalidOperator     = "INVALID_OPERATOR"
@@ -65,6 +66,7 @@ var (
 	ErrMissingOperation   = errors.New("No query operation specified")
 	ErrInvalidOnConflict  = errors.New("Invalid on-conflict specified")
 	ErrDatabaseNotFound   = errors.New("database not found")
+	ErrDatabaseOutOfSync  = errors.New("database out of sync")
 	ErrNoRelationship     = errors.New("no relationship exists between tables")
 	ErrInvalidIdentifier  = errors.New("invalid identifier")
 	ErrEmptyIdentifier    = errors.New("identifier cannot be empty")

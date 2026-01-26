@@ -620,12 +620,11 @@ atomicbase logout
 atomicbase push                    # Push schema to all tenant DBs
 atomicbase pull                    # Pull schema from server
 atomicbase diff                    # Preview changes before push
-atomicbase generate                # Generate TypeScript types
 
-# Organization management
-atomicbase orgs list
-atomicbase orgs create <name>
-atomicbase orgs delete <name>
+atomicbase tenants create <tenant-name> <tenant-template>
+atomicbase tenants delete <tenant-name>
+
+atomicbase generate                # Generate TypeScript types
 
 # Schema sync jobs
 atomicbase jobs list

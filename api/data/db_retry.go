@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// Lock retry configuration (matches PocketBase)
 var (
 	lockRetryIntervals = []time.Duration{
 		50 * time.Millisecond,

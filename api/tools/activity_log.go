@@ -35,11 +35,11 @@ type ActivityHandler struct {
 	db         *sql.DB
 	insertStmt *sql.Stmt
 
-	mu         sync.Mutex
-	batch      []*ActivityLog
-	batchSize  int
-	debounce   time.Duration
-	timer      *time.Timer
+	mu        sync.Mutex
+	batch     []*ActivityLog
+	batchSize int
+	debounce  time.Duration
+	timer     *time.Timer
 
 	done   chan struct{}
 	wg     sync.WaitGroup

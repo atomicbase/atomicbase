@@ -2,41 +2,31 @@ package tools
 
 import "sync"
 
-// schemaKey is the key for the schema cache map.
-type schemaKey struct {
-	TemplateID int32
-	Version    int
+// CachedTemplate holds both schema and version together.
+type CachedTemplate struct {
+	Schema  any
+	Version int
 }
 
-// Global schema cache - maps (template_id, version) to schema value
-var templateSchemaCache sync.Map
+// Template cache - maps template_id to current schema + version
+var templateCache sync.Map // int32 -> CachedTemplate
 
-// SchemaCache stores a schema in the cache.
-func SchemaCache(templateID int32, version int, value any) {
-	key := schemaKey{TemplateID: templateID, Version: version}
-	templateSchemaCache.Store(key, value)
+// SetTemplate stores the current schema and version for a template.
+func SetTemplate(templateID int32, version int, schema any) {
+	templateCache.Store(templateID, CachedTemplate{Schema: schema, Version: version})
 }
 
-// SchemaFromCache retrieves a schema from cache.
-// Returns the value and true if found, nil and false otherwise.
-func SchemaFromCache(templateID int32, version int) (any, bool) {
-	key := schemaKey{TemplateID: templateID, Version: version}
-	return templateSchemaCache.Load(key)
+// GetTemplate retrieves the cached template (schema + version).
+// Returns the cached template and true if found, empty struct and false otherwise.
+func GetTemplate(templateID int32) (CachedTemplate, bool) {
+	v, ok := templateCache.Load(templateID)
+	if !ok {
+		return CachedTemplate{}, false
+	}
+	return v.(CachedTemplate), true
 }
 
-// InvalidateSchema removes a specific schema version from cache.
-func InvalidateSchema(templateID int32, version int) {
-	key := schemaKey{TemplateID: templateID, Version: version}
-	templateSchemaCache.Delete(key)
-}
-
-// InvalidateAllSchemas removes all cached schemas for a template.
-func InvalidateAllSchemas(templateID int32) {
-	templateSchemaCache.Range(func(k, v any) bool {
-		key := k.(schemaKey)
-		if key.TemplateID == templateID {
-			templateSchemaCache.Delete(k)
-		}
-		return true
-	})
+// InvalidateTemplate removes a template from cache.
+func InvalidateTemplate(templateID int32) {
+	templateCache.Delete(templateID)
 }

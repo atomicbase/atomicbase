@@ -23,17 +23,23 @@ type Database struct {
 
 // SchemaCache holds cached table and foreign key information for query validation.
 type SchemaCache struct {
-	Tables    map[string]Table // Keyed by table name
-	Fks       map[string][]Fk  // Keyed by table name -> list of FKs from that table
-	FTSTables map[string]bool  // Set of tables that have FTS5 indexes
+	Tables    map[string]CacheTable // Keyed by table name
+	Fks       map[string][]CacheFk  // Keyed by table name -> list of FKs from that table
+	FTSTables map[string]bool       // Set of tables that have FTS5 indexes
 }
 
 // Fk represents a foreign key relationship between tables.
-type Fk struct {
+type CacheFk struct {
 	Table      string // Table containing the FK column
 	References string // Referenced table
 	From       string // FK column name
 	To         string // Referenced column name
+}
+
+type CacheTable struct {
+	Name    string            `json:"name"`
+	Pk      []string          `json:"pk"`
+	Columns map[string]string `json:"columns"`
 }
 
 // Table represents a database table's schema.

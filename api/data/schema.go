@@ -2,12 +2,13 @@ package data
 
 import (
 	"database/sql"
+	"log"
 
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
-func schemaFks(db *sql.DB) (map[string][]Fk, error) {
-	fks := make(map[string][]Fk)
+func schemaFks(db *sql.DB) (map[string][]CacheFk, error) {
+	fks := make(map[string][]CacheFk)
 
 	rows, err := db.Query(`
 		SELECT m.name as "table", p."table" as "references", p."from", p."to"
@@ -28,7 +29,7 @@ func schemaFks(db *sql.DB) (map[string][]Fk, error) {
 			return nil, err
 		}
 
-		fk := Fk{table.String, references.String, from.String, to.String}
+		fk := CacheFk{table.String, references.String, from.String, to.String}
 		fks[table.String] = append(fks[table.String], fk)
 	}
 
@@ -62,8 +63,8 @@ func schemaFTS(db *sql.DB) (map[string]bool, error) {
 	return ftsTables, rows.Err()
 }
 
-func SchemaCols(db *sql.DB) (map[string]Table, error) {
-	tbls := make(map[string]Table)
+func SchemaCols(db *sql.DB) (map[string]CacheTable, error) {
+	tbls := make(map[string]CacheTable)
 
 	// First, fetch foreign keys and build a lookup map
 	fks, err := schemaFks(db)
@@ -80,7 +81,7 @@ func SchemaCols(db *sql.DB) (map[string]Table, error) {
 	}
 
 	rows, err := db.Query(`
-		SELECT m.name, l.name as col, l.type as colType, l.pk, l."notnull", l.dflt_value
+		SELECT m.name, l.name as col, l.type as colType, l.pk
 		FROM sqlite_master m
 		JOIN pragma_table_info(m.name) l
 		WHERE m.type IN ('table', 'view');
@@ -95,36 +96,18 @@ func SchemaCols(db *sql.DB) (map[string]Table, error) {
 		var colType sql.NullString
 		var name sql.NullString
 		var pk sql.NullInt64 // SQLite pk is 0 for non-PK, 1+ for PK position in composite keys
-		var notNull sql.NullBool
-		var dfltValue sql.NullString
 
-		err := rows.Scan(&name, &col, &colType, &pk, &notNull, &dfltValue)
+		err := rows.Scan(&name, &col, &colType, &pk)
 		if err != nil {
 			return nil, err
 		}
 
 		tbl, exists := tbls[name.String]
 		if !exists {
-			tbl = Table{Name: name.String, Columns: make(map[string]Col)}
+			tbl = CacheTable{Name: name.String, Columns: make(map[string]string)}
 		}
 
-		newCol := Col{
-			Name:    col.String,
-			Type:    colType.String,
-			NotNull: notNull.Bool,
-		}
-
-		// Parse default value if present
-		if dfltValue.Valid && dfltValue.String != "" {
-			newCol.Default = parseDefaultValue(dfltValue.String)
-		}
-
-		// Check for foreign key reference
-		if ref, ok := fkMap[name.String+"."+col.String]; ok {
-			newCol.References = ref
-		}
-
-		tbl.Columns[col.String] = newCol
+		tbl.Columns[col.String] = colType.String
 
 		// pk > 0 means this column is part of the primary key
 		// For composite keys, pk indicates position (1, 2, etc.)
@@ -159,35 +142,37 @@ func parseDefaultValue(val string) any {
 
 // SearchFks searches for a foreign key from table to references.
 // Returns the Fk and true if found, or empty Fk and false if not found.
-func (schema SchemaCache) SearchFks(table string, references string) (Fk, bool) {
+func (schema SchemaCache) SearchFks(table string, references string) (CacheFk, bool) {
 	fks, exists := schema.Fks[table]
 	if !exists {
-		return Fk{}, false
+		return CacheFk{}, false
 	}
 	for _, fk := range fks {
 		if fk.References == references {
 			return fk, true
 		}
 	}
-	return Fk{}, false
+	return CacheFk{}, false
 }
 
 // SearchTbls searches for a table by name.
 // Returns the Table or ErrTableNotFound if not found.
-func (schema SchemaCache) SearchTbls(table string) (Table, error) {
+func (schema SchemaCache) SearchTbls(table string) (CacheTable, error) {
 	tbl, exists := schema.Tables[table]
 	if !exists {
-		return Table{}, tools.TableNotFoundErr(table)
+		return CacheTable{}, tools.TableNotFoundErr(table)
 	}
 	return tbl, nil
 }
 
 // SearchCols searches a column by name.
 // Returns the Col or ErrColumnNotFound if not found.
-func (tbl Table) SearchCols(col string) (Col, error) {
+func (tbl CacheTable) SearchCols(col string) (string, error) {
 	c, exists := tbl.Columns[col]
 	if !exists {
-		return Col{}, tools.ColumnNotFoundErr(tbl.Name, col)
+		log.Printf("DEBUG SearchCols: table=%q, looking for col=%q, columns=%v",
+			tbl.Name, col, tbl.Columns)
+		return "", tools.ColumnNotFoundErr(tbl.Name, col)
 	}
 	return c, nil
 }

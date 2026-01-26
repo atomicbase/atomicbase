@@ -233,9 +233,9 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 	var id sql.NullInt32
 	var token sql.NullString
 	var templateID int32
-	var schemaVersion int
+	var tenantVersion int
 
-	err := row.Scan(&id, &token, &templateID, &schemaVersion)
+	err := row.Scan(&id, &token, &templateID, &tenantVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Database{}, tools.ErrDatabaseNotFound
@@ -247,10 +247,16 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, errors.New("database token is missing")
 	}
 
-	// Get schema from cache (uses template_id and version)
-	schema, err := GetCachedSchema(dao.Client, templateID, schemaVersion)
+	// Get cached template (schema + current version)
+	schema, currentVersion, err := GetCachedTemplate(dao.Client, templateID)
 	if err != nil {
 		return Database{}, fmt.Errorf("failed to load schema: %w", err)
+	}
+
+	// Check if tenant is in sync with current template version
+	if templateID != 0 && tenantVersion != currentVersion {
+		return Database{}, fmt.Errorf("%w: tenant at version %d, current is %d",
+			tools.ErrDatabaseOutOfSync, tenantVersion, currentVersion)
 	}
 
 	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", dbName, org, token.String))
@@ -269,7 +275,7 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		Schema:        schema,
 		ID:            id.Int32,
 		TemplateID:    templateID,
-		SchemaVersion: schemaVersion,
+		SchemaVersion: currentVersion,
 	}, nil
 }
 

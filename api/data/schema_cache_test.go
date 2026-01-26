@@ -128,19 +128,23 @@ func TestTablesToSchemaCache_TablesMap(t *testing.T) {
 	}
 }
 
-// TestSchemaCache_StoreAndRetrieve verifies the generic cache in tools package.
+// TestSchemaCache_StoreAndRetrieve verifies the template cache in tools package.
 func TestSchemaCache_StoreAndRetrieve(t *testing.T) {
-	// Store a schema
+	// Store a schema with version
 	schema := TablesToSchemaCache([]Table{testTableUsers})
-	tools.SchemaCache(999, 1, schema)
+	tools.SetTemplate(999, 1, schema)
 
 	// Retrieve it
-	cached, ok := tools.SchemaFromCache(999, 1)
+	cached, ok := tools.GetTemplate(999)
 	if !ok {
-		t.Fatal("expected to find cached schema")
+		t.Fatal("expected to find cached template")
 	}
 
-	retrieved := cached.(SchemaCache)
+	if cached.Version != 1 {
+		t.Errorf("expected version 1, got %d", cached.Version)
+	}
+
+	retrieved := cached.Schema.(SchemaCache)
 	if len(retrieved.Tables) != 1 {
 		t.Errorf("expected 1 table, got %d", len(retrieved.Tables))
 	}
@@ -149,54 +153,66 @@ func TestSchemaCache_StoreAndRetrieve(t *testing.T) {
 	}
 
 	// Clean up
-	tools.InvalidateSchema(999, 1)
+	tools.InvalidateTemplate(999)
 }
 
 // TestSchemaCache_Miss verifies cache miss behavior.
 func TestSchemaCache_Miss(t *testing.T) {
-	_, ok := tools.SchemaFromCache(99999, 99999)
+	_, ok := tools.GetTemplate(99999)
 	if ok {
-		t.Error("expected cache miss for non-existent key")
+		t.Error("expected cache miss for non-existent template")
 	}
 }
 
 // TestSchemaCache_Invalidate verifies cache invalidation.
 func TestSchemaCache_Invalidate(t *testing.T) {
 	schema := TablesToSchemaCache([]Table{testTableUsers})
-	tools.SchemaCache(998, 1, schema)
+	tools.SetTemplate(998, 1, schema)
 
 	// Verify it's there
-	_, ok := tools.SchemaFromCache(998, 1)
+	_, ok := tools.GetTemplate(998)
 	if !ok {
-		t.Fatal("expected to find cached schema before invalidation")
+		t.Fatal("expected to find cached template before invalidation")
 	}
 
 	// Invalidate
-	tools.InvalidateSchema(998, 1)
+	tools.InvalidateTemplate(998)
 
 	// Verify it's gone
-	_, ok = tools.SchemaFromCache(998, 1)
+	_, ok = tools.GetTemplate(998)
 	if ok {
 		t.Error("expected cache miss after invalidation")
 	}
 }
 
-// TestSchemaCache_InvalidateAll verifies bulk invalidation for a template.
-func TestSchemaCache_InvalidateAll(t *testing.T) {
+// TestSchemaCache_VersionUpdate verifies updating a template's version in cache.
+func TestSchemaCache_VersionUpdate(t *testing.T) {
 	schema := TablesToSchemaCache([]Table{testTableUsers})
 
-	// Store multiple versions
-	tools.SchemaCache(997, 1, schema)
-	tools.SchemaCache(997, 2, schema)
-	tools.SchemaCache(997, 3, schema)
+	// Store version 1
+	tools.SetTemplate(997, 1, schema)
 
-	// Invalidate all for template 997
-	tools.InvalidateAllSchemas(997)
-
-	// Verify all are gone
-	for v := 1; v <= 3; v++ {
-		if _, ok := tools.SchemaFromCache(997, v); ok {
-			t.Errorf("expected cache miss for version %d after InvalidateAll", v)
-		}
+	// Verify version 1
+	cached, ok := tools.GetTemplate(997)
+	if !ok {
+		t.Fatal("expected to find cached template")
 	}
+	if cached.Version != 1 {
+		t.Errorf("expected version 1, got %d", cached.Version)
+	}
+
+	// Update to version 3 (simulates template migration)
+	tools.SetTemplate(997, 3, schema)
+
+	// Verify version 3
+	cached, ok = tools.GetTemplate(997)
+	if !ok {
+		t.Fatal("expected to find cached template after update")
+	}
+	if cached.Version != 3 {
+		t.Errorf("expected version 3 after update, got %d", cached.Version)
+	}
+
+	// Clean up
+	tools.InvalidateTemplate(997)
 }

@@ -4,58 +4,59 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/gob"
-	"errors"
 	"fmt"
 	"log"
 
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
-// GetCachedSchema retrieves a schema from cache, loading it from DB if not present.
-// For tenant databases, this uses template_id and template_version.
-// For the primary database (templateID=0), it returns the primary schema.
-func GetCachedSchema(db *sql.DB, templateID int32, version int) (SchemaCache, error) {
+// GetCachedTemplate retrieves the current schema and version for a template.
+// For tenant databases, this uses template_id to get the current version.
+// For the primary database (templateID=0), it returns the primary schema with version 0.
+func GetCachedTemplate(db *sql.DB, templateID int32) (SchemaCache, int, error) {
 	// Primary database has its own schema management
 	if templateID == 0 {
 		schemaMu.RLock()
 		schema := primarySchema
 		schemaMu.RUnlock()
-		return schema, nil
+		return schema, 0, nil
 	}
 
 	// Check cache first
-	if cached, ok := tools.SchemaFromCache(templateID, version); ok {
-		return cached.(SchemaCache), nil
+	if cached, ok := tools.GetTemplate(templateID); ok {
+		return cached.Schema.(SchemaCache), cached.Version, nil
 	}
 
-	// Load from templates_history table
-	schema, err := loadSchemaFromHistory(db, templateID, version)
+	// Load from database and cache
+	schema, version, err := loadCurrentSchemaFromDB(db, templateID)
 	if err != nil {
-		return SchemaCache{}, err
+		return SchemaCache{}, 0, err
 	}
 
-	// Store in cache
-	tools.SchemaCache(templateID, version, schema)
-
-	return schema, nil
+	tools.SetTemplate(templateID, version, schema)
+	return schema, version, nil
 }
 
-// loadSchemaFromHistory loads a schema from the templates_history table.
-func loadSchemaFromHistory(db *sql.DB, templateID int32, version int) (SchemaCache, error) {
+// loadCurrentSchemaFromDB loads the current schema version for a template.
+func loadCurrentSchemaFromDB(db *sql.DB, templateID int32) (SchemaCache, int, error) {
 	if db == nil {
-		return SchemaCache{}, errors.New("Can't load schema from nil database")
+		return SchemaCache{}, 0, fmt.Errorf("cannot load schema from nil database")
 	}
 
 	row := db.QueryRow(fmt.Sprintf(`
-		SELECT schema FROM %s WHERE template_id = ? AND version = ?
-	`, ReservedTableTemplatesHistory), templateID, version)
+		SELECT h.version, h.schema
+		FROM %s h
+		JOIN %s t ON h.template_id = t.id AND h.version = t.current_version
+		WHERE h.template_id = ?
+	`, ReservedTableTemplatesHistory, ReservedTableTemplates), templateID)
 
+	var version int
 	var tablesData []byte
-	if err := row.Scan(&tablesData); err != nil {
+	if err := row.Scan(&version, &tablesData); err != nil {
 		if err == sql.ErrNoRows {
-			return SchemaCache{}, fmt.Errorf("schema version %d not found for template %d", version, templateID)
+			return SchemaCache{}, 0, fmt.Errorf("schema not found for template %d", templateID)
 		}
-		return SchemaCache{}, err
+		return SchemaCache{}, 0, err
 	}
 
 	// Deserialize tables
@@ -63,33 +64,38 @@ func loadSchemaFromHistory(db *sql.DB, templateID int32, version int) (SchemaCac
 	dec := gob.NewDecoder(buf)
 	var tables []Table
 	if err := dec.Decode(&tables); err != nil {
-		return SchemaCache{}, fmt.Errorf("failed to decode schema tables: %w", err)
+		return SchemaCache{}, 0, fmt.Errorf("failed to decode schema tables: %w", err)
 	}
 
-	// Convert []Table to SchemaCache format
-	return TablesToSchemaCache(tables), nil
+	return TablesToSchemaCache(tables), version, nil
 }
 
 // TablesToSchemaCache converts a slice of Table definitions to a SchemaCache.
 func TablesToSchemaCache(tables []Table) SchemaCache {
 	cache := SchemaCache{
-		Tables:    make(map[string]Table),
-		Fks:       make(map[string][]Fk),
+		Tables:    make(map[string]CacheTable),
+		Fks:       make(map[string][]CacheFk),
 		FTSTables: make(map[string]bool),
 	}
 
 	for _, t := range tables {
-		cache.Tables[t.Name] = t
-
+		tbl := CacheTable{
+			Name:    t.Name,
+			Pk:      t.Pk,
+			Columns: make(map[string]string),
+		}
 		// Extract foreign keys from column references
 		for _, col := range t.Columns {
+
+			tbl.Columns[col.Name] = col.Type
+
 			if col.References != "" {
 				// Parse "table.column" format
 				for i := 0; i < len(col.References); i++ {
 					if col.References[i] == '.' {
 						refTable := col.References[:i]
 						refCol := col.References[i+1:]
-						fk := Fk{
+						fk := CacheFk{
 							Table:      t.Name,
 							References: refTable,
 							From:       col.Name,
@@ -101,13 +107,13 @@ func TablesToSchemaCache(tables []Table) SchemaCache {
 				}
 			}
 		}
+		cache.Tables[t.Name] = tbl
 	}
 
 	return cache
 }
 
 // PreloadSchemaCache loads current schema versions into cache.
-// Only loads the current version for each template to minimize memory usage.
 func PreloadSchemaCache(db *sql.DB) error {
 	rows, err := db.Query(fmt.Sprintf(`
 		SELECT h.template_id, h.version, h.schema
@@ -136,7 +142,7 @@ func PreloadSchemaCache(db *sql.DB) error {
 			continue
 		}
 
-		tools.SchemaCache(templateID, version, TablesToSchemaCache(tables))
+		tools.SetTemplate(templateID, version, TablesToSchemaCache(tables))
 	}
 
 	return rows.Err()

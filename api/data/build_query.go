@@ -38,7 +38,7 @@ type column struct {
 
 // findForeignKey searches for a foreign key relationship between two tables.
 // Returns an empty Fk if no relationship exists. Callers must check for empty Fk.
-func (schema SchemaCache) findForeignKey(table, references string) Fk {
+func (schema SchemaCache) findForeignKey(table, references string) CacheFk {
 	// Error intentionally ignored - returns empty Fk when not found, which callers check
 	fk, _ := schema.SearchFks(table, references)
 	return fk
@@ -115,11 +115,11 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 	for _, col := range rel.columns {
 		if col.name == "*" {
 			sel += "*, "
-			for _, c := range tbl.Columns {
-				if strings.EqualFold(c.Type, ColTypeBlob) {
+			for c, t := range tbl.Columns {
+				if strings.EqualFold(t, ColTypeBlob) {
 					continue
 				}
-				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", c.Name, c.Name))
+				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", c, c))
 			}
 			continue
 		}
@@ -129,7 +129,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			return "", "", err
 		}
 
-		if strings.EqualFold(column.Type, ColTypeBlob) {
+		if strings.EqualFold(column, ColTypeBlob) {
 			continue
 		}
 
@@ -161,7 +161,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 		}
 
 		fk := schema.findForeignKey(joinTbl.name, rel.name)
-		if fk == (Fk{}) {
+		if fk == (CacheFk{}) {
 			return "", "", tools.NoRelationshipErr(rel.name, joinTbl.name)
 		}
 
@@ -187,7 +187,7 @@ func (schema SchemaCache) buildSelect(rel Relation) (string, string, error) {
 			} else {
 				// Group by all columns of the root table
 				for _, c := range tbl.Columns {
-					rootGroupBy += fmt.Sprintf("[%s].[%s], ", rel.name, c.Name)
+					rootGroupBy += fmt.Sprintf("[%s].[%s], ", rel.name, c)
 				}
 			}
 		}
@@ -213,7 +213,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 	var joins string
 	var aggPairs []string
 	includesFk := false
-	var fk Fk
+	var fk CacheFk
 
 	if rel.columns == nil && rel.joins == nil {
 		rel.columns = []column{{"*", ""}}
@@ -235,21 +235,21 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 
 		if col.name == "*" {
 			sel += "*, "
-			for _, c := range tbl.Columns {
-				if strings.EqualFold(c.Type, ColTypeBlob) {
+			for c, t := range tbl.Columns {
+				if strings.EqualFold(t, ColTypeBlob) {
 					continue
 				}
-				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", c.Name, rel.name, c.Name))
+				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s].[%s]", c, rel.name, c))
 			}
 			continue
 		}
 
-		column, err := tbl.SearchCols(col.name)
+		colType, err := tbl.SearchCols(col.name)
 		if err != nil {
 			return "", "", err
 		}
 
-		if strings.EqualFold(column.Type, ColTypeBlob) {
+		if strings.EqualFold(colType, ColTypeBlob) {
 			continue
 		}
 
@@ -285,7 +285,7 @@ func (schema SchemaCache) buildSelCurr(rel Relation, joinedOn string) (string, s
 		}
 
 		nestedFk := schema.findForeignKey(joinTbl.name, rel.name)
-		if nestedFk == (Fk{}) {
+		if nestedFk == (CacheFk{}) {
 			return "", "", tools.NoRelationshipErr(rel.name, joinTbl.name)
 		}
 
@@ -517,18 +517,18 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 	for _, col := range cjq.BaseColumns {
 		if col.name == "*" {
 			sel += fmt.Sprintf("[%s].*, ", cjq.BaseTable)
-			for _, c := range baseTbl.Columns {
-				if strings.EqualFold(c.Type, ColTypeBlob) {
+			for c, t := range baseTbl.Columns {
+				if strings.EqualFold(t, ColTypeBlob) {
 					continue
 				}
-				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", c.Name, c.Name))
+				aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", c, c))
 			}
 		} else {
-			column, err := baseTbl.SearchCols(col.name)
+			colType, err := baseTbl.SearchCols(col.name)
 			if err != nil {
 				return "", "", "", err
 			}
-			if strings.EqualFold(column.Type, ColTypeBlob) {
+			if strings.EqualFold(colType, ColTypeBlob) {
 				continue
 			}
 			sel += fmt.Sprintf("[%s].[%s], ", cjq.BaseTable, col.name)
@@ -586,21 +586,21 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 			// Using explicit aliases so the outer json_object can reference them
 			for _, col := range joinedCols {
 				if col.name == "*" {
-					for _, c := range joinTbl.Columns {
-						if strings.EqualFold(c.Type, ColTypeBlob) {
+					for c, t := range joinTbl.Columns {
+						if strings.EqualFold(t, ColTypeBlob) {
 							continue
 						}
 						// Prefix with table name for flat output to avoid conflicts
-						key := fmt.Sprintf("%s_%s", j.alias, c.Name)
-						sel += fmt.Sprintf("[%s].[%s] AS [%s], ", j.alias, c.Name, key)
+						key := fmt.Sprintf("%s_%s", j.alias, c)
+						sel += fmt.Sprintf("[%s].[%s] AS [%s], ", j.alias, c, key)
 						aggPairs = append(aggPairs, fmt.Sprintf("'%s', [%s]", key, key))
 					}
 				} else {
-					column, err := joinTbl.SearchCols(col.name)
+					colType, err := joinTbl.SearchCols(col.name)
 					if err != nil {
 						return "", "", "", err
 					}
-					if strings.EqualFold(column.Type, ColTypeBlob) {
+					if strings.EqualFold(colType, ColTypeBlob) {
 						continue
 					}
 					key := col.name
@@ -618,18 +618,18 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 			var nestedPairs []string
 			for _, col := range joinedCols {
 				if col.name == "*" {
-					for _, c := range joinTbl.Columns {
-						if strings.EqualFold(c.Type, ColTypeBlob) {
+					for c, t := range joinTbl.Columns {
+						if strings.EqualFold(t, ColTypeBlob) {
 							continue
 						}
-						nestedPairs = append(nestedPairs, fmt.Sprintf("'%s', [%s].[%s]", c.Name, j.alias, c.Name))
+						nestedPairs = append(nestedPairs, fmt.Sprintf("'%s', [%s].[%s]", c, j.alias, c))
 					}
 				} else {
-					column, err := joinTbl.SearchCols(col.name)
+					colType, err := joinTbl.SearchCols(col.name)
 					if err != nil {
 						return "", "", "", err
 					}
-					if strings.EqualFold(column.Type, ColTypeBlob) {
+					if strings.EqualFold(colType, ColTypeBlob) {
 						continue
 					}
 					key := col.name
@@ -666,8 +666,8 @@ func (schema SchemaCache) BuildCustomJoinSelect(cjq *CustomJoinQuery) (string, s
 		var groupBy []string
 		for _, col := range cjq.BaseColumns {
 			if col.name == "*" {
-				for _, c := range baseTbl.Columns {
-					groupBy = append(groupBy, fmt.Sprintf("[%s].[%s]", cjq.BaseTable, c.Name))
+				for c, _ := range baseTbl.Columns {
+					groupBy = append(groupBy, fmt.Sprintf("[%s].[%s]", cjq.BaseTable, c))
 				}
 			} else {
 				groupBy = append(groupBy, fmt.Sprintf("[%s].[%s]", cjq.BaseTable, col.name))

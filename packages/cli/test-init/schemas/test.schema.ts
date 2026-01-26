@@ -20,4 +20,4 @@ export default defineSchema("sdk-test", {
         content: c.text(),
         user_id: c.integer().references('users.id')
     })
-})                                                                     
+})

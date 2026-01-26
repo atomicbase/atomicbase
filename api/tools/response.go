@@ -41,7 +41,13 @@ func BuildAPIError(err error) (int, APIError) {
 		return http.StatusNotFound, APIError{
 			Code:    CodeDatabaseNotFound,
 			Message: err.Error(),
-			Hint:    "The database specified in the Tenant header was not found. Use GET /platform/tenants to list available databases.",
+			Hint:    "The database specified in the Tenant header was not found. Use the platform API or CLI to list all available tenant databases",
+		}
+	case errors.Is(err, ErrDatabaseOutOfSync):
+		return http.StatusConflict, APIError{
+			Code:    CodeDatabaseOutOfSync,
+			Message: err.Error(),
+			Hint:    "The database requested is out of sync with it's template. Use the platform API or CLI to sync it.",
 		}
 	case errors.Is(err, ErrTemplateNotFound):
 		return http.StatusNotFound, APIError{

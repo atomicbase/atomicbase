@@ -10,7 +10,7 @@ import (
 // BuildWhereFromJSON builds a WHERE clause from JSON filter array.
 // Each element in the array is ANDed together.
 // Example input: [{"id": {"eq": 5}}, {"or": [{"status": {"eq": "active"}}, {"role": {"eq": "admin"}}]}]
-func (table Table) BuildWhereFromJSON(where []map[string]any, schema SchemaCache) (string, []any, error) {
+func (table CacheTable) BuildWhereFromJSON(where []map[string]any, schema SchemaCache) (string, []any, error) {
 	if len(where) == 0 {
 		return "", nil, nil
 	}
@@ -91,7 +91,7 @@ func (table Table) BuildWhereFromJSON(where []map[string]any, schema SchemaCache
 }
 
 // buildOrClause builds an OR clause from an array of conditions.
-func (table Table) buildOrClause(conditions []any, schema SchemaCache) (string, []any, error) {
+func (table CacheTable) buildOrClause(conditions []any, schema SchemaCache) (string, []any, error) {
 	var parts []string
 	var args []any
 
@@ -135,7 +135,7 @@ func isColumnRef(val any) (string, bool) {
 
 // buildFilterClause builds a single filter clause for a column.
 // Supports table.column syntax for join queries.
-func (table Table) buildFilterClause(column string, filter map[string]any, schema SchemaCache) (string, []any, error) {
+func (table CacheTable) buildFilterClause(column string, filter map[string]any, schema SchemaCache) (string, []any, error) {
 	// Parse table.column format if present
 	tableName := table.Name
 	colName := column
@@ -244,13 +244,8 @@ func (table Table) buildFilterClause(column string, filter map[string]any, schem
 	return "", args, nil
 }
 
-// buildNotFilterClause builds a NOT filter clause.
-func (table Table) buildNotFilterClause(column string, filter map[string]any, schema SchemaCache) (string, []any, error) {
-	return table.buildNotFilterClauseWithTable(table.Name, column, filter, schema)
-}
-
 // buildNotFilterClauseWithTable builds a NOT filter clause with explicit table name.
-func (table Table) buildNotFilterClauseWithTable(tableName, colName string, filter map[string]any, schema SchemaCache) (string, []any, error) {
+func (table CacheTable) buildNotFilterClauseWithTable(tableName, colName string, filter map[string]any, schema SchemaCache) (string, []any, error) {
 	for op, val := range filter {
 		switch op {
 		case OpEq:
@@ -289,7 +284,7 @@ func (table Table) buildNotFilterClauseWithTable(tableName, colName string, filt
 
 // BuildOrderFromJSON builds an ORDER BY clause from JSON order map.
 // Example input: {"created_at": "desc", "name": "asc"}
-func (table Table) BuildOrderFromJSON(order map[string]string) (string, error) {
+func (table CacheTable) BuildOrderFromJSON(order map[string]string) (string, error) {
 	if len(order) == 0 {
 		return "", nil
 	}
@@ -374,7 +369,7 @@ func ParseSelectFromJSON(sel []any, tableName string) (Relation, error) {
 }
 
 // BuildReturningFromJSON builds a RETURNING clause from JSON column array.
-func (table Table) BuildReturningFromJSON(cols []string) (string, error) {
+func (table CacheTable) BuildReturningFromJSON(cols []string) (string, error) {
 	if len(cols) == 0 {
 		return "", nil
 	}
