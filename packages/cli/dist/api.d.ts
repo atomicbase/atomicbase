@@ -1,6 +1,11 @@
 import type { SchemaDefinition, TableDefinition, ColumnDefinition, IndexDefinition } from "@atomicbase/schema";
 import type { AtomicbaseConfig } from "./config.js";
 export type { TableDefinition, ColumnDefinition, IndexDefinition };
+export declare class ApiError extends Error {
+    status: number;
+    code?: string | undefined;
+    constructor(message: string, status: number, code?: string | undefined);
+}
 export interface Schema {
     tables: TableDefinition[];
 }
@@ -35,6 +40,19 @@ export interface PushResponse {
     updatedAt: string;
     schema: Schema;
 }
+export interface Tenant {
+    id: number;
+    name: string;
+    token?: string;
+    templateId: number;
+    templateVersion: number;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface SyncTenantResponse {
+    fromVersion: number;
+    toVersion: number;
+}
 export declare class ApiClient {
     private baseUrl;
     private apiKey?;
@@ -61,11 +79,32 @@ export declare class ApiClient {
     diffSchema(name: string, schema: SchemaDefinition): Promise<DiffResult>;
     /**
      * Check if a template exists.
+     * Returns false only for 404 errors, re-throws other errors.
      */
     templateExists(name: string): Promise<boolean>;
     /**
      * Get job status.
      */
     getJob(jobId: number): Promise<unknown>;
+    /**
+     * List all tenants.
+     */
+    listTenants(): Promise<Tenant[]>;
+    /**
+     * Get a tenant by name.
+     */
+    getTenant(name: string): Promise<Tenant>;
+    /**
+     * Create a new tenant.
+     */
+    createTenant(name: string, template: string): Promise<Tenant>;
+    /**
+     * Delete a tenant.
+     */
+    deleteTenant(name: string): Promise<void>;
+    /**
+     * Sync a tenant to the latest template version.
+     */
+    syncTenant(name: string): Promise<SyncTenantResponse>;
 }
 //# sourceMappingURL=api.d.ts.map

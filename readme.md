@@ -9,7 +9,8 @@ A complete backend solution for multi-tenant applications. Built on SQLite and T
 | Data API           | Beta           |
 | TypeScript SDK     | Complete       |
 | Schema Templates   | Complete       |
-| CLI                | In Progress    |
+| Schema Package     | Complete       |
+| CLI                | Beta           |
 | Authentication     | Planned        |
 | File Storage       | Planned        |
 | Dashboard          | Planned        |
@@ -349,7 +350,111 @@ POST /data/batch
 }
 ```
 
-## Schema Templates
+## Schema Package
+
+Define schemas in TypeScript with full type safety:
+
+```bash
+npm install @atomicbase/schema
+```
+
+```typescript
+import { defineSchema, defineTable, c } from "@atomicbase/schema";
+
+export default defineSchema("my-app", {
+  users: defineTable({
+    id: c.integer().primaryKey(),
+    email: c.text().notNull().unique(),
+    name: c.text().notNull(),
+    created_at: c.text().notNull().default("CURRENT_TIMESTAMP"),
+  }),
+
+  posts: defineTable({
+    id: c.integer().primaryKey(),
+    title: c.text().notNull(),
+    body: c.text(),
+    user_id: c.integer().references("users.id", { onDelete: "CASCADE" }),
+  })
+    .index("idx_posts_user", ["user_id"])
+    .fts(["title", "body"]),
+});
+```
+
+### Column Types
+
+```typescript
+c.integer()  // INTEGER - whole numbers, booleans (0/1), timestamps
+c.text()     // TEXT - strings, JSON, ISO dates
+c.real()     // REAL - floating point numbers
+c.blob()     // BLOB - binary data
+```
+
+### Column Modifiers
+
+```typescript
+c.integer().primaryKey()              // PRIMARY KEY
+c.text().notNull()                    // NOT NULL
+c.text().unique()                     // UNIQUE constraint
+c.text().default("value")             // DEFAULT value
+c.text().collate("NOCASE")            // Collation (BINARY, NOCASE, RTRIM)
+c.integer().check("age > 0")          // CHECK constraint
+c.text().generatedAs("upper(name)")   // Generated column (virtual)
+c.text().generatedAs("expr", { stored: true })  // Generated column (stored)
+c.integer().references("users.id")    // Foreign key
+c.integer().references("users.id", { onDelete: "CASCADE", onUpdate: "SET NULL" })
+```
+
+### Table Modifiers
+
+```typescript
+defineTable({ ... })
+  .index("idx_name", ["col1", "col2"])      // Add index
+  .uniqueIndex("idx_name", ["col1"])        // Add unique index
+  .fts(["title", "body"])                   // Enable FTS5 full-text search
+```
+
+## CLI
+
+Manage schemas from the command line:
+
+```bash
+npm install -g @atomicbase/cli
+```
+
+### Commands
+
+```bash
+# Initialize a new project
+atomicbase init
+
+# Push schemas to the server
+atomicbase push                    # Push all schemas
+atomicbase push schemas/app.ts     # Push specific schema
+
+# Pull a schema from the server
+atomicbase pull my-app             # Pull to schemas/my-app.schema.ts
+atomicbase pull my-app -o out.ts   # Pull to specific file
+
+# Preview changes without applying
+atomicbase diff                    # Diff all schemas
+atomicbase diff schemas/app.ts     # Diff specific schema
+```
+
+### Configuration
+
+After `atomicbase init`, configure `atomicbase.config.ts`:
+
+```typescript
+import { defineConfig } from "@atomicbase/cli";
+
+export default defineConfig({
+  url: process.env.ATOMICBASE_URL || "http://localhost:8080",
+  apiKey: process.env.ATOMICBASE_API_KEY,
+  schemas: "./schemas",  // Directory containing schema files
+});
+```
+
+## Schema Templates (REST API)
 
 Define reusable schemas and sync them across tenant databases:
 
@@ -413,19 +518,31 @@ api/
 ├── main.go          # Entry point, server setup
 ├── config/          # Environment configuration
 ├── data/            # Data API (queries, schema, batch)
-├── platform/        # Platform API (tenants, templates)
+├── platform/        # Platform API (tenants, templates, migrations)
 └── tools/           # Middleware, errors, utilities
 
-packages/sdk/
-├── src/
+packages/
+├── sdk/                         # TypeScript SDK
 │   ├── AtomicbaseClient.ts      # Client factory
-│   ├── AtomicbaseBuilder.ts     # Base builder (filters, transforms, execution)
-│   ├── AtomicbaseQueryBuilder.ts # Query operations (select, insert, etc.)
-│   ├── AtomicbaseError.ts       # Error class
-│   ├── filters.ts               # Filter helpers (eq, or, fts, onEq, etc.)
-│   ├── types.ts                 # TypeScript types
-│   └── index.ts                 # Exports
-└── package.json
+│   ├── AtomicbaseBuilder.ts     # Query builder
+│   ├── AtomicbaseQueryBuilder.ts # SELECT operations
+│   ├── AtomicbaseTransformBuilder.ts # INSERT/UPDATE/DELETE
+│   ├── filters.ts               # Filter helpers (eq, or, fts, etc.)
+│   └── types.ts                 # TypeScript types
+│
+├── schema/                      # Schema definition package
+│   └── src/index.ts             # defineSchema, defineTable, column builders
+│
+└── cli/                         # CLI tool
+    ├── src/
+    │   ├── commands/
+    │   │   ├── init.ts          # Project initialization
+    │   │   ├── push.ts          # Push schemas to server
+    │   │   ├── pull.ts          # Pull schemas from server
+    │   │   └── diff.ts          # Preview schema changes
+    │   ├── schema/parser.ts     # Schema file loader
+    │   └── config.ts            # Config file loader
+    └── bin/atomicbase.js        # CLI entry point
 ```
 
 ## Development
@@ -442,11 +559,19 @@ cd packages/sdk
 pnpm install
 pnpm build   # Build
 pnpm dev     # Watch mode
+
+# Schema package
+cd packages/schema
+pnpm build
+
+# CLI
+cd packages/cli
+pnpm build
+pnpm link --global  # Install globally for local testing
 ```
 
 ## Roadmap
 
-- **CLI** _(in progress)_ - Template management, schema syncing, migrations
 - **Dashboard** - Web UI for management and monitoring
 - **Authentication** - User management, sessions, OAuth
 - **File Storage** - S3-compatible object storage

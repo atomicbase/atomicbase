@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { loadConfig } from "../config.js";
 import { loadSchema, loadAllSchemas } from "../schema/parser.js";
-import { ApiClient } from "../api.js";
+import { ApiClient, ApiError } from "../api.js";
 export const diffCommand = new Command("diff")
     .description("Preview changes without applying")
     .argument("[file]", "Schema file to diff (or diff all if omitted)")
@@ -36,19 +36,26 @@ export const diffCommand = new Command("diff")
             console.log("");
         }
         catch (err) {
-            // Template might not exist yet - that's fine, show what would be created
-            if (err instanceof Error && err.message.includes("404")) {
-                console.log("  Template does not exist yet. Push will create:");
-                console.log(`  + ${schema.tables.length} table(s)`);
-                for (const table of schema.tables) {
-                    const columnCount = Object.keys(table.columns).length;
-                    console.log(`    + ${table.name} (${columnCount} columns)`);
+            if (err instanceof ApiError) {
+                // API returns 400 NO_CHANGES when schema is identical
+                if (err.code === "NO_CHANGES") {
+                    console.log("  No changes");
+                    console.log("");
+                    continue;
                 }
-                console.log("");
+                // Template might not exist yet - that's fine, show what would be created
+                if (err.status === 404) {
+                    console.log("  Template does not exist yet. Push will create:");
+                    console.log(`  + ${schema.tables.length} table(s)`);
+                    for (const table of schema.tables) {
+                        const columnCount = Object.keys(table.columns).length;
+                        console.log(`    + ${table.name} (${columnCount} columns)`);
+                    }
+                    console.log("");
+                    continue;
+                }
             }
-            else {
-                console.error(`✗ Failed to diff "${schema.name}":`, err);
-            }
+            console.error(`✗ Failed to diff "${schema.name}":`, err);
         }
     }
 });

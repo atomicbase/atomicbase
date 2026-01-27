@@ -4,6 +4,18 @@ import type { AtomicbaseConfig } from "./config.js";
 // Re-export types from schema package (these match Go API types directly)
 export type { TableDefinition, ColumnDefinition, IndexDefinition };
 
+// Custom error class to preserve HTTP status code
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 // Schema type matches Go API's Schema type
 export interface Schema {
   tables: TableDefinition[];
@@ -52,6 +64,23 @@ export interface PushResponse {
   schema: Schema;
 }
 
+// Tenant represents a tenant database (matches Go API)
+export interface Tenant {
+  id: number;
+  name: string;
+  token?: string;  // Omitted in list responses
+  templateId: number;
+  templateVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// SyncTenantResponse is returned by the sync endpoint (matches Go API)
+export interface SyncTenantResponse {
+  fromVersion: number;
+  toVersion: number;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private apiKey?: string;
@@ -82,8 +111,10 @@ export class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(
-        error.message || `API error: ${response.status} ${response.statusText}`
+      throw new ApiError(
+        error.message || `API error: ${response.status} ${response.statusText}`,
+        response.status,
+        error.code
       );
     }
 
@@ -138,13 +169,17 @@ export class ApiClient {
 
   /**
    * Check if a template exists.
+   * Returns false only for 404 errors, re-throws other errors.
    */
   async templateExists(name: string): Promise<boolean> {
     try {
       await this.getTemplate(name);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        return false;
+      }
+      throw err;
     }
   }
 
@@ -153,5 +188,47 @@ export class ApiClient {
    */
   async getJob(jobId: number): Promise<unknown> {
     return this.request<unknown>("GET", `/platform/jobs/${jobId}`);
+  }
+
+  // =========================================================================
+  // Tenant Management
+  // =========================================================================
+
+  /**
+   * List all tenants.
+   */
+  async listTenants(): Promise<Tenant[]> {
+    return this.request<Tenant[]>("GET", "/platform/tenants");
+  }
+
+  /**
+   * Get a tenant by name.
+   */
+  async getTenant(name: string): Promise<Tenant> {
+    return this.request<Tenant>("GET", `/platform/tenants/${name}`);
+  }
+
+  /**
+   * Create a new tenant.
+   */
+  async createTenant(name: string, template: string): Promise<Tenant> {
+    return this.request<Tenant>("POST", "/platform/tenants", {
+      name,
+      template,
+    });
+  }
+
+  /**
+   * Delete a tenant.
+   */
+  async deleteTenant(name: string): Promise<void> {
+    await this.request<void>("DELETE", `/platform/tenants/${name}`);
+  }
+
+  /**
+   * Sync a tenant to the latest template version.
+   */
+  async syncTenant(name: string): Promise<SyncTenantResponse> {
+    return this.request<SyncTenantResponse>("POST", `/platform/tenants/${name}/sync`);
   }
 }

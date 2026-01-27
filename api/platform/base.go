@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"sync"
 
 	"github.com/joe-ervin05/atomicbase/config"
@@ -26,9 +27,15 @@ var (
 	dbMu sync.RWMutex
 )
 
+func init() {
+	if err := initDB(); err != nil {
+		log.Fatal(err)
+	}
+}
+
 // InitDB initializes the platform database connection.
 // Should be called during server startup.
-func InitDB() error {
+func initDB() error {
 	dbMu.Lock()
 	defer dbMu.Unlock()
 

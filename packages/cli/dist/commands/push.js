@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { createInterface } from "readline";
 import { loadConfig } from "../config.js";
 import { loadSchema, loadAllSchemas } from "../schema/parser.js";
-import { ApiClient } from "../api.js";
+import { ApiClient, ApiError } from "../api.js";
 /**
  * Prompt user with a yes/no question.
  */
@@ -108,7 +108,18 @@ async function pushSingleSchema(api, schema) {
         return;
     }
     // Existing template - check for changes first
-    const diff = await api.diffSchema(schema.name, schema);
+    let diff;
+    try {
+        diff = await api.diffSchema(schema.name, schema);
+    }
+    catch (err) {
+        // API returns 400 NO_CHANGES when schema is identical
+        if (err instanceof ApiError && err.code === "NO_CHANGES") {
+            console.log("✓ No changes");
+            return;
+        }
+        throw err;
+    }
     if (!diff.changes || diff.changes.length === 0) {
         console.log("✓ No changes");
         return;

@@ -1,3 +1,14 @@
+// Custom error class to preserve HTTP status code
+export class ApiError extends Error {
+    status;
+    code;
+    constructor(message, status, code) {
+        super(message);
+        this.status = status;
+        this.code = code;
+        this.name = "ApiError";
+    }
+}
 export class ApiClient {
     baseUrl;
     apiKey;
@@ -19,7 +30,7 @@ export class ApiClient {
         });
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            throw new Error(error.message || `API error: ${response.status} ${response.statusText}`);
+            throw new ApiError(error.message || `API error: ${response.status} ${response.statusText}`, response.status, error.code);
         }
         return response.json();
     }
@@ -60,14 +71,18 @@ export class ApiClient {
     }
     /**
      * Check if a template exists.
+     * Returns false only for 404 errors, re-throws other errors.
      */
     async templateExists(name) {
         try {
             await this.getTemplate(name);
             return true;
         }
-        catch {
-            return false;
+        catch (err) {
+            if (err instanceof ApiError && err.status === 404) {
+                return false;
+            }
+            throw err;
         }
     }
     /**
@@ -75,6 +90,42 @@ export class ApiClient {
      */
     async getJob(jobId) {
         return this.request("GET", `/platform/jobs/${jobId}`);
+    }
+    // =========================================================================
+    // Tenant Management
+    // =========================================================================
+    /**
+     * List all tenants.
+     */
+    async listTenants() {
+        return this.request("GET", "/platform/tenants");
+    }
+    /**
+     * Get a tenant by name.
+     */
+    async getTenant(name) {
+        return this.request("GET", `/platform/tenants/${name}`);
+    }
+    /**
+     * Create a new tenant.
+     */
+    async createTenant(name, template) {
+        return this.request("POST", "/platform/tenants", {
+            name,
+            template,
+        });
+    }
+    /**
+     * Delete a tenant.
+     */
+    async deleteTenant(name) {
+        await this.request("DELETE", `/platform/tenants/${name}`);
+    }
+    /**
+     * Sync a tenant to the latest template version.
+     */
+    async syncTenant(name) {
+        return this.request("POST", `/platform/tenants/${name}/sync`);
     }
 }
 //# sourceMappingURL=api.js.map

@@ -3,6 +3,7 @@ import { initCommand } from "./commands/init.js";
 import { pushCommand } from "./commands/push.js";
 import { pullCommand } from "./commands/pull.js";
 import { diffCommand } from "./commands/diff.js";
+import { tenantsCommand } from "./commands/tenant.js";
 
 const program = new Command();
 
@@ -20,5 +21,6 @@ program.addCommand(initCommand);
 program.addCommand(pushCommand);
 program.addCommand(pullCommand);
 program.addCommand(diffCommand);
+program.addCommand(tenantsCommand);
 
 program.parse();

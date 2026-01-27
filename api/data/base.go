@@ -80,7 +80,9 @@ const DATABASES_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableDatabases +
 	name TEXT UNIQUE,
 	token TEXT,
 	template_id INTEGER REFERENCES ` + ReservedTableTemplates + `(id),
-	template_version INTEGER DEFAULT 1
+	template_version INTEGER DEFAULT 1,
+	created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );` +
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_databases_name ON ` + ReservedTableDatabases + `(name);`
 
