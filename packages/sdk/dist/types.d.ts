@@ -95,4 +95,32 @@ export type AtomicbaseBatchResponse<T extends unknown[] = unknown[]> = {
     data: null;
     error: AtomicbaseError;
 };
+/**
+ * Tenant database information.
+ */
+export interface Tenant {
+    id: number;
+    name: string;
+    token?: string;
+    templateId: number;
+    templateVersion: number;
+    createdAt: string;
+    updatedAt: string;
+}
+/**
+ * Options for creating a new tenant.
+ */
+export interface CreateTenantOptions {
+    /** Unique name for the tenant database */
+    name: string;
+    /** Name of the template to use for the database schema */
+    template: string;
+}
+/**
+ * Response from syncing a tenant to the latest template version.
+ */
+export interface SyncTenantResponse {
+    fromVersion: number;
+    toVersion: number;
+}
 //# sourceMappingURL=types.d.ts.map

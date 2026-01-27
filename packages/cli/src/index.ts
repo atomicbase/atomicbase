@@ -6,6 +6,10 @@ import { diffCommand } from "./commands/diff.js";
 import { tenantsCommand } from "./commands/tenant.js";
 import { jobsCommand } from "./commands/jobs.js";
 
+// Re-export config helper for use in atomicbase.config.ts files
+export { defineConfig } from "./config.js";
+export type { AtomicbaseConfig } from "./config.js";
+
 const program = new Command();
 
 program

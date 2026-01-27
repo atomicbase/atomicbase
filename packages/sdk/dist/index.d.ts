@@ -1,7 +1,8 @@
 export { AtomicbaseClient, TenantClient, createClient } from "./AtomicbaseClient.js";
+export { TenantsClient } from "./TenantsClient.js";
 export { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
 export { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 export { AtomicbaseError } from "./AtomicbaseError.js";
 export { col, onEq, onNeq, onGt, onGte, onLt, onLte, eq, neq, gt, gte, lt, lte, like, glob, inArray, notInArray, between, isNull, isNotNull, fts, not, or, and, } from "./filters.js";
-export type { AtomicbaseResponse, AtomicbaseResponseSuccess, AtomicbaseResponseFailure, AtomicbaseResponseWithCount, BatchOperation, BatchResponse, AtomicbaseBatchResponse, AtomicbaseClientOptions, FilterCondition, SelectColumn, OrderDirection, JoinClause, } from "./types.js";
+export type { AtomicbaseResponse, AtomicbaseResponseSuccess, AtomicbaseResponseFailure, AtomicbaseResponseWithCount, BatchOperation, BatchResponse, AtomicbaseBatchResponse, AtomicbaseClientOptions, FilterCondition, SelectColumn, OrderDirection, JoinClause, Tenant, CreateTenantOptions, SyncTenantResponse, } from "./types.js";
 //# sourceMappingURL=index.d.ts.map

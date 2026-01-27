@@ -1,4 +1,3 @@
 packages:
-  - "sdk"
-  - "dashboard"
   - "packages/*"
+  - "examples/*"

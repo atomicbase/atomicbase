@@ -1,5 +1,6 @@
 import { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 import { AtomicbaseError } from "./AtomicbaseError.js";
+import { TenantsClient } from "./TenantsClient.js";
 /**
  * Tenant-scoped client for database operations.
  * Created by calling `client.tenant('tenant-name')`.
@@ -131,6 +132,7 @@ export class TenantClient {
 /**
  * Atomicbase client for multi-tenant database operations.
  * Use `.tenant()` to get a tenant-scoped client for querying.
+ * Use `.tenants` to manage tenants (create, delete, sync).
  *
  * @example
  * ```ts
@@ -141,7 +143,13 @@ export class TenantClient {
  *   apiKey: 'your-api-key',
  * })
  *
- * // Get a tenant-scoped client
+ * // Manage tenants
+ * const { data: tenant } = await client.tenants.create({
+ *   name: 'acme-corp',
+ *   template: 'my-app'
+ * })
+ *
+ * // Get a tenant-scoped client for database operations
  * const acme = client.tenant('acme-corp')
  *
  * // Query the tenant's database
@@ -157,11 +165,43 @@ export class AtomicbaseClient {
     apiKey;
     headers;
     fetchFn;
+    /**
+     * Client for managing tenants (CRUD operations).
+     *
+     * @example
+     * ```ts
+     * // List all tenants
+     * const { data: tenants } = await client.tenants.list()
+     *
+     * // Create a new tenant
+     * const { data: tenant } = await client.tenants.create({
+     *   name: 'acme-corp',
+     *   template: 'my-app'
+     * })
+     *
+     * // Get tenant details
+     * const { data: tenant } = await client.tenants.get('acme-corp')
+     *
+     * // Sync tenant to latest template version
+     * const { data: result } = await client.tenants.sync('acme-corp')
+     *
+     * // Delete a tenant
+     * await client.tenants.delete('acme-corp')
+     * ```
+     */
+    tenants;
     constructor(options) {
         this.baseUrl = options.url.replace(/\/$/, "");
         this.apiKey = options.apiKey;
         this.headers = options.headers ?? {};
         this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
+        // Initialize tenants client
+        this.tenants = new TenantsClient({
+            baseUrl: this.baseUrl,
+            apiKey: this.apiKey,
+            headers: this.headers,
+            fetch: this.fetchFn,
+        });
     }
     /**
      * Create a tenant-scoped client for database operations.
