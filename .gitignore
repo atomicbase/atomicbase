@@ -12,15 +12,12 @@
 
 # Go
 api/atomicdata
-api/bin
 *.exe
 
 # Node/TypeScript
 node_modules
-packages/sdk/dist
-packages/schema/dist
-packages/cli/dist
-packages/cli/bin
+dist
+bin
 *.log
 
 # Test artifacts
