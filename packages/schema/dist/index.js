@@ -6,7 +6,7 @@
 //
 // Example:
 // ```typescript
-// import { defineSchema, defineTable, c } from "@atomicbase/sdk";
+// import { defineSchema, defineTable, c } from "@atomicbase/schema";
 //
 // export default defineSchema("user-app", {
 //   users: defineTable({
@@ -27,11 +27,13 @@ export class ColumnBuilder {
     _primaryKey = false;
     _notNull = false;
     _unique = false;
-    _defaultValue = null;
-    _collate = null;
-    _check = null;
-    _generated = null;
-    _references = null;
+    _default = null;
+    _collate = undefined;
+    _check = undefined;
+    _generated = undefined;
+    _references = undefined;
+    _onDelete = undefined;
+    _onUpdate = undefined;
     constructor(type) {
         this._type = type;
     }
@@ -61,7 +63,7 @@ export class ColumnBuilder {
      * @param value - Literal value or SQL expression (e.g., "CURRENT_TIMESTAMP")
      */
     default(value) {
-        this._defaultValue = value;
+        this._default = value;
         return this;
     }
     /**
@@ -98,35 +100,51 @@ export class ColumnBuilder {
      * @param options - Optional cascade options
      */
     references(ref, options) {
-        const [table, column] = ref.split(".");
-        if (!table || !column) {
+        const parts = ref.split(".");
+        if (parts.length !== 2 || !parts[0] || !parts[1]) {
             throw new Error(`Invalid reference format: "${ref}". Expected "table.column"`);
         }
-        this._references = {
-            table,
-            column,
-            onDelete: options?.onDelete,
-            onUpdate: options?.onUpdate,
-        };
+        this._references = ref;
+        this._onDelete = options?.onDelete;
+        this._onUpdate = options?.onUpdate;
         return this;
+    }
+    /**
+     * Check if this column is a primary key.
+     * @internal
+     */
+    _isPrimaryKey() {
+        return this._primaryKey;
     }
     /**
      * Build the column definition object.
      * @internal
      */
     _build(name) {
-        return {
+        const col = {
             name,
             type: this._type,
-            primaryKey: this._primaryKey,
-            notNull: this._notNull,
-            unique: this._unique,
-            defaultValue: this._defaultValue,
-            collate: this._collate,
-            check: this._check,
-            generated: this._generated,
-            references: this._references,
         };
+        // Only include optional fields if they have values
+        if (this._notNull)
+            col.notNull = true;
+        if (this._unique)
+            col.unique = true;
+        if (this._default !== null)
+            col.default = this._default;
+        if (this._collate)
+            col.collate = this._collate;
+        if (this._check)
+            col.check = this._check;
+        if (this._generated)
+            col.generated = this._generated;
+        if (this._references)
+            col.references = this._references;
+        if (this._onDelete)
+            col.onDelete = this._onDelete;
+        if (this._onUpdate)
+            col.onUpdate = this._onUpdate;
+        return col;
     }
 }
 // =============================================================================
@@ -169,7 +187,7 @@ export const c = {
 export class TableBuilder {
     _columns;
     _indexes = [];
-    _ftsColumns = null;
+    _ftsColumns = undefined;
     constructor(columns) {
         this._columns = columns;
     }
@@ -205,16 +223,24 @@ export class TableBuilder {
      * @internal
      */
     _build(name) {
-        const columns = [];
+        const columns = {};
+        const pk = [];
         for (const [colName, builder] of Object.entries(this._columns)) {
-            columns.push(builder._build(colName));
+            columns[colName] = builder._build(colName);
+            if (builder._isPrimaryKey()) {
+                pk.push(colName);
+            }
         }
-        return {
+        const table = {
             name,
+            pk,
             columns,
-            indexes: this._indexes,
-            ftsColumns: this._ftsColumns,
         };
+        if (this._indexes.length > 0)
+            table.indexes = this._indexes;
+        if (this._ftsColumns)
+            table.ftsColumns = this._ftsColumns;
+        return table;
     }
 }
 // =============================================================================

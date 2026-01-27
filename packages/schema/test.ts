@@ -18,8 +18,8 @@ const schema = defineSchema("user-app", {
     archived: c.integer().notNull().default(0),
     created_at: c.text().notNull().default("CURRENT_TIMESTAMP"),
   })
-  .fts(["title", "description"])
-  .index("idx_user", ["user_id"]),
+    .fts(["title", "description"])
+    .index("idx_user", ["user_id"]),
 
   tasks: defineTable({
     id: c.integer().primaryKey(),
@@ -36,34 +36,32 @@ const schema = defineSchema("user-app", {
 
 // Verify structure
 console.log("Schema name:", schema.name);
-console.log("Tables:", schema.tables.map((t) => t.name));
+console.log(
+  "Tables:",
+  schema.tables.map((t) => t.name)
+);
 console.log("");
 
 // Check users table
 const users = schema.tables.find((t) => t.name === "users")!;
-console.log("users columns:", users.columns.map((c) => c.name));
-console.log(
-  "users.email:",
-  users.columns.find((c) => c.name === "email")
-);
+console.log("users pk:", users.pk);
+console.log("users columns:", Object.keys(users.columns));
+console.log("users.email:", users.columns["email"]);
 console.log("");
 
 // Check projects table (has FTS and index)
 const projects = schema.tables.find((t) => t.name === "projects")!;
+console.log("projects pk:", projects.pk);
 console.log("projects.ftsColumns:", projects.ftsColumns);
 console.log("projects.indexes:", projects.indexes);
-console.log(
-  "projects.user_id references:",
-  projects.columns.find((c) => c.name === "user_id")?.references
-);
+console.log("projects.user_id references:", projects.columns["user_id"]?.references);
 console.log("");
 
 // Check tasks table (has CASCADE)
 const tasks = schema.tables.find((t) => t.name === "tasks")!;
-console.log(
-  "tasks.project_id references:",
-  tasks.columns.find((c) => c.name === "project_id")?.references
-);
+const projectIdCol = tasks.columns["project_id"];
+console.log("tasks.project_id references:", projectIdCol?.references);
+console.log("tasks.project_id onDelete:", projectIdCol?.onDelete);
 
 // Output full JSON
 console.log("\n--- Full Schema JSON ---");

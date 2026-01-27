@@ -9,34 +9,43 @@ export interface GeneratedColumn {
     expr: string;
     stored?: boolean;
 }
+/**
+ * Column definition matching Go API's Col type.
+ */
 export interface ColumnDefinition {
     name: string;
     type: ColumnType;
-    primaryKey: boolean;
-    notNull: boolean;
-    unique: boolean;
-    defaultValue: string | number | null;
-    collate: Collation | null;
-    check: string | null;
-    generated: GeneratedColumn | null;
-    references: {
-        table: string;
-        column: string;
-        onDelete?: ForeignKeyAction;
-        onUpdate?: ForeignKeyAction;
-    } | null;
+    notNull?: boolean;
+    unique?: boolean;
+    default?: string | number | null;
+    collate?: Collation;
+    check?: string;
+    generated?: GeneratedColumn;
+    references?: string;
+    onDelete?: ForeignKeyAction;
+    onUpdate?: ForeignKeyAction;
 }
+/**
+ * Index definition matching Go API's Index type.
+ */
 export interface IndexDefinition {
     name: string;
     columns: string[];
     unique?: boolean;
 }
+/**
+ * Table definition matching Go API's Table type.
+ */
 export interface TableDefinition {
     name: string;
-    columns: ColumnDefinition[];
-    indexes: IndexDefinition[];
-    ftsColumns: string[] | null;
+    pk: string[];
+    columns: Record<string, ColumnDefinition>;
+    indexes?: IndexDefinition[];
+    ftsColumns?: string[];
 }
+/**
+ * Schema definition matching Go API's Schema type.
+ */
 export interface SchemaDefinition {
     name: string;
     tables: TableDefinition[];
@@ -49,11 +58,13 @@ export declare class ColumnBuilder {
     private _primaryKey;
     private _notNull;
     private _unique;
-    private _defaultValue;
+    private _default;
     private _collate;
     private _check;
     private _generated;
     private _references;
+    private _onDelete;
+    private _onUpdate;
     constructor(type: ColumnType);
     /**
      * Mark column as PRIMARY KEY.
@@ -96,6 +107,11 @@ export declare class ColumnBuilder {
      * @param options - Optional cascade options
      */
     references(ref: string, options?: ForeignKeyOptions): this;
+    /**
+     * Check if this column is a primary key.
+     * @internal
+     */
+    _isPrimaryKey(): boolean;
     /**
      * Build the column definition object.
      * @internal

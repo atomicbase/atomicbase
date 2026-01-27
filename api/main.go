@@ -12,6 +12,7 @@ import (
 
 	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joe-ervin05/atomicbase/data"
+	"github.com/joe-ervin05/atomicbase/platform"
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
@@ -70,6 +71,12 @@ func main() {
 
 	// Register routes from each module
 	data.RegisterRoutes(app)
+	platform.RegisterRoutes(app)
+
+	// Resume any interrupted migration jobs from previous run
+	if err := platform.ResumeRunningJobs(context.Background()); err != nil {
+		log.Printf("Warning: failed to resume running jobs: %v", err)
+	}
 
 	// Apply middleware chain: panic recovery -> logging -> timeout -> cors -> rate limit -> auth -> handler
 	handler := tools.PanicRecoveryMiddleware(
@@ -107,9 +114,15 @@ func main() {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
-	// Close the database connection
+	// Wait for background migration jobs to complete
+	platform.GetJobManager().Wait()
+
+	// Close database connections
 	if err := data.ClosePrimaryDB(); err != nil {
 		log.Printf("Error closing database: %v", err)
+	}
+	if err := platform.CloseDB(); err != nil {
+		log.Printf("Error closing platform database: %v", err)
 	}
 
 	// Close activity logger
