@@ -4,21 +4,23 @@ import { resolve, dirname } from "node:path";
 import { loadConfig } from "../config.js";
 import { ApiClient } from "../api.js";
 /**
- * Convert API table format (columns as map) to SDK format (columns as array).
+ * Convert API table format to internal generator format.
+ * API: columns as Record<string, ColumnDefinition>, pk as string[]
+ * Generator: columns as array with primaryKey flag
  */
 function convertFromApiFormat(tables) {
     return tables.map((table) => {
-        const columns = Object.values(table.columns).map((col) => {
+        const columns = Object.entries(table.columns).map(([name, col]) => {
             const colDef = {
-                name: col.name,
+                name,
                 type: col.type,
-                primaryKey: table.pk?.includes(col.name) ?? false,
-                notNull: col.notNull ?? false,
-                unique: col.unique ?? false,
-                defaultValue: col.default ?? null,
-                collate: col.collate ?? null,
-                check: col.check ?? null,
-                generated: col.generated ?? null,
+                primaryKey: table.pk?.includes(name) ?? false,
+                notNull: col.notNull,
+                unique: col.unique,
+                default: col.default,
+                collate: col.collate,
+                check: col.check,
+                generated: col.generated,
                 references: col.references
                     ? {
                         table: col.references.split(".")[0],
@@ -92,10 +94,10 @@ function generateColumnCode(col) {
     if (col.collate) {
         code += `.collate("${col.collate}")`;
     }
-    if (col.defaultValue !== null) {
-        const val = typeof col.defaultValue === "string"
-            ? `"${col.defaultValue}"`
-            : col.defaultValue;
+    if (col.default !== undefined && col.default !== null) {
+        const val = typeof col.default === "string"
+            ? `"${col.default}"`
+            : col.default;
         code += `.default(${val})`;
     }
     if (col.check) {
@@ -134,7 +136,7 @@ export const pullCommand = new Command("pull")
     try {
         const template = await api.getTemplate(name);
         // Generate schema code
-        const code = generateSchemaCode(name, convertFromApiFormat(template.tables));
+        const code = generateSchemaCode(name, convertFromApiFormat(template.schema.tables));
         // Determine output path
         const outputPath = options.output ?? resolve(config.schemas, `${name}.schema.ts`);
         const outputDir = dirname(outputPath);
@@ -146,7 +148,7 @@ export const pullCommand = new Command("pull")
         writeFileSync(outputPath, code);
         console.log(`✓ Wrote ${outputPath}`);
         console.log(`  Version: ${template.currentVersion}`);
-        console.log(`  Tables: ${template.tables.length}`);
+        console.log(`  Tables: ${template.schema.tables.length}`);
     }
     catch (err) {
         console.error(`✗ Failed to pull "${name}":`, err);

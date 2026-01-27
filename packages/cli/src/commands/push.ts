@@ -2,8 +2,19 @@ import { Command } from "commander";
 import { createInterface } from "readline";
 import { loadConfig } from "../config.js";
 import { loadSchema, loadAllSchemas } from "../schema/parser.js";
-import { ApiClient, type Change, type ResolvedRename } from "../api.js";
+import { ApiClient, type SchemaDiff, type Merge } from "../api.js";
 import type { SchemaDefinition } from "@atomicbase/schema";
+
+/**
+ * Ambiguous change detected client-side: a drop + add pair that might be a rename.
+ */
+interface AmbiguousChange {
+  type: "table" | "column";
+  table: string;
+  column?: string;
+  dropIndex: number;
+  addIndex: number;
+}
 
 /**
  * Prompt user with a yes/no question.
@@ -24,45 +35,96 @@ async function confirm(question: string): Promise<boolean> {
 }
 
 /**
- * Resolve ambiguous changes by prompting the user.
+ * Detect ambiguous changes (drop + add pairs that might be renames).
+ * This is now client-side since the API just returns raw changes.
  */
-async function resolveAmbiguousChanges(changes: Change[]): Promise<ResolvedRename[]> {
-  const resolutions: ResolvedRename[] = [];
-  const ambiguous = changes.filter((c) => c.ambiguous);
+function detectAmbiguousChanges(changes: SchemaDiff[]): AmbiguousChange[] {
+  const ambiguous: AmbiguousChange[] = [];
+
+  // Find drop_table + add_table pairs
+  const dropTables = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "drop_table");
+  const addTables = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "add_table");
+
+  // Any drop + add table is potentially ambiguous (might be a rename)
+  for (const drop of dropTables) {
+    for (const add of addTables) {
+      ambiguous.push({
+        type: "table",
+        table: add.change.table!,
+        dropIndex: drop.index,
+        addIndex: add.index,
+      });
+    }
+  }
+
+  // Find drop_column + add_column pairs within the same table
+  const dropColumns = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "drop_column");
+  const addColumns = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "add_column");
+
+  for (const drop of dropColumns) {
+    for (const add of addColumns) {
+      if (drop.change.table === add.change.table) {
+        ambiguous.push({
+          type: "column",
+          table: add.change.table!,
+          column: add.change.column,
+          dropIndex: drop.index,
+          addIndex: add.index,
+        });
+      }
+    }
+  }
+
+  return ambiguous;
+}
+
+/**
+ * Resolve ambiguous changes by prompting the user.
+ * Returns Merge[] for the API.
+ */
+async function resolveAmbiguousChanges(
+  changes: SchemaDiff[],
+  ambiguous: AmbiguousChange[]
+): Promise<Merge[]> {
+  const merges: Merge[] = [];
 
   if (ambiguous.length === 0) {
-    return resolutions;
+    return merges;
   }
 
   console.log("\n⚠️  Ambiguous changes detected:\n");
 
   for (const change of ambiguous) {
-    if (change.type === "rename_table") {
+    const dropChange = changes[change.dropIndex];
+    const addChange = changes[change.addIndex];
+
+    if (change.type === "table") {
       const isRename = await confirm(
-        `  Table '${change.oldName}' was removed and '${change.table}' was added.\n  Is this a rename?`
+        `  Table '${dropChange.table}' was removed and '${addChange.table}' was added.\n  Is this a rename?`
       );
-      resolutions.push({
-        type: "table",
-        table: change.table,
-        oldName: change.oldName!,
-        isRename,
-      });
-    } else if (change.type === "rename_column") {
+      if (isRename) {
+        merges.push({ old: change.dropIndex, new: change.addIndex });
+      }
+    } else {
       const isRename = await confirm(
-        `  Column '${change.table}.${change.oldName}' was removed and '${change.table}.${change.column}' was added.\n  Is this a rename?`
+        `  Column '${change.table}.${dropChange.column}' was removed and '${change.table}.${addChange.column}' was added.\n  Is this a rename?`
       );
-      resolutions.push({
-        type: "column",
-        table: change.table,
-        column: change.column,
-        oldName: change.oldName!,
-        isRename,
-      });
+      if (isRename) {
+        merges.push({ old: change.dropIndex, new: change.addIndex });
+      }
     }
   }
 
   console.log("");
-  return resolutions;
+  return merges;
 }
 
 /**
@@ -77,12 +139,11 @@ async function pushSingleSchema(api: ApiClient, schema: SchemaDefinition): Promi
   if (!exists) {
     // New template - just create it
     const result = await api.pushSchema(schema);
-    console.log(`✓ Created template "${schema.name}" (v${result.template.currentVersion})`);
-    printChanges(result.changes);
+    console.log(`✓ Created template "${schema.name}" (v${result.currentVersion})`);
     return;
   }
 
-  // Existing template - check for ambiguous changes first
+  // Existing template - check for changes first
   const diff = await api.diffSchema(schema.name, schema);
 
   if (!diff.changes || diff.changes.length === 0) {
@@ -93,42 +154,40 @@ async function pushSingleSchema(api: ApiClient, schema: SchemaDefinition): Promi
   // Show what we detected
   printChanges(diff.changes);
 
-  // Resolve ambiguous changes
-  let resolvedRenames: ResolvedRename[] | undefined;
-  if (diff.hasAmbiguous) {
-    resolvedRenames = await resolveAmbiguousChanges(diff.changes);
+  // Detect and resolve ambiguous changes (client-side)
+  const ambiguous = detectAmbiguousChanges(diff.changes);
+  let merges: Merge[] | undefined;
+  if (ambiguous.length > 0) {
+    merges = await resolveAmbiguousChanges(diff.changes, ambiguous);
+    if (merges.length === 0) {
+      merges = undefined;
+    }
   }
 
-  // Apply the update
-  const result = await api.updateTemplate(schema.name, schema, resolvedRenames);
-  console.log(`✓ Updated to v${result.template.currentVersion}`);
+  // Apply the migration
+  const result = await api.migrateTemplate(schema.name, schema, merges);
+  console.log(`✓ Migration started (job #${result.jobId})`);
+  console.log(`  Check status: atomicbase job ${result.jobId}`);
 }
 
 /**
  * Print changes in a readable format.
  */
-function printChanges(changes: Change[] | null): void {
+function printChanges(changes: SchemaDiff[]): void {
   if (!changes || changes.length === 0) {
     return;
   }
 
   console.log("\nChanges:");
   for (const change of changes) {
-    if (change.ambiguous) {
-      continue; // Will be handled separately
-    }
-
     const prefix =
       change.type.startsWith("add") ? "+" :
       change.type.startsWith("drop") ? "-" :
       change.type.startsWith("rename") ? "→" : "~";
 
-    let desc = change.table;
+    let desc = change.table || "";
     if (change.column) {
       desc += `.${change.column}`;
-    }
-    if (change.type.startsWith("rename") && change.oldName) {
-      desc = `${change.oldName} → ${desc}`;
     }
 
     console.log(`  ${prefix} ${desc} (${change.type})`);

@@ -1,44 +1,3 @@
-/**
- * Convert SDK schema format to API format.
- * SDK uses arrays for columns, API uses maps.
- */
-function convertToApiFormat(tables) {
-    return tables.map((table) => {
-        const columns = {};
-        const pk = [];
-        for (const col of table.columns) {
-            columns[col.name] = {
-                name: col.name,
-                type: col.type,
-                notNull: col.notNull || undefined,
-                unique: col.unique || undefined,
-                default: col.defaultValue,
-                collate: col.collate || undefined,
-                check: col.check || undefined,
-                generated: col.generated || undefined,
-                references: col.references
-                    ? `${col.references.table}.${col.references.column}`
-                    : undefined,
-                onDelete: col.references?.onDelete,
-                onUpdate: col.references?.onUpdate,
-            };
-            if (col.primaryKey) {
-                pk.push(col.name);
-            }
-        }
-        return {
-            name: table.name,
-            pk,
-            columns,
-            indexes: table.indexes.length > 0 ? table.indexes.map((idx) => ({
-                name: idx.name,
-                columns: idx.columns,
-                unique: idx.unique || undefined,
-            })) : undefined,
-            ftsColumns: table.ftsColumns && table.ftsColumns.length > 0 ? table.ftsColumns : undefined,
-        };
-    });
-}
 export class ApiClient {
     baseUrl;
     apiKey;
@@ -65,24 +24,23 @@ export class ApiClient {
         return response.json();
     }
     /**
-     * Push a schema to the server (create or update).
+     * Push a schema to the server (create new template).
+     * Schema package outputs API-compatible format directly.
      */
-    async pushSchema(schema, resolvedRenames) {
-        const tables = convertToApiFormat(schema.tables);
+    async pushSchema(schema) {
         return this.request("POST", "/platform/templates", {
             name: schema.name,
-            tables,
-            resolvedRenames,
+            schema: { tables: schema.tables },
         });
     }
     /**
-     * Update an existing template.
+     * Migrate an existing template to a new schema.
+     * Returns a job ID for tracking the async migration.
      */
-    async updateTemplate(name, schema, resolvedRenames) {
-        const tables = convertToApiFormat(schema.tables);
-        return this.request("PUT", `/platform/templates/${name}`, {
-            tables,
-            resolvedRenames,
+    async migrateTemplate(name, schema, merges) {
+        return this.request("POST", `/platform/templates/${name}/migrate`, {
+            schema: { tables: schema.tables },
+            merge: merges,
         });
     }
     /**
@@ -93,12 +51,11 @@ export class ApiClient {
     }
     /**
      * Preview changes without applying (diff).
+     * Returns raw changes - ambiguity detection is client-side.
      */
-    async diffSchema(name, schema, resolvedRenames) {
-        const tables = convertToApiFormat(schema.tables);
+    async diffSchema(name, schema) {
         return this.request("POST", `/platform/templates/${name}/diff`, {
-            tables,
-            resolvedRenames,
+            schema: { tables: schema.tables },
         });
     }
     /**

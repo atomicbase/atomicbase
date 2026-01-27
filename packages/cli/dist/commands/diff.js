@@ -31,12 +31,6 @@ export const diffCommand = new Command("diff")
                     const prefix = change.type.startsWith("add") ? "+" :
                         change.type.startsWith("drop") ? "-" : "~";
                     console.log(`  ${prefix} ${change.table}${change.column ? `.${change.column}` : ""} (${change.type})`);
-                    if (change.sql) {
-                        console.log(`    SQL: ${change.sql}`);
-                    }
-                }
-                if (result.requiresMigration) {
-                    console.log("\n⚠ Some changes require data migration (mirror table rebuild)");
                 }
             }
             console.log("");
@@ -47,7 +41,8 @@ export const diffCommand = new Command("diff")
                 console.log("  Template does not exist yet. Push will create:");
                 console.log(`  + ${schema.tables.length} table(s)`);
                 for (const table of schema.tables) {
-                    console.log(`    + ${table.name} (${table.columns.length} columns)`);
+                    const columnCount = Object.keys(table.columns).length;
+                    console.log(`    + ${table.name} (${columnCount} columns)`);
                 }
                 console.log("");
             }

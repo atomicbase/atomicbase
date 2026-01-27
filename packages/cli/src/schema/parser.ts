@@ -61,7 +61,7 @@ export async function loadSchema(filePath: string): Promise<SchemaDefinition> {
 
     // Validate each table has at least one column
     for (const table of schema.tables) {
-      if (!table.columns || table.columns.length === 0) {
+      if (!table.columns || Object.keys(table.columns).length === 0) {
         throw new Error(
           `Table "${table.name}" in ${fileName} has no columns\n\n` +
           `  Each table must have at least one column:\n\n` +

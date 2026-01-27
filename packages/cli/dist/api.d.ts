@@ -1,73 +1,39 @@
-import type { SchemaDefinition } from "@atomicbase/schema";
+import type { SchemaDefinition, TableDefinition, ColumnDefinition, IndexDefinition } from "@atomicbase/schema";
 import type { AtomicbaseConfig } from "./config.js";
-interface ApiTable {
-    name: string;
-    pk: string[];
-    columns: Record<string, ApiColumn>;
-    indexes?: ApiIndex[];
-    ftsColumns?: string[];
+export type { TableDefinition, ColumnDefinition, IndexDefinition };
+export interface Schema {
+    tables: TableDefinition[];
 }
-interface ApiIndex {
-    name: string;
-    columns: string[];
-    unique?: boolean;
-}
-interface ApiColumn {
-    name: string;
+export interface SchemaDiff {
     type: string;
-    notNull?: boolean;
-    unique?: boolean;
-    default?: string | number | null;
-    collate?: string;
-    check?: string;
-    generated?: {
-        expr: string;
-        stored?: boolean;
-    };
-    references?: string;
-    onDelete?: string;
-    onUpdate?: string;
-}
-export interface PushResponse {
-    template: {
-        id: number;
-        name: string;
-        currentVersion: number;
-        createdAt: string;
-        updatedAt: string;
-    };
-    changes: Change[] | null;
-}
-export interface Change {
-    type: string;
-    table: string;
+    table?: string;
     column?: string;
-    oldName?: string;
-    sql?: string;
-    ambiguous?: boolean;
-    reason?: string;
-    requiresMigration?: boolean;
 }
-export interface DiffResponse {
-    changes: Change[];
-    requiresMigration: boolean;
-    hasAmbiguous: boolean;
-    migrationSql?: string[];
+export interface DiffResult {
+    changes: SchemaDiff[];
 }
-export interface ResolvedRename {
-    type: "table" | "column";
-    table: string;
-    column?: string;
-    oldName: string;
-    isRename: boolean;
+export interface Merge {
+    old: number;
+    new: number;
+}
+export interface MigrateResponse {
+    jobId: number;
 }
 export interface TemplateResponse {
     id: number;
     name: string;
     currentVersion: number;
-    tables: ApiTable[];
     createdAt: string;
     updatedAt: string;
+    schema: Schema;
+}
+export interface PushResponse {
+    id: number;
+    name: string;
+    currentVersion: number;
+    createdAt: string;
+    updatedAt: string;
+    schema: Schema;
 }
 export declare class ApiClient {
     private baseUrl;
@@ -75,21 +41,24 @@ export declare class ApiClient {
     constructor(config: AtomicbaseConfig);
     private request;
     /**
-     * Push a schema to the server (create or update).
+     * Push a schema to the server (create new template).
+     * Schema package outputs API-compatible format directly.
      */
-    pushSchema(schema: SchemaDefinition, resolvedRenames?: ResolvedRename[]): Promise<PushResponse>;
+    pushSchema(schema: SchemaDefinition): Promise<PushResponse>;
     /**
-     * Update an existing template.
+     * Migrate an existing template to a new schema.
+     * Returns a job ID for tracking the async migration.
      */
-    updateTemplate(name: string, schema: SchemaDefinition, resolvedRenames?: ResolvedRename[]): Promise<PushResponse>;
+    migrateTemplate(name: string, schema: SchemaDefinition, merges?: Merge[]): Promise<MigrateResponse>;
     /**
      * Get a template by name.
      */
     getTemplate(name: string): Promise<TemplateResponse>;
     /**
      * Preview changes without applying (diff).
+     * Returns raw changes - ambiguity detection is client-side.
      */
-    diffSchema(name: string, schema: SchemaDefinition, resolvedRenames?: ResolvedRename[]): Promise<DiffResponse>;
+    diffSchema(name: string, schema: SchemaDefinition): Promise<DiffResult>;
     /**
      * Check if a template exists.
      */
@@ -97,7 +66,6 @@ export declare class ApiClient {
     /**
      * Get job status.
      */
-    getJob(jobId: string): Promise<unknown>;
+    getJob(jobId: number): Promise<unknown>;
 }
-export {};
 //# sourceMappingURL=api.d.ts.map

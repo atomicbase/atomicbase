@@ -3,24 +3,46 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { loadConfig } from "../config.js";
 import { ApiClient, type TemplateResponse } from "../api.js";
-import type { TableDefinition, ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/schema";
+import type { ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/schema";
 
 /**
- * Convert API table format (columns as map) to SDK format (columns as array).
+ * Internal table format for code generation (columns as array with primaryKey flag).
  */
-function convertFromApiFormat(tables: TemplateResponse["tables"]): TableDefinition[] {
+interface GeneratorTable {
+  name: string;
+  columns: GeneratorColumn[];
+  indexes: { name: string; columns: string[]; unique?: boolean }[];
+  ftsColumns: string[] | null;
+}
+
+interface GeneratorColumn extends Omit<ColumnDefinition, "references" | "onDelete" | "onUpdate"> {
+  primaryKey: boolean;
+  references: {
+    table: string;
+    column: string;
+    onDelete?: ForeignKeyAction;
+    onUpdate?: ForeignKeyAction;
+  } | null;
+}
+
+/**
+ * Convert API table format to internal generator format.
+ * API: columns as Record<string, ColumnDefinition>, pk as string[]
+ * Generator: columns as array with primaryKey flag
+ */
+function convertFromApiFormat(tables: TemplateResponse["schema"]["tables"]): GeneratorTable[] {
   return tables.map((table) => {
-    const columns: ColumnDefinition[] = Object.values(table.columns).map((col) => {
-      const colDef: ColumnDefinition = {
-        name: col.name,
-        type: col.type as ColumnDefinition["type"],
-        primaryKey: table.pk?.includes(col.name) ?? false,
-        notNull: col.notNull ?? false,
-        unique: col.unique ?? false,
-        defaultValue: col.default ?? null,
-        collate: (col.collate as Collation) ?? null,
-        check: col.check ?? null,
-        generated: col.generated ?? null,
+    const columns: GeneratorColumn[] = Object.entries(table.columns).map(([name, col]) => {
+      const colDef: GeneratorColumn = {
+        name,
+        type: col.type,
+        primaryKey: table.pk?.includes(name) ?? false,
+        notNull: col.notNull,
+        unique: col.unique,
+        default: col.default,
+        collate: col.collate as Collation | undefined,
+        check: col.check,
+        generated: col.generated,
         references: col.references
           ? {
               table: col.references.split(".")[0],
@@ -49,7 +71,7 @@ function convertFromApiFormat(tables: TemplateResponse["tables"]): TableDefiniti
 /**
  * Generate TypeScript schema code from a template response.
  */
-function generateSchemaCode(name: string, tables: TableDefinition[]): string {
+function generateSchemaCode(name: string, tables: GeneratorTable[]): string {
   const lines: string[] = [
     `import { defineSchema, defineTable, c } from "@atomicbase/schema";`,
     ``,
@@ -93,7 +115,7 @@ function generateSchemaCode(name: string, tables: TableDefinition[]): string {
   return lines.join("\n");
 }
 
-function generateColumnCode(col: ColumnDefinition): string {
+function generateColumnCode(col: GeneratorColumn): string {
   let code = `c.${col.type.toLowerCase()}()`;
 
   if (col.primaryKey) {
@@ -108,10 +130,10 @@ function generateColumnCode(col: ColumnDefinition): string {
   if (col.collate) {
     code += `.collate("${col.collate}")`;
   }
-  if (col.defaultValue !== null) {
-    const val = typeof col.defaultValue === "string"
-      ? `"${col.defaultValue}"`
-      : col.defaultValue;
+  if (col.default !== undefined && col.default !== null) {
+    const val = typeof col.default === "string"
+      ? `"${col.default}"`
+      : col.default;
     code += `.default(${val})`;
   }
   if (col.check) {
@@ -154,7 +176,7 @@ export const pullCommand = new Command("pull")
       const template = await api.getTemplate(name);
 
       // Generate schema code
-      const code = generateSchemaCode(name, convertFromApiFormat(template.tables));
+      const code = generateSchemaCode(name, convertFromApiFormat(template.schema.tables));
 
       // Determine output path
       const outputPath = options.output ?? resolve(config.schemas, `${name}.schema.ts`);
@@ -169,7 +191,7 @@ export const pullCommand = new Command("pull")
       writeFileSync(outputPath, code);
       console.log(`✓ Wrote ${outputPath}`);
       console.log(`  Version: ${template.currentVersion}`);
-      console.log(`  Tables: ${template.tables.length}`);
+      console.log(`  Tables: ${template.schema.tables.length}`);
     } catch (err) {
       console.error(`✗ Failed to pull "${name}":`, err);
       process.exit(1);

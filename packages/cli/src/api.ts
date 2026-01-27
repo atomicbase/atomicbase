@@ -1,127 +1,55 @@
-import type { SchemaDefinition, TableDefinition, ColumnDefinition } from "@atomicbase/schema";
+import type { SchemaDefinition, TableDefinition, ColumnDefinition, IndexDefinition } from "@atomicbase/schema";
 import type { AtomicbaseConfig } from "./config.js";
 
-// API table format (different from SDK format)
-interface ApiTable {
-  name: string;
-  pk: string[];
-  columns: Record<string, ApiColumn>;
-  indexes?: ApiIndex[];
-  ftsColumns?: string[];
+// Re-export types from schema package (these match Go API types directly)
+export type { TableDefinition, ColumnDefinition, IndexDefinition };
+
+// Schema type matches Go API's Schema type
+export interface Schema {
+  tables: TableDefinition[];
 }
 
-interface ApiIndex {
-  name: string;
-  columns: string[];
-  unique?: boolean;
-}
-
-interface ApiColumn {
-  name: string;
-  type: string;
-  notNull?: boolean;
-  unique?: boolean;
-  default?: string | number | null;
-  collate?: string;
-  check?: string;
-  generated?: {
-    expr: string;
-    stored?: boolean;
-  };
-  references?: string;
-  onDelete?: string;
-  onUpdate?: string;
-}
-
-export interface PushResponse {
-  template: {
-    id: number;
-    name: string;
-    currentVersion: number;
-    createdAt: string;
-    updatedAt: string;
-  };
-  changes: Change[] | null;
-}
-
-export interface Change {
-  type: string;
-  table: string;
+// SchemaDiff represents a single schema modification (matches Go API)
+export interface SchemaDiff {
+  type: string;  // add_table, drop_table, add_column, drop_column, etc.
+  table?: string;
   column?: string;
-  oldName?: string;
-  sql?: string;
-  ambiguous?: boolean;
-  reason?: string;
-  requiresMigration?: boolean;
 }
 
-export interface DiffResponse {
-  changes: Change[];
-  requiresMigration: boolean;
-  hasAmbiguous: boolean;
-  migrationSql?: string[];
+// DiffResult is returned by the Diff endpoint (matches Go API)
+export interface DiffResult {
+  changes: SchemaDiff[];
 }
 
-export interface ResolvedRename {
-  type: "table" | "column";
-  table: string;
-  column?: string;
-  oldName: string;
-  isRename: boolean;
+// Merge indicates a drop+add pair that should be treated as a rename (matches Go API)
+export interface Merge {
+  old: number;  // Index of drop statement in changes array
+  new: number;  // Index of add statement in changes array
 }
 
-/**
- * Convert SDK schema format to API format.
- * SDK uses arrays for columns, API uses maps.
- */
-function convertToApiFormat(tables: TableDefinition[]): ApiTable[] {
-  return tables.map((table) => {
-    const columns: Record<string, ApiColumn> = {};
-    const pk: string[] = [];
-
-    for (const col of table.columns) {
-      columns[col.name] = {
-        name: col.name,
-        type: col.type,
-        notNull: col.notNull || undefined,
-        unique: col.unique || undefined,
-        default: col.defaultValue,
-        collate: col.collate || undefined,
-        check: col.check || undefined,
-        generated: col.generated || undefined,
-        references: col.references
-          ? `${col.references.table}.${col.references.column}`
-          : undefined,
-        onDelete: col.references?.onDelete,
-        onUpdate: col.references?.onUpdate,
-      };
-
-      if (col.primaryKey) {
-        pk.push(col.name);
-      }
-    }
-
-    return {
-      name: table.name,
-      pk,
-      columns,
-      indexes: table.indexes.length > 0 ? table.indexes.map((idx) => ({
-        name: idx.name,
-        columns: idx.columns,
-        unique: idx.unique || undefined,
-      })) : undefined,
-      ftsColumns: table.ftsColumns && table.ftsColumns.length > 0 ? table.ftsColumns : undefined,
-    };
-  });
+// MigrateResponse is returned by the migrate endpoint (matches Go API)
+export interface MigrateResponse {
+  jobId: number;
 }
 
+// TemplateWithSchema matches Go API's TemplateWithSchema
 export interface TemplateResponse {
   id: number;
   name: string;
   currentVersion: number;
-  tables: ApiTable[];
   createdAt: string;
   updatedAt: string;
+  schema: Schema;
+}
+
+// PushResponse for creating new templates
+export interface PushResponse {
+  id: number;
+  name: string;
+  currentVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  schema: Schema;
 }
 
 export class ApiClient {
@@ -163,32 +91,28 @@ export class ApiClient {
   }
 
   /**
-   * Push a schema to the server (create or update).
+   * Push a schema to the server (create new template).
+   * Schema package outputs API-compatible format directly.
    */
-  async pushSchema(
-    schema: SchemaDefinition,
-    resolvedRenames?: ResolvedRename[]
-  ): Promise<PushResponse> {
-    const tables = convertToApiFormat(schema.tables);
+  async pushSchema(schema: SchemaDefinition): Promise<PushResponse> {
     return this.request<PushResponse>("POST", "/platform/templates", {
       name: schema.name,
-      tables,
-      resolvedRenames,
+      schema: { tables: schema.tables },
     });
   }
 
   /**
-   * Update an existing template.
+   * Migrate an existing template to a new schema.
+   * Returns a job ID for tracking the async migration.
    */
-  async updateTemplate(
+  async migrateTemplate(
     name: string,
     schema: SchemaDefinition,
-    resolvedRenames?: ResolvedRename[]
-  ): Promise<PushResponse> {
-    const tables = convertToApiFormat(schema.tables);
-    return this.request<PushResponse>("PUT", `/platform/templates/${name}`, {
-      tables,
-      resolvedRenames,
+    merges?: Merge[]
+  ): Promise<MigrateResponse> {
+    return this.request<MigrateResponse>("POST", `/platform/templates/${name}/migrate`, {
+      schema: { tables: schema.tables },
+      merge: merges,
     });
   }
 
@@ -201,16 +125,14 @@ export class ApiClient {
 
   /**
    * Preview changes without applying (diff).
+   * Returns raw changes - ambiguity detection is client-side.
    */
   async diffSchema(
     name: string,
-    schema: SchemaDefinition,
-    resolvedRenames?: ResolvedRename[]
-  ): Promise<DiffResponse> {
-    const tables = convertToApiFormat(schema.tables);
-    return this.request<DiffResponse>("POST", `/platform/templates/${name}/diff`, {
-      tables,
-      resolvedRenames,
+    schema: SchemaDefinition
+  ): Promise<DiffResult> {
+    return this.request<DiffResult>("POST", `/platform/templates/${name}/diff`, {
+      schema: { tables: schema.tables },
     });
   }
 
@@ -229,7 +151,7 @@ export class ApiClient {
   /**
    * Get job status.
    */
-  async getJob(jobId: string): Promise<unknown> {
+  async getJob(jobId: number): Promise<unknown> {
     return this.request<unknown>("GET", `/platform/jobs/${jobId}`);
   }
 }
