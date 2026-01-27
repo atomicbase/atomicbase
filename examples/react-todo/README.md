@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# React Todo Example
 
-## Getting Started
+A Next.js todo application demonstrating Atomicbase with:
+- Google OAuth authentication (Lucia pattern with Arctic + @oslojs)
+- Database-per-user architecture
+- shadcn/ui components
 
-First, run the development server:
+## Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Atomicbase API server running
+2. Google OAuth credentials from [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Copy the environment variables:
+   ```bash
+   cp .env.local.example .env.local
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. Configure your `.env.local`:
+   ```
+   ATOMICBASE_URL=http://localhost:8080
+   ATOMICBASE_API_KEY=your-api-key
+   GOOGLE_CLIENT_ID=your-client-id
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   NEXT_PUBLIC_APP_URL=http://localhost:3000
+   ```
 
-## Learn More
+3. Push the schemas to Atomicbase:
+   ```bash
+   pnpm exec atomicbase push
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. Create the "primary" tenant for auth data:
+   ```bash
+   curl -X POST http://localhost:8080/platform/tenants \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer your-api-key" \
+     -d '{"name": "primary", "template": "primary"}'
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+5. Start the development server:
+   ```bash
+   pnpm dev
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+6. Open http://localhost:3000
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Database Model
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Primary database** (`primary` tenant): Stores users and sessions for authentication
+- **User tenant databases** (`user-{googleId}`): Each user gets their own database for todos
+
+### Schema Templates
+
+**Primary** (`schemas/primary.ts`):
+- `users` - User accounts linked to Google OAuth
+- `sessions` - Session tokens with expiration
+
+**Tenant** (`schemas/tenant.ts`):
+- `todos` - User's todo items
+
+### Auth Flow
+
+1. User clicks "Sign in with Google"
+2. Redirected to Google OAuth consent screen
+3. On callback, user is created (if new) along with their tenant database
+4. Session token is hashed (SHA-256) and stored, cookie set
+5. User redirected to dashboard
+
+## Tech Stack
+
+- Next.js 16 (App Router)
+- Tailwind CSS 4
+- shadcn/ui components
+- Atomicbase SDK
+- Arctic (OAuth)
+- @oslojs/crypto (session hashing)
