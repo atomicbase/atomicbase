@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // ValidationResult contains the results of migration validation.
@@ -16,22 +14,16 @@ type ValidationResult struct {
 }
 
 // ValidateMigrationPlan validates a migration plan before execution.
-// Performs syntax validation, FK reference checks, and optionally data constraint checks.
-func ValidateMigrationPlan(ctx context.Context, plan *MigrationPlan, newSchema Schema, probeDB *sql.DB) (*ValidationResult, error) {
+// Performs FK reference checks and optionally data constraint checks against a probe database.
+// Note: SQL syntax is validated by executing on the first tenant database - if it fails, the migration aborts.
+func ValidateMigrationPlan(ctx context.Context, newSchema Schema, probeDB *sql.DB) (*ValidationResult, error) {
 	result := &ValidationResult{Valid: true}
 
-	// 1. SQL Syntax Validation
-	syntaxErrors, err := validateSyntax(plan.SQL)
-	if err != nil {
-		return nil, fmt.Errorf("syntax validation failed: %w", err)
-	}
-	result.Errors = append(result.Errors, syntaxErrors...)
-
-	// 2. FK Reference Validation
+	// 1. FK Reference Validation (schema-level, no DB needed)
 	fkErrors := validateFKReferences(newSchema)
 	result.Errors = append(result.Errors, fkErrors...)
 
-	// 3. Data-Dependent Checks (if probe database provided)
+	// 2. Data-Dependent Checks (if probe database provided)
 	if probeDB != nil {
 		dataErrors, err := validateDataConstraints(ctx, probeDB, newSchema)
 		if err != nil {
@@ -42,58 +34,6 @@ func ValidateMigrationPlan(ctx context.Context, plan *MigrationPlan, newSchema S
 
 	result.Valid = len(result.Errors) == 0
 	return result, nil
-}
-
-// validateSyntax checks SQL statements for syntax errors using EXPLAIN on an in-memory SQLite.
-func validateSyntax(statements []string) ([]ValidationError, error) {
-	// Create in-memory database for syntax checking
-	memDB, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create memory database: %w", err)
-	}
-	defer memDB.Close()
-
-	// Enable foreign keys for proper parsing
-	if _, err := memDB.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return nil, err
-	}
-
-	var errors []ValidationError
-
-	for _, stmt := range statements {
-		// Skip empty statements
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-
-		// For CREATE/ALTER/DROP statements, try to execute them
-		// For other statements, use EXPLAIN
-		upperStmt := strings.ToUpper(stmt)
-		if strings.HasPrefix(upperStmt, "CREATE") ||
-			strings.HasPrefix(upperStmt, "ALTER") ||
-			strings.HasPrefix(upperStmt, "DROP") {
-			// Execute DDL directly (in memory, safe)
-			if _, err := memDB.Exec(stmt); err != nil {
-				errors = append(errors, ValidationError{
-					Type:    "syntax",
-					Message: fmt.Sprintf("SQL syntax error: %s", err.Error()),
-					SQL:     truncateSQL(stmt, 200),
-				})
-			}
-		} else {
-			// Use EXPLAIN for DML statements
-			if _, err := memDB.Exec("EXPLAIN " + stmt); err != nil {
-				errors = append(errors, ValidationError{
-					Type:    "syntax",
-					Message: fmt.Sprintf("SQL syntax error: %s", err.Error()),
-					SQL:     truncateSQL(stmt, 200),
-				})
-			}
-		}
-	}
-
-	return errors, nil
 }
 
 // validateFKReferences checks that all foreign key references point to tables that exist in the schema.
@@ -293,9 +233,9 @@ func checkCheckConstraint(ctx context.Context, db *sql.DB, table, column, checkE
 	var violationCount int
 	err = db.QueryRowContext(ctx, query).Scan(&violationCount)
 	if err != nil {
-		// Check constraint expression might reference the column name
-		// Try again with explicit column reference
-		return nil, nil // Ignore errors from invalid CHECK expressions
+		// Check constraint expression might be invalid or reference missing columns
+		// Ignore errors - the actual migration will catch this
+		return nil, nil
 	}
 
 	var errors []ValidationError
@@ -428,38 +368,4 @@ func getDefaultValue(colType string) any {
 	default:
 		return ""
 	}
-}
-
-// truncateSQL truncates SQL for error messages.
-func truncateSQL(sql string, maxLen int) string {
-	if len(sql) <= maxLen {
-		return sql
-	}
-	return sql[:maxLen] + "..."
-}
-
-// ValidateSQLSyntax validates a single SQL statement.
-// Useful for validating user-provided SQL before execution.
-func ValidateSQLSyntax(stmt string) error {
-	memDB, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		return err
-	}
-	defer memDB.Close()
-
-	stmt = strings.TrimSpace(stmt)
-	if stmt == "" {
-		return nil
-	}
-
-	upperStmt := strings.ToUpper(stmt)
-	if strings.HasPrefix(upperStmt, "CREATE") ||
-		strings.HasPrefix(upperStmt, "ALTER") ||
-		strings.HasPrefix(upperStmt, "DROP") {
-		_, err = memDB.Exec(stmt)
-	} else {
-		_, err = memDB.Exec("EXPLAIN " + stmt)
-	}
-
-	return err
 }

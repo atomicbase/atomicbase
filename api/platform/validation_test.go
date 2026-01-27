@@ -10,122 +10,6 @@ import (
 )
 
 // =============================================================================
-// validateSyntax Tests
-// Criteria B: Various SQL syntax edge cases
-// =============================================================================
-
-func TestValidateSyntax_ValidDDL(t *testing.T) {
-	statements := []string{
-		"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-		"ALTER TABLE users ADD COLUMN email TEXT",
-		"CREATE INDEX idx_name ON users (name)",
-		"DROP TABLE IF EXISTS users",
-	}
-
-	errors, err := validateSyntax(statements)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(errors) != 0 {
-		t.Errorf("expected no errors for valid DDL, got %d: %v", len(errors), errors)
-	}
-}
-
-func TestValidateSyntax_InvalidDDL(t *testing.T) {
-	statements := []string{
-		"CREATE TABL users (id INTEGER)", // typo: TABL
-	}
-
-	errors, err := validateSyntax(statements)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(errors) != 1 {
-		t.Fatalf("expected 1 error for invalid DDL, got %d", len(errors))
-	}
-	if errors[0].Type != "syntax" {
-		t.Errorf("type = %s, want syntax", errors[0].Type)
-	}
-}
-
-func TestValidateSyntax_ValidDML(t *testing.T) {
-	// First create the table, then validate DML
-	statements := []string{
-		"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-		"INSERT INTO users (id, name) VALUES (1, 'test')",
-		"SELECT * FROM users WHERE id = 1",
-		"UPDATE users SET name = 'updated' WHERE id = 1",
-		"DELETE FROM users WHERE id = 1",
-	}
-
-	errors, err := validateSyntax(statements)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(errors) != 0 {
-		t.Errorf("expected no errors for valid DML, got %d: %v", len(errors), errors)
-	}
-}
-
-func TestValidateSyntax_EmptyStatements(t *testing.T) {
-	statements := []string{
-		"",
-		"   ",
-		"\n\t",
-	}
-
-	errors, err := validateSyntax(statements)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(errors) != 0 {
-		t.Errorf("expected no errors for empty statements, got %d", len(errors))
-	}
-}
-
-func TestValidateSyntax_MultipleErrors(t *testing.T) {
-	statements := []string{
-		"CREATE TABL users (id INTEGER)",  // error 1
-		"CREATE TABLE posts (id INTEGER)", // valid
-		"SELEC * FROM posts",              // error 2
-	}
-
-	errors, err := validateSyntax(statements)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(errors) != 2 {
-		t.Errorf("expected 2 errors, got %d: %v", len(errors), errors)
-	}
-}
-
-func TestValidateSyntax_SQLTruncation(t *testing.T) {
-	// Very long SQL should be truncated in error message
-	longSQL := "CREATE TABL " + strings.Repeat("x", 300)
-	statements := []string{longSQL}
-
-	errors, err := validateSyntax(statements)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(errors) != 1 {
-		t.Fatalf("expected 1 error, got %d", len(errors))
-	}
-	if len(errors[0].SQL) > 210 { // 200 + "..."
-		t.Errorf("SQL should be truncated, got length %d", len(errors[0].SQL))
-	}
-	if !strings.HasSuffix(errors[0].SQL, "...") {
-		t.Error("truncated SQL should end with ...")
-	}
-}
-
-// =============================================================================
 // validateFKReferences Tests
 // Criteria B: FK validation edge cases
 // =============================================================================
@@ -617,11 +501,6 @@ func TestGetDefaultValue(t *testing.T) {
 // =============================================================================
 
 func TestValidateMigrationPlan_AllValid(t *testing.T) {
-	plan := &MigrationPlan{
-		SQL: []string{
-			"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-		},
-	}
 	schema := Schema{Tables: []Table{
 		{Name: "users", Columns: map[string]Col{
 			"id":   {Name: "id", Type: "INTEGER"},
@@ -629,7 +508,7 @@ func TestValidateMigrationPlan_AllValid(t *testing.T) {
 		}},
 	}}
 
-	result, err := ValidateMigrationPlan(context.Background(), plan, schema, nil)
+	result, err := ValidateMigrationPlan(context.Background(), schema, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -639,36 +518,14 @@ func TestValidateMigrationPlan_AllValid(t *testing.T) {
 	}
 }
 
-func TestValidateMigrationPlan_SyntaxError(t *testing.T) {
-	plan := &MigrationPlan{
-		SQL: []string{
-			"CREATE TABL users (id INTEGER)", // syntax error
-		},
-	}
-	schema := Schema{Tables: []Table{}}
-
-	result, err := ValidateMigrationPlan(context.Background(), plan, schema, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.Valid {
-		t.Error("expected invalid result for syntax error")
-	}
-	if len(result.Errors) == 0 {
-		t.Error("expected errors in result")
-	}
-}
-
 func TestValidateMigrationPlan_FKError(t *testing.T) {
-	plan := &MigrationPlan{SQL: []string{}}
 	schema := Schema{Tables: []Table{
 		{Name: "posts", Columns: map[string]Col{
 			"user_id": {Name: "user_id", Type: "INTEGER", References: "users.id"}, // users doesn't exist
 		}},
 	}}
 
-	result, err := ValidateMigrationPlan(context.Background(), plan, schema, nil)
+	result, err := ValidateMigrationPlan(context.Background(), schema, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -697,7 +554,6 @@ func TestValidateMigrationPlan_WithProbeDB(t *testing.T) {
 	`)
 	defer probeDB.Close()
 
-	plan := &MigrationPlan{SQL: []string{}}
 	schema := Schema{Tables: []Table{
 		{Name: "users", Columns: map[string]Col{
 			"id":    {Name: "id", Type: "INTEGER"},
@@ -705,7 +561,7 @@ func TestValidateMigrationPlan_WithProbeDB(t *testing.T) {
 		}},
 	}}
 
-	result, err := ValidateMigrationPlan(context.Background(), plan, schema, probeDB)
+	result, err := ValidateMigrationPlan(context.Background(), schema, probeDB)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -723,37 +579,6 @@ func TestValidateMigrationPlan_WithProbeDB(t *testing.T) {
 	}
 	if !hasUniqueError {
 		t.Error("expected unique constraint error")
-	}
-}
-
-// =============================================================================
-// ValidateSQLSyntax Tests
-// Criteria A: Public helper function
-// =============================================================================
-
-func TestValidateSQLSyntax_Valid(t *testing.T) {
-	err := ValidateSQLSyntax("CREATE TABLE users (id INTEGER PRIMARY KEY)")
-	if err != nil {
-		t.Errorf("unexpected error for valid SQL: %v", err)
-	}
-}
-
-func TestValidateSQLSyntax_Invalid(t *testing.T) {
-	err := ValidateSQLSyntax("CREATE TABL users (id INTEGER)")
-	if err == nil {
-		t.Error("expected error for invalid SQL")
-	}
-}
-
-func TestValidateSQLSyntax_Empty(t *testing.T) {
-	err := ValidateSQLSyntax("")
-	if err != nil {
-		t.Errorf("unexpected error for empty SQL: %v", err)
-	}
-
-	err = ValidateSQLSyntax("   ")
-	if err != nil {
-		t.Errorf("unexpected error for whitespace SQL: %v", err)
 	}
 }
 
