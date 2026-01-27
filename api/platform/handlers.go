@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /platform/tenants/{name}/sync", handleSyncTenant)
 
 	// Jobs
+	mux.HandleFunc("GET /platform/jobs", handleListJobs)
 	mux.HandleFunc("GET /platform/jobs/{id}", handleGetJob)
 	mux.HandleFunc("POST /platform/jobs/{id}/retry", handleRetryJob)
 }
@@ -249,6 +251,58 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// If no tenants, use a transaction to atomically create version and update template
+	if len(tenants) == 0 {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			return
+		}
+		defer tx.Rollback()
+
+		// Insert history record
+		_, err = tx.ExecContext(ctx, fmt.Sprintf(`
+			INSERT INTO %s (template_id, version, schema, checksum, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, TableTemplatesHistory), template.ID, newVersion, schemaJSON, checksum, now)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			return
+		}
+
+		// Update template version
+		_, err = tx.ExecContext(ctx, fmt.Sprintf(`
+			UPDATE %s SET current_version = ?, updated_at = ? WHERE id = ?
+		`, TableTemplates), newVersion, now, template.ID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			return
+		}
+
+		// Commit transaction
+		if err := tx.Commit(); err != nil {
+			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			return
+		}
+
+		// Create migration record (outside transaction, ok if this fails)
+		migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
+		if err != nil {
+			// Migration record is optional for tracking, version update already succeeded
+			log.Printf("Warning: failed to create migration record: %v", err)
+			respondJSON(w, http.StatusAccepted, MigrateResponse{JobID: 0})
+			return
+		}
+
+		state := MigrationStateSuccess
+		_ = UpdateMigrationStatus(ctx, migration.ID, MigrationStatusComplete, &state, 0, 0)
+
+		respondJSON(w, http.StatusAccepted, MigrateResponse{JobID: migration.ID})
+		return
+	}
+
+	// With tenants: insert history first, then start background job
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (template_id, version, schema, checksum, created_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -262,24 +316,6 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
-		return
-	}
-
-	// If no tenants, complete immediately
-	if len(tenants) == 0 {
-		// Update template version directly
-		_, err = conn.ExecContext(ctx, fmt.Sprintf(`
-			UPDATE %s SET current_version = ?, updated_at = ? WHERE id = ?
-		`, TableTemplates), newVersion, now, template.ID)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
-			return
-		}
-
-		state := MigrationStateSuccess
-		_ = UpdateMigrationStatus(ctx, migration.ID, MigrationStatusComplete, &state, 0, 0)
-
-		respondJSON(w, http.StatusAccepted, MigrateResponse{JobID: migration.ID})
 		return
 	}
 
@@ -547,6 +583,19 @@ func handleSyncTenant(w http.ResponseWriter, r *http.Request) {
 // =============================================================================
 // Job Handlers
 // =============================================================================
+
+func handleListJobs(w http.ResponseWriter, r *http.Request) {
+	// Optional status filter
+	status := r.URL.Query().Get("status")
+
+	jobs, err := ListMigrations(r.Context(), status)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, jobs)
+}
 
 func handleGetJob(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")

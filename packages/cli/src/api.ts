@@ -81,6 +81,29 @@ export interface SyncTenantResponse {
   toVersion: number;
 }
 
+// Job/Migration represents a migration job (matches Go API's Migration)
+export interface Job {
+  id: number;
+  templateId: number;
+  fromVersion: number;
+  toVersion: number;
+  sql: string[];
+  status: string;  // pending, running, paused, complete
+  state: string | null;  // null, success, partial, failed
+  totalDbs: number;
+  completedDbs: number;
+  failedDbs: number;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+// RetryJobResponse is returned by the retry endpoint (matches Go API)
+export interface RetryJobResponse {
+  retriedCount: number;
+  jobId: number;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private apiKey?: string;
@@ -183,11 +206,30 @@ export class ApiClient {
     }
   }
 
+  // =========================================================================
+  // Job Management
+  // =========================================================================
+
+  /**
+   * List all jobs (migrations).
+   */
+  async listJobs(status?: string): Promise<Job[]> {
+    const query = status ? `?status=${status}` : "";
+    return this.request<Job[]>("GET", `/platform/jobs${query}`);
+  }
+
   /**
    * Get job status.
    */
-  async getJob(jobId: number): Promise<unknown> {
-    return this.request<unknown>("GET", `/platform/jobs/${jobId}`);
+  async getJob(jobId: number): Promise<Job> {
+    return this.request<Job>("GET", `/platform/jobs/${jobId}`);
+  }
+
+  /**
+   * Retry failed tenants in a job.
+   */
+  async retryJob(jobId: number): Promise<RetryJobResponse> {
+    return this.request<RetryJobResponse>("POST", `/platform/jobs/${jobId}/retry`);
   }
 
   // =========================================================================

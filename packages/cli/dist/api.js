@@ -85,11 +85,27 @@ export class ApiClient {
             throw err;
         }
     }
+    // =========================================================================
+    // Job Management
+    // =========================================================================
+    /**
+     * List all jobs (migrations).
+     */
+    async listJobs(status) {
+        const query = status ? `?status=${status}` : "";
+        return this.request("GET", `/platform/jobs${query}`);
+    }
     /**
      * Get job status.
      */
     async getJob(jobId) {
         return this.request("GET", `/platform/jobs/${jobId}`);
+    }
+    /**
+     * Retry failed tenants in a job.
+     */
+    async retryJob(jobId) {
+        return this.request("POST", `/platform/jobs/${jobId}/retry`);
     }
     // =========================================================================
     // Tenant Management

@@ -106,7 +106,7 @@ type MigrationResult struct {
 func RunMigrationJob(ctx context.Context, jobID int64) {
 	jm := GetJobManager()
 
-	// Get migration details
+	// Get migration details (use request context for initial fetch)
 	migration, err := GetMigration(ctx, jobID)
 	if err != nil {
 		log.Printf("[job %d] failed to get migration: %v", jobID, err)
@@ -124,7 +124,8 @@ func RunMigrationJob(ctx context.Context, jobID int64) {
 		defer jm.wg.Done()
 		defer jm.Unlock(migration.TemplateID)
 
-		runMigrationJobInternal(ctx, migration)
+		// Use background context for the job - it runs independently of HTTP request
+		runMigrationJobInternal(context.Background(), migration)
 	}()
 }
 

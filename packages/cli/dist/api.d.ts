@@ -53,6 +53,25 @@ export interface SyncTenantResponse {
     fromVersion: number;
     toVersion: number;
 }
+export interface Job {
+    id: number;
+    templateId: number;
+    fromVersion: number;
+    toVersion: number;
+    sql: string[];
+    status: string;
+    state: string | null;
+    totalDbs: number;
+    completedDbs: number;
+    failedDbs: number;
+    startedAt?: string;
+    completedAt?: string;
+    createdAt: string;
+}
+export interface RetryJobResponse {
+    retriedCount: number;
+    jobId: number;
+}
 export declare class ApiClient {
     private baseUrl;
     private apiKey?;
@@ -83,9 +102,17 @@ export declare class ApiClient {
      */
     templateExists(name: string): Promise<boolean>;
     /**
+     * List all jobs (migrations).
+     */
+    listJobs(status?: string): Promise<Job[]>;
+    /**
      * Get job status.
      */
-    getJob(jobId: number): Promise<unknown>;
+    getJob(jobId: number): Promise<Job>;
+    /**
+     * Retry failed tenants in a job.
+     */
+    retryJob(jobId: number): Promise<RetryJobResponse>;
     /**
      * List all tenants.
      */

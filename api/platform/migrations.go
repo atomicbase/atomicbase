@@ -687,6 +687,75 @@ func GetMigration(ctx context.Context, id int64) (*Migration, error) {
 	return &m, nil
 }
 
+// ListMigrations retrieves all migrations, optionally filtered by status.
+func ListMigrations(ctx context.Context, status string) ([]Migration, error) {
+	conn, err := getDB()
+	if err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, template_id, from_version, to_version, sql, status, state,
+			   total_dbs, completed_dbs, failed_dbs, started_at, completed_at, created_at
+		FROM %s
+	`, TableMigrations)
+
+	var args []any
+	if status != "" {
+		query += " WHERE status = ?"
+		args = append(args, status)
+	}
+	query += " ORDER BY id DESC"
+
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var migrations []Migration
+	for rows.Next() {
+		var m Migration
+		var sqlJSON string
+		var state sql.NullString
+		var startedAt, completedAt, createdAt sql.NullString
+
+		err = rows.Scan(&m.ID, &m.TemplateID, &m.FromVersion, &m.ToVersion, &sqlJSON,
+			&m.Status, &state, &m.TotalDBs, &m.CompletedDBs, &m.FailedDBs,
+			&startedAt, &completedAt, &createdAt)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := json.Unmarshal([]byte(sqlJSON), &m.SQL); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal SQL: %w", err)
+		}
+
+		if state.Valid {
+			m.State = &state.String
+		}
+		if startedAt.Valid {
+			t, _ := time.Parse(time.RFC3339, startedAt.String)
+			m.StartedAt = &t
+		}
+		if completedAt.Valid {
+			t, _ := time.Parse(time.RFC3339, completedAt.String)
+			m.CompletedAt = &t
+		}
+		if createdAt.Valid {
+			m.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
+		}
+
+		migrations = append(migrations, m)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return migrations, nil
+}
+
 // UpdateMigrationStatus updates the status and counters of a migration.
 func UpdateMigrationStatus(ctx context.Context, id int64, status string, state *string, completedDBs, failedDBs int) error {
 	conn, err := getDB()

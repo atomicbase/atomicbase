@@ -4,6 +4,7 @@ import { pushCommand } from "./commands/push.js";
 import { pullCommand } from "./commands/pull.js";
 import { diffCommand } from "./commands/diff.js";
 import { tenantsCommand } from "./commands/tenant.js";
+import { jobsCommand } from "./commands/jobs.js";
 const program = new Command();
 program
     .name("atomicbase")
@@ -19,5 +20,6 @@ program.addCommand(pushCommand);
 program.addCommand(pullCommand);
 program.addCommand(diffCommand);
 program.addCommand(tenantsCommand);
+program.addCommand(jobsCommand);
 program.parse();
 //# sourceMappingURL=index.js.map
