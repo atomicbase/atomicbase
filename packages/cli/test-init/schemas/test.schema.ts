@@ -3,21 +3,21 @@ import { c, defineSchema, defineTable } from "@atomicbase/schema";
 export default defineSchema("sdk", {
     sdk_test: defineTable({
         id: c.integer().primaryKey(),
-        name: c.text().notNull(),
-        email: c.text().unique().notNull(),
-        age: c.integer().notNull(),
-        status: c.text().notNull(),
+        name: c.text(),
+        email: c.text().unique(),
+        age: c.integer(),
+        status: c.text(),
     }),
     users: defineTable({
         id: c.integer().primaryKey(),
-        name: c.text().notNull(),
-        email: c.text().unique().notNull(),
+        name: c.text(),
+        email: c.text().unique(),
         age: c.integer()
     }),
     posts: defineTable({
         id: c.integer().primaryKey(),
-        title: c.text().notNull(),
-        content: c.text().notNull(),
+        title: c.text(),
+        content: c.text(),
         user_id: c.integer().references('users.id')
     })
 })
