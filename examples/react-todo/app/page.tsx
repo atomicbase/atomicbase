@@ -54,7 +54,7 @@ export default async function Home() {
         <p className="text-sm text-muted-foreground mb-4">
           Built with{" "}
           <a
-            href="https://github.com/joe-ervin05/atomicbase"
+            href="https://github.com/joe-ervin05/atomicbase-2"
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium text-foreground underline underline-offset-4 hover:text-primary"

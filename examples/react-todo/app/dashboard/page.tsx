@@ -57,7 +57,7 @@ export default async function DashboardPage() {
         <p className="text-xs text-muted-foreground">
           Powered by{" "}
           <a
-            href="https://github.com/joe-ervin05/atomicbase"
+            href="https://github.com/joe-ervin05/atomicbase-2"
             target="_blank"
             rel="noopener noreferrer"
             className="underline underline-offset-2 hover:text-foreground"
