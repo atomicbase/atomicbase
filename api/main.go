@@ -67,6 +67,11 @@ func main() {
 		log.Fatalf("Failed to initialize activity logger: %v", err)
 	}
 
+	// Initialize platform database
+	if err := platform.InitDB(); err != nil {
+		log.Fatalf("Failed to initialize platform database: %v", err)
+	}
+
 	app := http.NewServeMux()
 
 	// Register routes from each module

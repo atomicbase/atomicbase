@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { useFormStatus } from "react-dom";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { addTodo } from "@/app/dashboard/actions";
@@ -19,7 +20,11 @@ export function AddTodoForm() {
   const formRef = useRef<HTMLFormElement>(null);
 
   async function handleSubmit(formData: FormData) {
-    await addTodo(formData);
+    const result = await addTodo(formData);
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
     formRef.current?.reset();
   }
 

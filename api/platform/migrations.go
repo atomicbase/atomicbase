@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
 // GenerateMigrationPlan creates a migration plan from schema diff and merges.
@@ -347,7 +349,14 @@ func generateColumnDef(col Col, pk []string) string {
 	}
 
 	if isPK {
-		parts = append(parts, "INTEGER PRIMARY KEY")
+		// Use INTEGER PRIMARY KEY for integer types (enables rowid alias)
+		// Use explicit type + PRIMARY KEY for other types (e.g., TEXT)
+		colType := strings.ToUpper(col.Type)
+		if colType == "INTEGER" || colType == "INT" {
+			parts = append(parts, "INTEGER PRIMARY KEY")
+		} else {
+			parts = append(parts, colType, "PRIMARY KEY")
+		}
 	} else if isCompositePK && strings.ToUpper(col.Type) == "INTEGER" {
 		// Composite PK integer columns get type
 		parts = append(parts, "INTEGER")
@@ -805,9 +814,9 @@ func CreateTemplateVersion(ctx context.Context, templateID int32, version int, s
 		return "", err
 	}
 
-	schemaJSON, err := json.Marshal(schema)
+	schemaJSON, err := tools.EncodeSchema(schema)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal schema: %w", err)
+		return "", err
 	}
 
 	hash := sha256.Sum256(schemaJSON)

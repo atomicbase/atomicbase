@@ -1,9 +1,13 @@
 import { decodeIdToken, OAuth2RequestError } from "arctic";
 import { google } from "@/lib/google";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { primaryDb, client } from "@/lib/db";
-import { createSession, setSessionCookie } from "@/lib/session";
+import { createSession } from "@/lib/session";
 import { eq } from "@atomicbase/sdk";
+
+const SESSION_COOKIE_NAME = "session";
+const SESSION_EXPIRY_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 interface GoogleIdTokenClaims {
   sub: string; // Google user ID
@@ -25,6 +29,12 @@ interface InsertResult {
   last_insert_id: number;
 }
 
+function redirectToError(request: Request, message: string): Response {
+  const url = new URL("/login/error", request.url);
+  url.searchParams.set("message", message);
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -36,12 +46,8 @@ export async function GET(request: Request): Promise<Response> {
 
   // Validate state
   if (!code || !state || !storedState || !codeVerifier || state !== storedState) {
-    return new Response("Invalid OAuth state", { status: 400 });
+    return redirectToError(request, "Invalid login session. Please try again.");
   }
-
-  // Clean up OAuth cookies
-  cookieStore.delete("google_oauth_state");
-  cookieStore.delete("google_oauth_code_verifier");
 
   try {
     // Exchange code for tokens
@@ -54,57 +60,92 @@ export async function GET(request: Request): Promise<Response> {
     const name = claims.name;
     const picture = claims.picture ?? null;
 
-    // Check if user exists
-    const { data: existingUser } = await primaryDb
+    // Check if user exists by email
+    const { data: existingUser, error: fetchError } = await primaryDb
       .from<UserRecord>("users")
       .select()
-      .where(eq("google_id", googleId))
+      .where(eq("email", email))
       .maybeSingle();
+
+    if (fetchError) {
+      console.error("Failed to fetch user:", fetchError);
+      return redirectToError(request, "Failed to check user account. Please try again.");
+    }
 
     let userId: number;
 
     if (existingUser) {
-      // Existing user - update profile info
+      // Existing user - update profile info (including google_id in case it changed)
       userId = existingUser.id;
-      await primaryDb.from("users").update({ email, name, picture }).where(eq("id", userId));
+      const { error: updateError } = await primaryDb
+        .from("users")
+        .update({ google_id: googleId, email, name, picture })
+        .where(eq("id", userId));
+
+      if (updateError) {
+        console.error("Failed to update user:", updateError);
+        return redirectToError(request, "Failed to update user profile. Please try again.");
+      }
     } else {
       // New user - create user and tenant database
       const tenantName = `user-${googleId}`;
 
       // Create user record
-      const { data: insertResult } = await primaryDb.from("users").insert({
+      const { data: insertResult, error: insertError } = await primaryDb.from("users").insert({
         google_id: googleId,
         email,
         name,
         picture,
         tenant_name: tenantName,
+        created_at: new Date().toISOString(),
       });
 
-      if (!insertResult) {
-        throw new Error("Failed to create user");
+      if (insertError || !insertResult) {
+        console.error("Failed to create user:", insertError);
+        return redirectToError(request, "Failed to create user account. Please try again.");
       }
 
       userId = (insertResult as InsertResult).last_insert_id;
 
       // Create tenant database for user's todos
-      await client.tenants.create({
+      const { error: tenantError } = await client.tenants.create({
         name: tenantName,
         template: "tenant",
       });
+
+      if (tenantError) {
+        console.error("Failed to create tenant:", tenantError);
+        return redirectToError(request, "Failed to set up your workspace. Please try again.");
+      }
     }
 
     // Create session
     const { token } = await createSession(userId);
-    await setSessionCookie(token);
 
-    return Response.redirect(new URL("/dashboard", request.url));
+    // Use NextResponse to properly attach cookies to redirect
+    const response = NextResponse.redirect(new URL("/dashboard", request.url));
+
+    // Set session cookie
+    response.cookies.set(SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: SESSION_EXPIRY_MS / 1000,
+    });
+
+    // Clean up OAuth cookies
+    response.cookies.delete("google_oauth_state");
+    response.cookies.delete("google_oauth_code_verifier");
+
+    return response;
   } catch (error) {
     console.error("OAuth callback error:", error);
 
     if (error instanceof OAuth2RequestError) {
-      return new Response("Invalid OAuth code", { status: 400 });
+      return redirectToError(request, "Login authorization failed. Please try again.");
     }
 
-    return new Response("Internal server error", { status: 500 });
+    return redirectToError(request, "An unexpected error occurred. Please try again.");
   }
 }

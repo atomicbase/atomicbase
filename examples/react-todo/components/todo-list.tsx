@@ -1,6 +1,7 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
+import { toast } from "sonner";
 import { TodoItem } from "./todo-item";
 import { toggleTodo, deleteTodo } from "@/app/dashboard/actions";
 
@@ -33,14 +34,20 @@ export function TodoList({ initialTodos }: TodoListProps) {
   const handleToggle = (id: number) => {
     startTransition(async () => {
       updateOptimisticTodos({ type: "toggle", id });
-      await toggleTodo(id);
+      const result = await toggleTodo(id);
+      if (result.error) {
+        toast.error(result.error);
+      }
     });
   };
 
   const handleDelete = (id: number) => {
     startTransition(async () => {
       updateOptimisticTodos({ type: "delete", id });
-      await deleteTodo(id);
+      const result = await deleteTodo(id);
+      if (result.error) {
+        toast.error(result.error);
+      }
     });
   };
 

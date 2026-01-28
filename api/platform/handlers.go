@@ -15,6 +15,11 @@ import (
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
+// encodeSchemaForStorage encodes schema for database storage.
+func encodeSchemaForStorage(schema Schema) ([]byte, error) {
+	return tools.EncodeSchema(schema)
+}
+
 // RegisterRoutes registers all platform API routes.
 func RegisterRoutes(mux *http.ServeMux) {
 	// Templates
@@ -240,7 +245,11 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	// Create new version in history
 	newVersion := template.CurrentVersion + 1
-	schemaJSON, _ := json.Marshal(req.Schema)
+	schemaJSON, err := encodeSchemaForStorage(req.Schema)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		return
+	}
 	hash := sha256.Sum256(schemaJSON)
 	checksum := hex.EncodeToString(hash[:])
 
@@ -285,6 +294,9 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
 			return
 		}
+
+		// Invalidate schema cache so next request loads the new version
+		tools.InvalidateTemplate(template.ID)
 
 		// Create migration record (outside transaction, ok if this fails)
 		migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
@@ -393,7 +405,11 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 
 	// Create new version in history (rollback creates a NEW version with the old schema)
 	newVersion := template.CurrentVersion + 1
-	schemaJSON, _ := json.Marshal(targetVersion.Schema)
+	schemaJSON, err := encodeSchemaForStorage(targetVersion.Schema)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		return
+	}
 	hash := sha256.Sum256(schemaJSON)
 	checksum := hex.EncodeToString(hash[:])
 

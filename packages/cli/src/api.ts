@@ -108,9 +108,9 @@ export class ApiClient {
   private baseUrl: string;
   private apiKey?: string;
 
-  constructor(config: AtomicbaseConfig) {
+  constructor(config: Required<AtomicbaseConfig>) {
     this.baseUrl = config.url.replace(/\/$/, "");
-    this.apiKey = config.apiKey;
+    this.apiKey = config.apiKey || undefined;
   }
 
   private async request<T>(

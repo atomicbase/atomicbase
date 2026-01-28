@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
 // Job processing constants.
@@ -501,5 +503,9 @@ func updateTemplateVersion(ctx context.Context, templateID int32, version int) {
 	`, TableTemplates), version, now, templateID)
 	if err != nil {
 		log.Printf("[template %d] failed to update version to %d: %v", templateID, version, err)
+		return
 	}
+
+	// Invalidate schema cache so next request loads the new version
+	tools.InvalidateTemplate(templateID)
 }

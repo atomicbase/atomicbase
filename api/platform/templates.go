@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
 // Common errors for template operations.
@@ -88,8 +90,8 @@ func GetTemplate(ctx context.Context, name string) (*TemplateWithSchema, error) 
 	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 
-	if err := json.Unmarshal(schemaJSON, &t.Schema); err != nil {
-		return nil, fmt.Errorf("failed to decode schema: %w", err)
+	if err := tools.DecodeSchema(schemaJSON, &t.Schema); err != nil {
+		return nil, err
 	}
 
 	return &t, nil
@@ -103,9 +105,9 @@ func CreateTemplate(ctx context.Context, name string, schema Schema) (*TemplateW
 	}
 
 	// Serialize schema to JSON
-	schemaJSON, err := json.Marshal(schema)
+	schemaJSON, err := tools.EncodeSchema(schema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode schema: %w", err)
+		return nil, err
 	}
 
 	// Calculate checksum
@@ -225,7 +227,13 @@ func DeleteTemplate(ctx context.Context, name string) error {
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Remove from schema cache
+	tools.InvalidateTemplate(templateID)
+	return nil
 }
 
 // DiffTemplate compares a new schema against the current template version.
@@ -286,7 +294,7 @@ func GetTemplateHistory(ctx context.Context, name string) ([]TemplateVersion, er
 		}
 
 		v.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-		if err := json.Unmarshal(schemaJSON, &v.Schema); err != nil {
+		if err := tools.DecodeSchema(schemaJSON, &v.Schema); err != nil {
 			return nil, fmt.Errorf("failed to decode schema for version %d: %w", v.Version, err)
 		}
 
@@ -329,8 +337,8 @@ func GetTemplateVersion(ctx context.Context, templateID int32, version int) (*Te
 	}
 
 	v.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	if err := json.Unmarshal(schemaJSON, &v.Schema); err != nil {
-		return nil, fmt.Errorf("failed to decode schema: %w", err)
+	if err := tools.DecodeSchema(schemaJSON, &v.Schema); err != nil {
+		return nil, err
 	}
 
 	return &v, nil

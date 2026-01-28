@@ -7,41 +7,52 @@ import { getUserTenant } from "@/lib/db";
 import { eq } from "@atomicbase/sdk";
 import { deleteSessionCookie, invalidateSession } from "@/lib/session";
 
-export async function addTodo(formData: FormData) {
+export type ActionResult = { error?: string };
+
+export async function addTodo(formData: FormData): Promise<ActionResult> {
   const { user } = await requireAuth();
   const title = formData.get("title") as string;
 
   if (!title?.trim()) {
-    throw new Error("Title is required");
+    return { error: "Title is required" };
   }
 
   const userTenant = getUserTenant(user.tenantName);
-  await userTenant.from("todos").insert({
+  const { error } = await userTenant.from("todos").insert({
     title: title.trim(),
     completed: 0,
   });
 
+  if (error) {
+    return { error: error.message };
+  }
+
   revalidatePath("/dashboard");
+  return {};
 }
 
-export async function toggleTodo(todoId: number) {
+export async function toggleTodo(todoId: number): Promise<ActionResult> {
   const { user } = await requireAuth();
 
   const userTenant = getUserTenant(user.tenantName);
 
   // Get current state
-  const { data: todo } = await userTenant
+  const { data: todo, error: fetchError } = await userTenant
     .from("todos")
     .select()
     .where(eq("id", todoId))
     .single();
 
+  if (fetchError) {
+    return { error: fetchError.message };
+  }
+
   if (!todo) {
-    throw new Error("Todo not found");
+    return { error: "Todo not found" };
   }
 
   // Toggle completed state
-  await userTenant
+  const { error: updateError } = await userTenant
     .from("todos")
     .update({
       completed: todo.completed ? 0 : 1,
@@ -49,16 +60,26 @@ export async function toggleTodo(todoId: number) {
     })
     .where(eq("id", todoId));
 
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
   revalidatePath("/dashboard");
+  return {};
 }
 
-export async function deleteTodo(todoId: number) {
+export async function deleteTodo(todoId: number): Promise<ActionResult> {
   const { user } = await requireAuth();
 
   const userTenant = getUserTenant(user.tenantName);
-  await userTenant.from("todos").delete().where(eq("id", todoId));
+  const { error } = await userTenant.from("todos").delete().where(eq("id", todoId));
+
+  if (error) {
+    return { error: error.message };
+  }
 
   revalidatePath("/dashboard");
+  return {};
 }
 
 export async function logout() {

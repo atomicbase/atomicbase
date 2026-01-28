@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"sync"
 
 	"github.com/joe-ervin05/atomicbase/config"
@@ -27,15 +26,9 @@ var (
 	dbMu sync.RWMutex
 )
 
-func init() {
-	if err := initDB(); err != nil {
-		log.Fatal(err)
-	}
-}
-
 // InitDB initializes the platform database connection.
-// Should be called during server startup.
-func initDB() error {
+// Must be called during server startup before using platform functions.
+func InitDB() error {
 	dbMu.Lock()
 	defer dbMu.Unlock()
 
@@ -45,7 +38,10 @@ func initDB() error {
 
 	conn, err := sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
 	if err != nil {
-		return err
+		conn, err = sql.Open("sqlite3", "file:atomicdata/tenants.db")
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := conn.Ping(); err != nil {

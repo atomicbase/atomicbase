@@ -60,12 +60,16 @@ export async function createSession(userId: number): Promise<{ token: string; se
   const sessionId = hashToken(token);
   const expiresAt = new Date(Date.now() + SESSION_EXPIRY_MS);
 
-  await primaryDb.from("sessions").insert({
+  const { error } = await primaryDb.from("sessions").insert({
     id: sessionId,
     user_id: userId,
     expires_at: Math.floor(expiresAt.getTime() / 1000),
     created_at: Math.floor(Date.now() / 1000),
   });
+
+  if (error) {
+    throw new Error(`Failed to create session: ${error.message}`);
+  }
 
   return {
     token,

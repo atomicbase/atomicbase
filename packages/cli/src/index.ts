@@ -1,3 +1,4 @@
+import { config as loadEnv } from "dotenv";
 import { Command } from "commander";
 import { initCommand } from "./commands/init.js";
 import { pushCommand } from "./commands/push.js";
@@ -5,6 +6,9 @@ import { pullCommand } from "./commands/pull.js";
 import { diffCommand } from "./commands/diff.js";
 import { tenantsCommand } from "./commands/tenant.js";
 import { jobsCommand } from "./commands/jobs.js";
+
+// Load environment variables from .env file
+loadEnv();
 
 // Re-export config helper for use in atomicbase.config.ts files
 export { defineConfig } from "./config.js";

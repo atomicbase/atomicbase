@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joe-ervin05/atomicbase/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -135,7 +136,7 @@ func insertTestTemplate(t *testing.T, testDB *sql.DB, name string, version int) 
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 	schema := Schema{Tables: []Table{{Name: "users", Pk: []string{"id"}, Columns: map[string]Col{"id": {Name: "id", Type: "INTEGER"}}}}}
-	schemaJSON, _ := json.Marshal(schema)
+	schemaJSON, _ := tools.EncodeSchema(schema)
 
 	result, err := testDB.Exec(`
 		INSERT INTO `+TableTemplates+` (name, current_version, created_at, updated_at)

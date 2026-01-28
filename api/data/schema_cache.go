@@ -1,9 +1,7 @@
 package data
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/gob"
 	"fmt"
 	"log"
 
@@ -59,15 +57,15 @@ func loadCurrentSchemaFromDB(db *sql.DB, templateID int32) (SchemaCache, int, er
 		return SchemaCache{}, 0, err
 	}
 
-	// Deserialize tables
-	buf := bytes.NewBuffer(tablesData)
-	dec := gob.NewDecoder(buf)
-	var tables []Table
-	if err := dec.Decode(&tables); err != nil {
-		return SchemaCache{}, 0, fmt.Errorf("failed to decode schema tables: %w", err)
+	// Deserialize schema from JSON (format: {"tables": [...]})
+	var schema struct {
+		Tables []Table `json:"tables"`
+	}
+	if err := tools.DecodeSchema(tablesData, &schema); err != nil {
+		return SchemaCache{}, 0, err
 	}
 
-	return TablesToSchemaCache(tables), version, nil
+	return TablesToSchemaCache(schema.Tables), version, nil
 }
 
 // TablesToSchemaCache converts a slice of Table definitions to a SchemaCache.
@@ -134,15 +132,15 @@ func PreloadSchemaCache(db *sql.DB) error {
 			return err
 		}
 
-		buf := bytes.NewBuffer(tablesData)
-		dec := gob.NewDecoder(buf)
-		var tables []Table
-		if err := dec.Decode(&tables); err != nil {
+		var schema struct {
+			Tables []Table `json:"tables"`
+		}
+		if err := tools.DecodeSchema(tablesData, &schema); err != nil {
 			log.Printf("Warning: failed to decode schema cache for template %d version %d: %v", templateID, version, err)
 			continue
 		}
 
-		tools.SetTemplate(templateID, version, TablesToSchemaCache(tables))
+		tools.SetTemplate(templateID, version, TablesToSchemaCache(schema.Tables))
 	}
 
 	return rows.Err()

@@ -24,7 +24,9 @@
   },
   "dependencies": {
     "@atomicbase/schema": "workspace:*",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "jiti": "^2.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
