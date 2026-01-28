@@ -1,0 +1,13 @@
+{
+  "name": "atomicbase",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:sdk": "pnpm --filter @atomicbase/sdk build",
+    "build:schema": "pnpm --filter @atomicbase/schema build",
+    "build:cli": "pnpm --filter @atomicbase/cli build",
+    "build:react-todo": "pnpm --filter @atomicbase/sdk build && pnpm --filter @atomicbase/schema build && pnpm --filter react-todo build",
+    "dev:sdk": "pnpm --filter @atomicbase/sdk dev",
+    "dev:react-todo": "pnpm --filter react-todo dev"
+  }
+}

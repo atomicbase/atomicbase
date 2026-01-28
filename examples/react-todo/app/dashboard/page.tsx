@@ -31,8 +31,8 @@ export default async function DashboardPage() {
     .orderBy("created_at", "desc");
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-8">
-      <div className="mx-auto max-w-2xl">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-8 flex flex-col">
+      <div className="mx-auto max-w-2xl flex-1">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold">My Todos</h1>
@@ -52,6 +52,20 @@ export default async function DashboardPage() {
 
         <TodoList initialTodos={todos ?? []} />
       </div>
+
+      <footer className="mt-12 text-center">
+        <p className="text-xs text-muted-foreground">
+          Powered by{" "}
+          <a
+            href="https://github.com/joe-ervin05/atomicbase"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            Atomicbase
+          </a>
+        </p>
+      </footer>
     </div>
   );
 }

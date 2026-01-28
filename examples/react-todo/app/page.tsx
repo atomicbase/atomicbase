@@ -17,10 +17,10 @@ export default async function Home() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-8">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Todo App</CardTitle>
+          <CardTitle className="text-2xl">Multi-Tenant Todo App</CardTitle>
           <CardDescription>Sign in to manage your todos</CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
@@ -49,6 +49,34 @@ export default async function Home() {
           </Button>
         </CardContent>
       </Card>
+
+      <div className="mt-12 max-w-md text-center">
+        <p className="text-sm text-muted-foreground mb-4">
+          Built with{" "}
+          <a
+            href="https://github.com/joe-ervin05/atomicbase"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground underline underline-offset-4 hover:text-primary"
+          >
+            Atomicbase
+          </a>
+        </p>
+        <div className="flex flex-wrap justify-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            Database-per-user
+          </span>
+          <span className="flex items-center gap-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+            SQLite + Turso
+          </span>
+          <span className="flex items-center gap-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-purple-500" />
+            Schema templates
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
