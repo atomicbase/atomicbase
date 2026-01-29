@@ -20,6 +20,14 @@ program
   .name("atomicbase")
   .description("CLI for Atomicbase schema management")
   .version("0.1.0")
+  .option("-k, --insecure", "Skip SSL certificate verification")
+  .hook("preAction", (thisCommand) => {
+    // Set env var before config loads so all commands pick it up
+    if (thisCommand.opts().insecure) {
+      process.env.ATOMICBASE_INSECURE = "1";
+      console.log("Warning: SSL certificate verification disabled\n");
+    }
+  })
   .action(() => {
     // Show help when no command is provided
     program.help();

@@ -44,6 +44,15 @@ export interface MigrateResponse {
   jobId: number;
 }
 
+// TemplateListItem matches Go API's Template (list response without schema)
+export interface TemplateListItem {
+  id: number;
+  name: string;
+  currentVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // TemplateWithSchema matches Go API's TemplateWithSchema
 export interface TemplateResponse {
   id: number;
@@ -107,10 +116,12 @@ export interface RetryJobResponse {
 export class ApiClient {
   private baseUrl: string;
   private apiKey?: string;
+  private insecure: boolean;
 
   constructor(config: Required<AtomicbaseConfig>) {
     this.baseUrl = config.url.replace(/\/$/, "");
     this.apiKey = config.apiKey || undefined;
+    this.insecure = config.insecure ?? false;
   }
 
   private async request<T>(
@@ -126,11 +137,29 @@ export class ApiClient {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    // Temporarily disable SSL verification if insecure mode is enabled
+    const originalTlsSetting = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    if (this.insecure) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } finally {
+      // Restore original setting
+      if (this.insecure) {
+        if (originalTlsSetting === undefined) {
+          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        } else {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalTlsSetting;
+        }
+      }
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -175,6 +204,13 @@ export class ApiClient {
    */
   async getTemplate(name: string): Promise<TemplateResponse> {
     return this.request<TemplateResponse>("GET", `/platform/templates/${name}`);
+  }
+
+  /**
+   * List all templates.
+   */
+  async listTemplates(): Promise<TemplateListItem[]> {
+    return this.request<TemplateListItem[]>("GET", "/platform/templates");
   }
 
   /**

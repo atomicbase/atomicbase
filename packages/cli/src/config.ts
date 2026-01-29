@@ -7,6 +7,7 @@ export interface AtomicbaseConfig {
   apiKey?: string;
   schemas: string;
   output?: string;
+  insecure?: boolean;
 }
 
 const DEFAULT_CONFIG: Required<AtomicbaseConfig> = {
@@ -14,6 +15,7 @@ const DEFAULT_CONFIG: Required<AtomicbaseConfig> = {
   apiKey: "",
   schemas: "./schemas",
   output: "./schemas",
+  insecure: false,
 };
 
 const CONFIG_FILES = [
@@ -47,11 +49,17 @@ export async function loadConfig(): Promise<Required<AtomicbaseConfig>> {
   }
 
   // Merge: defaults < file config < env vars
+  const insecureEnv = process.env.ATOMICBASE_INSECURE;
+  const insecure = insecureEnv !== undefined
+    ? insecureEnv === "1" || insecureEnv.toLowerCase() === "true"
+    : fileConfig.insecure ?? DEFAULT_CONFIG.insecure;
+
   return {
     url: process.env.ATOMICBASE_URL ?? fileConfig.url ?? DEFAULT_CONFIG.url,
     apiKey: process.env.ATOMICBASE_API_KEY ?? fileConfig.apiKey ?? DEFAULT_CONFIG.apiKey,
     schemas: fileConfig.schemas ?? DEFAULT_CONFIG.schemas,
     output: fileConfig.output ?? DEFAULT_CONFIG.output,
+    insecure,
   };
 }
 

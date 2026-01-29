@@ -1,9 +1,23 @@
 import { Command } from "commander";
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { resolve, dirname } from "node:path";
 import { loadConfig } from "../config.js";
 import { ApiClient, type TemplateResponse } from "../api.js";
 import type { ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/schema";
+
+/**
+ * Prompt user for confirmation.
+ */
+async function confirm(message: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`${message} (y/N) `, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === "y");
+    });
+  });
+}
 
 /**
  * Internal table format for code generation (columns as array with primaryKey flag).
@@ -163,37 +177,67 @@ function generateColumnCode(col: GeneratorColumn): string {
 }
 
 export const pullCommand = new Command("pull")
-  .description("Pull a schema from the server")
-  .argument("<name>", "Template name to pull")
-  .option("-o, --output <file>", "Output file path")
-  .action(async (name: string, options: { output?: string }) => {
+  .description("Pull all schemas from the server")
+  .option("-y, --yes", "Skip confirmation prompt")
+  .action(async (options: { yes?: boolean }) => {
     const config = await loadConfig();
     const api = new ApiClient(config);
 
-    console.log(`Pulling schema "${name}"...`);
+    console.log("Fetching templates from server...");
 
     try {
-      const template = await api.getTemplate(name);
+      const templates = await api.listTemplates();
 
-      // Generate schema code
-      const code = generateSchemaCode(name, convertFromApiFormat(template.schema.tables));
-
-      // Determine output path
-      const outputPath = options.output ?? resolve(config.schemas, `${name}.schema.ts`);
-      const outputDir = dirname(outputPath);
-
-      // Ensure directory exists
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
+      if (templates.length === 0) {
+        console.log("No templates found on server.");
+        return;
       }
 
-      // Write file
-      writeFileSync(outputPath, code);
-      console.log(`✓ Wrote ${outputPath}`);
-      console.log(`  Version: ${template.currentVersion}`);
-      console.log(`  Tables: ${template.schema.tables.length}`);
+      // Show what will be written
+      console.log(`\nFound ${templates.length} template(s):`);
+      for (const t of templates) {
+        const outputPath = resolve(config.schemas, `${t.name}.schema.ts`);
+        console.log(`  - ${t.name} (v${t.currentVersion}) -> ${outputPath}`);
+      }
+
+      // Confirm unless --yes flag is set
+      if (!options.yes) {
+        console.log("");
+        const confirmed = await confirm("This will overwrite local schema files. Continue?");
+        if (!confirmed) {
+          console.log("Aborted.");
+          return;
+        }
+      }
+
+      // Ensure schemas directory exists
+      const schemasDir = config.schemas;
+      if (!existsSync(schemasDir)) {
+        mkdirSync(schemasDir, { recursive: true });
+      }
+
+      // Pull each template
+      console.log("");
+      let successCount = 0;
+      for (const templateInfo of templates) {
+        // Fetch full template with schema
+        const template = await api.getTemplate(templateInfo.name);
+        const code = generateSchemaCode(template.name, convertFromApiFormat(template.schema.tables));
+        const outputPath = resolve(schemasDir, `${template.name}.schema.ts`);
+        const outputDir = dirname(outputPath);
+
+        if (!existsSync(outputDir)) {
+          mkdirSync(outputDir, { recursive: true });
+        }
+
+        writeFileSync(outputPath, code);
+        console.log(`  Wrote ${template.name}.schema.ts (v${template.currentVersion}, ${template.schema.tables.length} tables)`);
+        successCount++;
+      }
+
+      console.log(`\nPulled ${successCount} schema(s) to ${schemasDir}`);
     } catch (err) {
-      console.error(`✗ Failed to pull "${name}":`, err);
+      console.error("Failed to pull schemas:", err);
       process.exit(1);
     }
   });
