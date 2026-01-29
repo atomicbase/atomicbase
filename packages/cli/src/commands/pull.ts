@@ -1,10 +1,11 @@
 import { Command } from "commander";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { resolve, dirname } from "node:path";
 import { loadConfig } from "../config.js";
+import { loadAllSchemas } from "../schema/parser.js";
 import { ApiClient, type TemplateResponse } from "../api.js";
-import type { ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/schema";
+import type { ColumnDefinition, ForeignKeyAction, Collation, SchemaDefinition } from "@atomicbase/schema";
 
 /**
  * Prompt user for confirmation.
@@ -176,34 +177,112 @@ function generateColumnCode(col: GeneratorColumn): string {
   return code;
 }
 
+interface PullOperation {
+  type: "add" | "update";
+  name: string;
+  version: number;
+  tableCount: number;
+  code: string;
+  outputPath: string;
+}
+
 export const pullCommand = new Command("pull")
-  .description("Pull all schemas from the server")
+  .description("Pull schemas from the server")
   .option("-y, --yes", "Skip confirmation prompt")
   .action(async (options: { yes?: boolean }) => {
     const config = await loadConfig();
     const api = new ApiClient(config);
 
-    console.log("Fetching templates from server...");
+    console.log("Fetching templates...");
 
     try {
-      const templates = await api.listTemplates();
+      // Load local templates
+      let localSchemas: SchemaDefinition[] = [];
+      try {
+        localSchemas = await loadAllSchemas(config.schemas);
+      } catch {
+        // No local schemas or schemas directory doesn't exist - that's fine
+      }
+      const localTemplateNames = new Set(localSchemas.map((s) => s.name));
 
-      if (templates.length === 0) {
+      // Fetch cloud templates
+      const cloudTemplates = await api.listTemplates();
+
+      if (cloudTemplates.length === 0) {
         console.log("No templates found on server.");
         return;
       }
 
-      // Show what will be written
-      console.log(`\nFound ${templates.length} template(s):`);
-      for (const t of templates) {
-        const outputPath = resolve(config.schemas, `${t.name}.schema.ts`);
-        console.log(`  - ${t.name} (v${t.currentVersion}) -> ${outputPath}`);
+      // Determine operations (add vs update vs skip)
+      const operations: PullOperation[] = [];
+
+      for (const templateInfo of cloudTemplates) {
+        const template = await api.getTemplate(templateInfo.name);
+        const code = generateSchemaCode(template.name, convertFromApiFormat(template.schema.tables));
+        const outputPath = resolve(config.schemas, `${template.name}.schema.ts`);
+
+        if (!localTemplateNames.has(template.name)) {
+          // Template exists in cloud but not locally - add
+          operations.push({
+            type: "add",
+            name: template.name,
+            version: template.currentVersion,
+            tableCount: template.schema.tables.length,
+            code,
+            outputPath,
+          });
+        } else {
+          // Template exists both locally and in cloud - check for diff
+          let existingCode = "";
+          if (existsSync(outputPath)) {
+            existingCode = readFileSync(outputPath, "utf-8");
+          }
+
+          if (existingCode !== code) {
+            // Different content - update
+            operations.push({
+              type: "update",
+              name: template.name,
+              version: template.currentVersion,
+              tableCount: template.schema.tables.length,
+              code,
+              outputPath,
+            });
+          }
+          // If content is the same, skip (do nothing)
+        }
+      }
+
+      if (operations.length === 0) {
+        console.log("All local schemas are up to date.");
+        return;
+      }
+
+      // Show operations
+      const adds = operations.filter((op) => op.type === "add");
+      const updates = operations.filter((op) => op.type === "update");
+
+      console.log("");
+
+      if (adds.length > 0) {
+        console.log(`Templates to add (${adds.length}):`);
+        for (const op of adds) {
+          console.log(`  + ${op.name} (v${op.version}, ${op.tableCount} tables)`);
+        }
+      }
+
+      if (updates.length > 0) {
+        if (adds.length > 0) console.log("");
+        console.log(`Templates to update (${updates.length}):`);
+        for (const op of updates) {
+          console.log(`  ~ ${op.name} (v${op.version}, ${op.tableCount} tables)`);
+        }
       }
 
       // Confirm unless --yes flag is set
       if (!options.yes) {
         console.log("");
-        const confirmed = await confirm("This will overwrite local schema files. Continue?");
+        const confirmed = await confirm("Apply these changes?");
         if (!confirmed) {
           console.log("Aborted.");
           return;
@@ -216,26 +295,20 @@ export const pullCommand = new Command("pull")
         mkdirSync(schemasDir, { recursive: true });
       }
 
-      // Pull each template
+      // Apply operations
       console.log("");
-      let successCount = 0;
-      for (const templateInfo of templates) {
-        // Fetch full template with schema
-        const template = await api.getTemplate(templateInfo.name);
-        const code = generateSchemaCode(template.name, convertFromApiFormat(template.schema.tables));
-        const outputPath = resolve(schemasDir, `${template.name}.schema.ts`);
-        const outputDir = dirname(outputPath);
-
+      for (const op of operations) {
+        const outputDir = dirname(op.outputPath);
         if (!existsSync(outputDir)) {
           mkdirSync(outputDir, { recursive: true });
         }
 
-        writeFileSync(outputPath, code);
-        console.log(`  Wrote ${template.name}.schema.ts (v${template.currentVersion}, ${template.schema.tables.length} tables)`);
-        successCount++;
+        writeFileSync(op.outputPath, op.code);
+        const action = op.type === "add" ? "Added" : "Updated";
+        console.log(`  ${action} ${op.name}.schema.ts`);
       }
 
-      console.log(`\nPulled ${successCount} schema(s) to ${schemasDir}`);
+      console.log(`\nPulled ${operations.length} schema(s) to ${schemasDir}`);
     } catch (err) {
       console.error("Failed to pull schemas:", err);
       process.exit(1);

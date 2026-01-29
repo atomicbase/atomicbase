@@ -177,7 +177,7 @@ async function pushSingleSchema(api: ApiClient, schema: SchemaDefinition): Promi
   // Apply the migration
   const result = await api.migrateTemplate(schema.name, schema, merges);
   console.log(`✓ Migration started (job #${result.jobId})`);
-  console.log(`  Check status: atomicbase job ${result.jobId}`);
+  console.log(`  Check status: atomicbase jobs ${result.jobId}`);
 }
 
 /**

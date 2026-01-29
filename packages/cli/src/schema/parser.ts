@@ -1,7 +1,10 @@
 import { existsSync, readdirSync } from "node:fs";
 import { resolve, basename } from "node:path";
-import { pathToFileURL } from "node:url";
+import { createJiti } from "jiti";
 import type { SchemaDefinition } from "@atomicbase/schema";
+
+// Create jiti instance for loading TypeScript schema files
+const jiti = createJiti(import.meta.url);
 
 /**
  * Load a schema from a .schema.ts file.
@@ -14,8 +17,8 @@ export async function loadSchema(filePath: string): Promise<SchemaDefinition> {
   }
 
   try {
-    const module = await import(pathToFileURL(absolutePath).href);
-    const schema = module.default;
+    const module = await jiti.import(absolutePath);
+    const schema = (module as { default?: SchemaDefinition }).default ?? module as SchemaDefinition;
 
     if (schema === undefined) {
       const fileName = basename(filePath);
