@@ -4,16 +4,18 @@ Manage a million databases like it's one.
 
 Atomicbase is the multi-tenant development platform. Built on SQLite and Turso, packaged as a single Go executable.
 
+## **Atomicbase is in experimental preview.** There are many known and unknown bugs. APIs are likely to change.
+
 ## Status
 
 | Component          | Status         |
 | ------------------ | -------------- |
 | Data API           | Beta           |
-| Platform API       | Beta           |
 | TypeScript SDK     | Beta           |
-| Schema Templates   | Beta           |
+| Platform API       | Experimental   |
+| Schema Templates   | Experimental   |
 | Schema Package     | Beta           |
-| CLI                | Beta           |
+| CLI                | Experimental   |
 | Authentication     | Planned        |
 | File Storage       | Planned        |
 | Realtime           | Planned        |
