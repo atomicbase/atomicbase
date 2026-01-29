@@ -1,6 +1,25 @@
 import { Command } from "commander";
+import { createInterface } from "readline";
 import { loadConfig } from "../config.js";
 import { ApiClient, ApiError } from "../api.js";
+
+/**
+ * Prompt user with a yes/no question.
+ */
+async function confirm(question: string): Promise<boolean> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`${question} [Y/n] `, (answer) => {
+      rl.close();
+      const normalized = answer.trim().toLowerCase();
+      resolve(normalized === "" || normalized === "y" || normalized === "yes");
+    });
+  });
+}
 
 /**
  * Format a date string for display.
@@ -130,9 +149,13 @@ async function deleteTenant(name: string, force: boolean): Promise<void> {
       throw err;
     }
 
-    console.log(`Are you sure you want to delete tenant "${name}"?`);
-    console.log("This action cannot be undone. Use --force to skip this prompt.");
-    process.exit(1);
+    const confirmed = await confirm(
+      `Are you sure you want to delete tenant "${name}"? This action cannot be undone.`
+    );
+    if (!confirmed) {
+      console.log("Aborted.");
+      process.exit(0);
+    }
   }
 
   console.log(`Deleting tenant "${name}"...`);

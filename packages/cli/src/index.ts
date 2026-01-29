@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { config as loadEnv } from "dotenv";
 import { Command } from "commander";
 import { initCommand } from "./commands/init.js";
@@ -7,8 +8,10 @@ import { diffCommand } from "./commands/diff.js";
 import { tenantsCommand } from "./commands/tenant.js";
 import { jobsCommand } from "./commands/jobs.js";
 
-// Load environment variables from .env file
-loadEnv();
+// Load environment variables from .env file in the user's working directory
+// INIT_CWD is set by npm/npx to the original directory where the command was run
+const workingDir = process.env.INIT_CWD || process.cwd();
+loadEnv({ path: resolve(workingDir, ".env") });
 
 // Re-export config helper for use in atomicbase.config.ts files
 export { defineConfig } from "./config.js";

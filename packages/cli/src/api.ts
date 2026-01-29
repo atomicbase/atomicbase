@@ -170,7 +170,12 @@ export class ApiClient {
       );
     }
 
-    return response.json();
+    // Handle empty responses (e.g., 204 No Content from DELETE)
+    const text = await response.text();
+    if (!text) {
+      return undefined as T;
+    }
+    return JSON.parse(text);
   }
 
   /**

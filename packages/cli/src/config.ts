@@ -27,6 +27,10 @@ const CONFIG_FILES = [
 // Create jiti instance for loading TypeScript config files
 const jiti = createJiti(import.meta.url);
 
+// Get the user's actual working directory
+// INIT_CWD is set by npm/npx to the original directory where the command was run
+const workingDir = process.env.INIT_CWD || process.cwd();
+
 /**
  * Load configuration from file and environment variables.
  * Priority: env vars > config file > defaults
@@ -36,7 +40,7 @@ export async function loadConfig(): Promise<Required<AtomicbaseConfig>> {
 
   // Try to load config file using jiti (handles TypeScript natively)
   for (const filename of CONFIG_FILES) {
-    const configPath = resolve(process.cwd(), filename);
+    const configPath = resolve(workingDir, filename);
     if (existsSync(configPath)) {
       try {
         const module = await jiti.import(configPath);
