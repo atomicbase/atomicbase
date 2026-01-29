@@ -6,7 +6,6 @@ export interface AtomicbaseConfig {
   url?: string;
   apiKey?: string;
   schemas: string;
-  output?: string;
   insecure?: boolean;
 }
 
@@ -14,7 +13,6 @@ const DEFAULT_CONFIG: Required<AtomicbaseConfig> = {
   url: "http://localhost:8080",
   apiKey: "",
   schemas: "./schemas",
-  output: "./schemas",
   insecure: false,
 };
 
@@ -62,7 +60,6 @@ export async function loadConfig(): Promise<Required<AtomicbaseConfig>> {
     url: process.env.ATOMICBASE_URL ?? fileConfig.url ?? DEFAULT_CONFIG.url,
     apiKey: process.env.ATOMICBASE_API_KEY ?? fileConfig.apiKey ?? DEFAULT_CONFIG.apiKey,
     schemas: fileConfig.schemas ?? DEFAULT_CONFIG.schemas,
-    output: fileConfig.output ?? DEFAULT_CONFIG.output,
     insecure,
   };
 }
