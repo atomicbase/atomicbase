@@ -136,7 +136,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
 ## License
 
-[Apache-2.0](./LICENSE)
+Atomicbase is [fair-source](https://fair.io) licensed under [FSL-1.1-MIT](./LICENSE). You can use, modify, and self-host the software freely for your own applications. The only restriction is offering Atomicbase as a competing hosted service. The license converts to MIT after two years.
 
 ## Links
 
