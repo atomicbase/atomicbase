@@ -238,7 +238,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		if auth == "" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "missing Authorization header"})
+			json.NewEncoder(w).Encode(map[string]string{"code": "UNAUTHORIZED", "message": "missing Authorization header"})
 			return
 		}
 
@@ -247,7 +247,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid Authorization header format"})
+			json.NewEncoder(w).Encode(map[string]string{"code": "UNAUTHORIZED", "message": "invalid Authorization header format"})
 			return
 		}
 
@@ -255,7 +255,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		if subtle.ConstantTimeCompare([]byte(parts[1]), []byte(apiKey)) != 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid API key"})
+			json.NewEncoder(w).Encode(map[string]string{"code": "UNAUTHORIZED", "message": "invalid API key"})
 			return
 		}
 

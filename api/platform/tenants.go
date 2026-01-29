@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/joe-ervin05/atomicbase/config"
@@ -130,11 +131,26 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 	}
 
 	// Initialize database with template schema
+	// Retry with backoff since newly created Turso databases may not be immediately available
 	migrationSQL := generateSchemaSQL(template.Schema)
-	if err := BatchExecute(ctx, name, token, migrationSQL); err != nil {
+	var schemaErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		schemaErr = BatchExecute(ctx, name, token, migrationSQL)
+		if schemaErr == nil {
+			break
+		}
+		// Only retry on 404 errors (database not yet available)
+		if !strings.Contains(schemaErr.Error(), "404") {
+			break
+		}
+	}
+	if schemaErr != nil {
 		// Try to clean up
 		_ = tursoDeleteDatabase(ctx, name)
-		return nil, fmt.Errorf("failed to initialize database schema: %w", err)
+		return nil, fmt.Errorf("failed to initialize database schema: %w", schemaErr)
 	}
 
 	// Insert tenant record
@@ -568,10 +584,27 @@ func tursoCreateDatabase(ctx context.Context, name string) error {
 	}
 	defer resp.Body.Close()
 
+	// Read and parse response body
+	var respBody bytes.Buffer
+	respBody.ReadFrom(resp.Body)
+
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
-		var errBody bytes.Buffer
-		errBody.ReadFrom(resp.Body)
-		return fmt.Errorf("turso API error: %s - %s", resp.Status, errBody.String())
+		return fmt.Errorf("turso API error: %s - %s", resp.Status, respBody.String())
+	}
+
+	// Parse response to verify database was created
+	var createResp struct {
+		Database struct {
+			Name     string `json:"Name"`
+			Hostname string `json:"Hostname"`
+		} `json:"database"`
+	}
+	if err := json.Unmarshal(respBody.Bytes(), &createResp); err != nil {
+		return fmt.Errorf("failed to parse turso response: %w (body: %s)", err, respBody.String())
+	}
+
+	if createResp.Database.Name == "" {
+		return fmt.Errorf("turso returned success but no database name (body: %s)", respBody.String())
 	}
 
 	return nil
