@@ -15,7 +15,7 @@ Atomicbase is the multi-tenant development platform. Built on SQLite and Turso, 
 | Platform API       | Experimental   |
 | Schema Templates   | Experimental   |
 | Schema Package     | Beta           |
-| CLI                | Experimental   |
+| CLI                | Beta           |
 | Authentication     | Planned        |
 | File Storage       | Planned        |
 | Realtime           | Planned        |
