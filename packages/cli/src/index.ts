@@ -5,6 +5,7 @@ import { initCommand } from "./commands/init.js";
 import { pushCommand } from "./commands/push.js";
 import { pullCommand } from "./commands/pull.js";
 import { diffCommand } from "./commands/diff.js";
+import { templatesCommand } from "./commands/templates.js";
 import { tenantsCommand } from "./commands/tenant.js";
 import { jobsCommand } from "./commands/jobs.js";
 
@@ -41,6 +42,7 @@ program.addCommand(initCommand);
 program.addCommand(pushCommand);
 program.addCommand(pullCommand);
 program.addCommand(diffCommand);
+program.addCommand(templatesCommand);
 program.addCommand(tenantsCommand);
 program.addCommand(jobsCommand);
 

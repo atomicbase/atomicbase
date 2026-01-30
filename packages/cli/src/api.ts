@@ -73,6 +73,21 @@ export interface PushResponse {
   schema: Schema;
 }
 
+// TemplateVersion represents a version in template history (matches Go API)
+export interface TemplateVersion {
+  id: number;
+  templateId: number;
+  version: number;
+  schema: Schema;
+  checksum: string;
+  createdAt: string;
+}
+
+// RollbackResponse is returned by the rollback endpoint (matches Go API)
+export interface RollbackResponse {
+  jobId: number;
+}
+
 // Tenant represents a tenant database (matches Go API)
 export interface Tenant {
   id: number;
@@ -245,6 +260,31 @@ export class ApiClient {
       }
       throw err;
     }
+  }
+
+  /**
+   * Delete a template.
+   * Only succeeds if no tenants are using it.
+   */
+  async deleteTemplate(name: string): Promise<void> {
+    await this.request<void>("DELETE", `/platform/templates/${name}`);
+  }
+
+  /**
+   * Get version history for a template.
+   */
+  async getTemplateHistory(name: string): Promise<TemplateVersion[]> {
+    return this.request<TemplateVersion[]>("GET", `/platform/templates/${name}/history`);
+  }
+
+  /**
+   * Rollback a template to a previous version.
+   * Returns a job ID for tracking the async migration.
+   */
+  async rollbackTemplate(name: string, version: number): Promise<RollbackResponse> {
+    return this.request<RollbackResponse>("POST", `/platform/templates/${name}/rollback`, {
+      version,
+    });
   }
 
   // =========================================================================
