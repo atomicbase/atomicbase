@@ -185,7 +185,7 @@ type MigrateRequest struct {
 
 // MigrateResponse is the response for POST /platform/templates/{name}/migrate.
 type MigrateResponse struct {
-	JobID int64 `json:"jobId"`
+	MigrationID int64 `json:"migrationId"`
 }
 
 // RollbackRequest is the request body for POST /platform/templates/{name}/rollback.
@@ -195,7 +195,7 @@ type RollbackRequest struct {
 
 // RollbackResponse is the response for POST /platform/templates/{name}/rollback.
 type RollbackResponse struct {
-	JobID int64 `json:"jobId"`
+	MigrationID int64 `json:"migrationId"`
 }
 
 // CreateTenantRequest is the request body for POST /platform/tenants.
@@ -210,8 +210,8 @@ type SyncTenantResponse struct {
 	ToVersion   int `json:"toVersion"`
 }
 
-// RetryJobResponse is the response for POST /platform/jobs/{id}/retry.
-type RetryJobResponse struct {
+// RetryMigrationResponse is the response for POST /platform/migrations/{id}/retry.
+type RetryMigrationResponse struct {
 	RetriedCount int   `json:"retriedCount"`
-	JobID        int64 `json:"jobId"`
+	MigrationID  int64 `json:"migrationId"`
 }

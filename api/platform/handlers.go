@@ -39,10 +39,10 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /platform/tenants/{name}", handleDeleteTenant)
 	mux.HandleFunc("POST /platform/tenants/{name}/sync", handleSyncTenant)
 
-	// Jobs
-	mux.HandleFunc("GET /platform/jobs", handleListJobs)
-	mux.HandleFunc("GET /platform/jobs/{id}", handleGetJob)
-	mux.HandleFunc("POST /platform/jobs/{id}/retry", handleRetryJob)
+	// Migrations
+	mux.HandleFunc("GET /platform/migrations", handleListMigrations)
+	mux.HandleFunc("GET /platform/migrations/{id}", handleGetMigration)
+	mux.HandleFunc("POST /platform/migrations/{id}/retry", handleRetryMigration)
 }
 
 // =============================================================================
@@ -303,14 +303,14 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// Migration record is optional for tracking, version update already succeeded
 			log.Printf("Warning: failed to create migration record: %v", err)
-			respondJSON(w, http.StatusAccepted, MigrateResponse{JobID: 0})
+			respondJSON(w, http.StatusAccepted, MigrateResponse{MigrationID: 0})
 			return
 		}
 
 		state := MigrationStateSuccess
 		_ = UpdateMigrationStatus(ctx, migration.ID, MigrationStatusComplete, &state, 0, 0)
 
-		respondJSON(w, http.StatusAccepted, MigrateResponse{JobID: migration.ID})
+		respondJSON(w, http.StatusAccepted, MigrateResponse{MigrationID: migration.ID})
 		return
 	}
 
@@ -334,7 +334,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	// Start background migration job
 	RunMigrationJob(ctx, migration.ID)
 
-	respondJSON(w, http.StatusAccepted, MigrateResponse{JobID: migration.ID})
+	respondJSON(w, http.StatusAccepted, MigrateResponse{MigrationID: migration.ID})
 }
 
 func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
@@ -439,7 +439,7 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 	// Start background migration job
 	RunMigrationJob(ctx, migration.ID)
 
-	respondJSON(w, http.StatusAccepted, RollbackResponse{JobID: migration.ID})
+	respondJSON(w, http.StatusAccepted, RollbackResponse{MigrationID: migration.ID})
 }
 
 func handleGetTemplateHistory(w http.ResponseWriter, r *http.Request) {
@@ -597,67 +597,67 @@ func handleSyncTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 // =============================================================================
-// Job Handlers
+// Migration Handlers
 // =============================================================================
 
-func handleListJobs(w http.ResponseWriter, r *http.Request) {
+func handleListMigrations(w http.ResponseWriter, r *http.Request) {
 	// Optional status filter
 	status := r.URL.Query().Get("status")
 
-	jobs, err := ListMigrations(r.Context(), status)
+	migrations, err := ListMigrations(r.Context(), status)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, jobs)
+	respondJSON(w, http.StatusOK, migrations)
 }
 
-func handleGetJob(w http.ResponseWriter, r *http.Request) {
+func handleGetMigration(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "job id is required", "")
+		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "migration id is required", "")
 		return
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid job id", "Job ID must be a number.")
+		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid migration id", "Migration ID must be a number.")
 		return
 	}
 
-	job, err := GetJob(r.Context(), id)
+	migration, err := GetMigration(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, ErrJobNotFound) {
-			respondError(w, http.StatusNotFound, "JOB_NOT_FOUND", err.Error(),
-				"The job may have been deleted or never existed.")
+		if errors.Is(err, ErrMigrationNotFound) {
+			respondError(w, http.StatusNotFound, "MIGRATION_NOT_FOUND", err.Error(),
+				"The migration may have been deleted or never existed.")
 			return
 		}
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, job)
+	respondJSON(w, http.StatusOK, migration)
 }
 
-func handleRetryJob(w http.ResponseWriter, r *http.Request) {
+func handleRetryMigration(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "job id is required", "")
+		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "migration id is required", "")
 		return
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid job id", "Job ID must be a number.")
+		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid migration id", "Migration ID must be a number.")
 		return
 	}
 
 	result, err := RetryFailedTenants(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, ErrJobNotFound) {
-			respondError(w, http.StatusNotFound, "JOB_NOT_FOUND", err.Error(),
-				"The job may have been deleted or never existed.")
+		if errors.Is(err, ErrMigrationNotFound) {
+			respondError(w, http.StatusNotFound, "MIGRATION_NOT_FOUND", err.Error(),
+				"The migration may have been deleted or never existed.")
 			return
 		}
 		if errors.Is(err, ErrMigrationLocked) {

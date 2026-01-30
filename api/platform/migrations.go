@@ -669,7 +669,7 @@ func GetMigration(ctx context.Context, id int64) (*Migration, error) {
 		&startedAt, &completedAt, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("migration not found: %d", id)
+			return nil, ErrMigrationNotFound
 		}
 		return nil, err
 	}

@@ -205,42 +205,6 @@ func TestLoadMigrationCache_MissingMigration(t *testing.T) {
 }
 
 // =============================================================================
-// GetJob Tests
-// Criteria B: Error handling scenarios
-// =============================================================================
-
-func TestGetJob_Found(t *testing.T) {
-	testDB := setupTenantTestDB(t)
-	defer testDB.Close()
-	cleanup := setTestDB(t, testDB)
-	defer cleanup()
-
-	templateID := insertTestTemplate(t, testDB, "myapp", 2)
-	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
-
-	job, err := GetJob(context.Background(), migrationID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if job.ID != migrationID {
-		t.Errorf("job.ID = %d, want %d", job.ID, migrationID)
-	}
-}
-
-func TestGetJob_NotFound(t *testing.T) {
-	testDB := setupTenantTestDB(t)
-	defer testDB.Close()
-	cleanup := setTestDB(t, testDB)
-	defer cleanup()
-
-	_, err := GetJob(context.Background(), 99999)
-	if err != ErrJobNotFound {
-		t.Errorf("expected ErrJobNotFound, got: %v", err)
-	}
-}
-
-// =============================================================================
 // RetryFailedTenants Tests
 // Criteria C: Complex state management
 // =============================================================================

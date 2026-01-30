@@ -41,7 +41,7 @@ export interface Merge {
 
 // MigrateResponse is returned by the migrate endpoint (matches Go API)
 export interface MigrateResponse {
-  jobId: number;
+  migrationId: number;
 }
 
 // TemplateListItem matches Go API's Template (list response without schema)
@@ -85,7 +85,7 @@ export interface TemplateVersion {
 
 // RollbackResponse is returned by the rollback endpoint (matches Go API)
 export interface RollbackResponse {
-  jobId: number;
+  migrationId: number;
 }
 
 // Tenant represents a tenant database (matches Go API)
@@ -105,8 +105,8 @@ export interface SyncTenantResponse {
   toVersion: number;
 }
 
-// Job/Migration represents a migration job (matches Go API's Migration)
-export interface Job {
+// Migration represents a schema migration job (matches Go API's Migration)
+export interface Migration {
   id: number;
   templateId: number;
   fromVersion: number;
@@ -122,10 +122,10 @@ export interface Job {
   createdAt: string;
 }
 
-// RetryJobResponse is returned by the retry endpoint (matches Go API)
-export interface RetryJobResponse {
+// RetryMigrationResponse is returned by the retry endpoint (matches Go API)
+export interface RetryMigrationResponse {
   retriedCount: number;
-  jobId: number;
+  migrationId: number;
 }
 
 export class ApiClient {
@@ -288,29 +288,29 @@ export class ApiClient {
   }
 
   // =========================================================================
-  // Job Management
+  // Migration Management
   // =========================================================================
 
   /**
-   * List all jobs (migrations).
+   * List all migrations.
    */
-  async listJobs(status?: string): Promise<Job[]> {
+  async listMigrations(status?: string): Promise<Migration[]> {
     const query = status ? `?status=${status}` : "";
-    return this.request<Job[]>("GET", `/platform/jobs${query}`);
+    return this.request<Migration[]>("GET", `/platform/migrations${query}`);
   }
 
   /**
-   * Get job status.
+   * Get migration status.
    */
-  async getJob(jobId: number): Promise<Job> {
-    return this.request<Job>("GET", `/platform/jobs/${jobId}`);
+  async getMigration(migrationId: number): Promise<Migration> {
+    return this.request<Migration>("GET", `/platform/migrations/${migrationId}`);
   }
 
   /**
-   * Retry failed tenants in a job.
+   * Retry failed tenants in a migration.
    */
-  async retryJob(jobId: number): Promise<RetryJobResponse> {
-    return this.request<RetryJobResponse>("POST", `/platform/jobs/${jobId}/retry`);
+  async retryMigration(migrationId: number): Promise<RetryMigrationResponse> {
+    return this.request<RetryMigrationResponse>("POST", `/platform/migrations/${migrationId}/retry`);
   }
 
   // =========================================================================

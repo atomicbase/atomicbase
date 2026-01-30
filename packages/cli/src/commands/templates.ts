@@ -218,8 +218,8 @@ async function pushSingleSchema(api: ApiClient, schema: SchemaDefinition): Promi
 
   // Apply the migration
   const result = await api.migrateTemplate(schema.name, schema, merges);
-  console.log(`Migration started (job #${result.jobId})`);
-  console.log(`  Check status: atomicbase jobs ${result.jobId}`);
+  console.log(`Migration started (migration #${result.migrationId})`);
+  console.log(`  Check status: atomicbase migrations ${result.migrationId}`);
 }
 
 // =============================================================================
@@ -608,8 +608,8 @@ async function rollbackTemplate(name: string, version: string, force: boolean): 
 
   try {
     const result = await api.rollbackTemplate(name, targetVersion);
-    console.log(`Rollback initiated. Job ID: ${result.jobId}`);
-    console.log(`\nTrack progress with: atomicbase jobs ${result.jobId}`);
+    console.log(`Rollback initiated. Migration ID: ${result.migrationId}`);
+    console.log(`\nTrack progress with: atomicbase migrations ${result.migrationId}`);
   } catch (err) {
     if (err instanceof ApiError) {
       if (err.code === "VERSION_NOT_FOUND") {

@@ -4,7 +4,7 @@ import { Command } from "commander";
 import { initCommand } from "./commands/init.js";
 import { templatesCommand } from "./commands/templates.js";
 import { tenantsCommand } from "./commands/tenant.js";
-import { jobsCommand } from "./commands/jobs.js";
+import { migrationsCommand } from "./commands/migrations.js";
 
 // Load environment variables from .env file in the user's working directory
 // INIT_CWD is set by npm/npx to the original directory where the command was run
@@ -38,6 +38,6 @@ program
 program.addCommand(initCommand);
 program.addCommand(templatesCommand);
 program.addCommand(tenantsCommand);
-program.addCommand(jobsCommand);
+program.addCommand(migrationsCommand);
 
 program.parse();

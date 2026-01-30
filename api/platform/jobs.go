@@ -20,11 +20,11 @@ const (
 	BaseBackoff = 100 * time.Millisecond
 )
 
-// Common errors for job operations.
+// Common errors for migration operations.
 var (
-	ErrJobNotFound     = errors.New("job not found")
-	ErrMigrationLocked = errors.New("migration locked: another migration is already in progress")
-	ErrFirstDBFailed   = errors.New("first database migration failed")
+	ErrMigrationNotFound = errors.New("migration not found")
+	ErrMigrationLocked   = errors.New("migration locked: another migration is already in progress")
+	ErrFirstDBFailed     = errors.New("first database migration failed")
 )
 
 // JobManager manages background migration jobs.
@@ -80,18 +80,6 @@ func (jm *JobManager) Wait() {
 	jm.wg.Wait()
 }
 
-// GetJob returns a migration job by ID.
-// Job ID is the same as Migration ID.
-func GetJob(ctx context.Context, jobID int64) (*Migration, error) {
-	migration, err := GetMigration(ctx, jobID)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return nil, ErrJobNotFound
-		}
-		return nil, err
-	}
-	return migration, nil
-}
 
 // MigrationResult tracks the outcome of a single tenant migration.
 type MigrationResult struct {
@@ -368,7 +356,7 @@ func statusFromResult(r MigrationResult) string {
 
 // RetryFailedTenants retries all failed tenants from a migration job.
 // Returns the count of retried tenants and optionally a new job ID.
-func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryJobResponse, error) {
+func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationResponse, error) {
 	// Get the original migration
 	migration, err := GetMigration(ctx, jobID)
 	if err != nil {
@@ -388,9 +376,9 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryJobResponse, er
 	}
 
 	if len(failedTenants) == 0 {
-		return &RetryJobResponse{
+		return &RetryMigrationResponse{
 			RetriedCount: 0,
-			JobID:        jobID,
+			MigrationID:        jobID,
 		}, nil
 	}
 
@@ -417,9 +405,9 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryJobResponse, er
 	// Start the job again
 	RunMigrationJob(ctx, jobID)
 
-	return &RetryJobResponse{
+	return &RetryMigrationResponse{
 		RetriedCount: len(failedTenants),
-		JobID:        jobID,
+		MigrationID:        jobID,
 	}, nil
 }
 

@@ -262,19 +262,19 @@ POST /platform/tenants/{name}/sync
 DELETE /platform/tenants/{name}
 ```
 
-#### Jobs
+#### Migrations
 
 Track and manage background migrations.
 
 ```bash
-# List jobs (optionally filter by status)
-GET /platform/jobs?status=running
+# List migrations (optionally filter by status)
+GET /platform/migrations?status=running
 
-# Get job details
-GET /platform/jobs/{id}
+# Get migration details
+GET /platform/migrations/{id}
 
 # Retry failed tenant migrations
-POST /platform/jobs/{id}/retry
+POST /platform/migrations/{id}/retry
 ```
 
 ### Other Endpoints
