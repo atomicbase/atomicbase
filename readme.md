@@ -100,7 +100,7 @@ export default defineSchema("my-app", {
 ```
 
 ```bash
-npx atomicbase push
+npx atomicbase templates push
 ```
 
 ### 6. Create a Tenant Database

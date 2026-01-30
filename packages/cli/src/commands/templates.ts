@@ -1,7 +1,15 @@
 import { Command } from "commander";
 import { createInterface } from "readline";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 import { loadConfig } from "../config.js";
-import { ApiClient, ApiError } from "../api.js";
+import { loadSchema, loadAllSchemas } from "../schema/parser.js";
+import { ApiClient, ApiError, type SchemaDiff, type Merge, type TemplateResponse } from "../api.js";
+import type { SchemaDefinition, ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/schema";
+
+// =============================================================================
+// Shared Utilities
+// =============================================================================
 
 /**
  * Prompt user with a yes/no question.
@@ -29,6 +37,363 @@ function formatDate(dateStr: string): string {
   return date.toLocaleString();
 }
 
+// =============================================================================
+// Push Command Helpers
+// =============================================================================
+
+/**
+ * Ambiguous change detected client-side: a drop + add pair that might be a rename.
+ */
+interface AmbiguousChange {
+  type: "table" | "column";
+  table: string;
+  column?: string;
+  dropIndex: number;
+  addIndex: number;
+}
+
+/**
+ * Detect ambiguous changes (drop + add pairs that might be renames).
+ * This is client-side since the API just returns raw changes.
+ */
+function detectAmbiguousChanges(changes: SchemaDiff[]): AmbiguousChange[] {
+  const ambiguous: AmbiguousChange[] = [];
+
+  // Find drop_table + add_table pairs
+  const dropTables = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "drop_table");
+  const addTables = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "add_table");
+
+  // Any drop + add table is potentially ambiguous (might be a rename)
+  for (const drop of dropTables) {
+    for (const add of addTables) {
+      ambiguous.push({
+        type: "table",
+        table: add.change.table!,
+        dropIndex: drop.index,
+        addIndex: add.index,
+      });
+    }
+  }
+
+  // Find drop_column + add_column pairs within the same table
+  const dropColumns = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "drop_column");
+  const addColumns = changes
+    .map((c, i) => ({ change: c, index: i }))
+    .filter((c) => c.change.type === "add_column");
+
+  for (const drop of dropColumns) {
+    for (const add of addColumns) {
+      if (drop.change.table === add.change.table) {
+        ambiguous.push({
+          type: "column",
+          table: add.change.table!,
+          column: add.change.column,
+          dropIndex: drop.index,
+          addIndex: add.index,
+        });
+      }
+    }
+  }
+
+  return ambiguous;
+}
+
+/**
+ * Resolve ambiguous changes by prompting the user.
+ * Returns Merge[] for the API.
+ */
+async function resolveAmbiguousChanges(
+  changes: SchemaDiff[],
+  ambiguous: AmbiguousChange[]
+): Promise<Merge[]> {
+  const merges: Merge[] = [];
+
+  if (ambiguous.length === 0) {
+    return merges;
+  }
+
+  console.log("\nAmbiguous changes detected:\n");
+
+  for (const change of ambiguous) {
+    const dropChange = changes[change.dropIndex];
+    const addChange = changes[change.addIndex];
+
+    if (change.type === "table") {
+      const isRename = await confirm(
+        `  Table '${dropChange.table}' was removed and '${addChange.table}' was added.\n  Is this a rename?`
+      );
+      if (isRename) {
+        merges.push({ old: change.dropIndex, new: change.addIndex });
+      }
+    } else {
+      const isRename = await confirm(
+        `  Column '${change.table}.${dropChange.column}' was removed and '${change.table}.${addChange.column}' was added.\n  Is this a rename?`
+      );
+      if (isRename) {
+        merges.push({ old: change.dropIndex, new: change.addIndex });
+      }
+    }
+  }
+
+  console.log("");
+  return merges;
+}
+
+/**
+ * Print changes in a readable format.
+ */
+function printChanges(changes: SchemaDiff[]): void {
+  if (!changes || changes.length === 0) {
+    return;
+  }
+
+  console.log("\nChanges:");
+  for (const change of changes) {
+    const prefix =
+      change.type.startsWith("add") ? "+" :
+      change.type.startsWith("drop") ? "-" :
+      change.type.startsWith("rename") ? ">" : "~";
+
+    let desc = change.table || "";
+    if (change.column) {
+      desc += `.${change.column}`;
+    }
+
+    console.log(`  ${prefix} ${desc} (${change.type})`);
+  }
+}
+
+/**
+ * Push a single schema, handling ambiguous changes.
+ */
+async function pushSingleSchema(api: ApiClient, schema: SchemaDefinition): Promise<void> {
+  console.log(`\nPushing schema "${schema.name}"...`);
+
+  // Check if template exists
+  const exists = await api.templateExists(schema.name);
+
+  if (!exists) {
+    // New template - just create it
+    const result = await api.pushSchema(schema);
+    console.log(`Created template "${schema.name}" (v${result.currentVersion})`);
+    return;
+  }
+
+  // Existing template - check for changes first
+  let diff;
+  try {
+    diff = await api.diffSchema(schema.name, schema);
+  } catch (err) {
+    // API returns 400 NO_CHANGES when schema is identical
+    if (err instanceof ApiError && err.code === "NO_CHANGES") {
+      console.log("No changes");
+      return;
+    }
+    throw err;
+  }
+
+  if (!diff.changes || diff.changes.length === 0) {
+    console.log("No changes");
+    return;
+  }
+
+  // Show what we detected
+  printChanges(diff.changes);
+
+  // Detect and resolve ambiguous changes (client-side)
+  const ambiguous = detectAmbiguousChanges(diff.changes);
+  let merges: Merge[] | undefined;
+  if (ambiguous.length > 0) {
+    merges = await resolveAmbiguousChanges(diff.changes, ambiguous);
+    if (merges.length === 0) {
+      merges = undefined;
+    }
+  }
+
+  // Apply the migration
+  const result = await api.migrateTemplate(schema.name, schema, merges);
+  console.log(`Migration started (job #${result.jobId})`);
+  console.log(`  Check status: atomicbase jobs ${result.jobId}`);
+}
+
+// =============================================================================
+// Pull Command Helpers
+// =============================================================================
+
+/**
+ * Internal table format for code generation (columns as array with primaryKey flag).
+ */
+interface GeneratorTable {
+  name: string;
+  columns: GeneratorColumn[];
+  indexes: { name: string; columns: string[]; unique?: boolean }[];
+  ftsColumns: string[] | null;
+}
+
+interface GeneratorColumn extends Omit<ColumnDefinition, "references" | "onDelete" | "onUpdate"> {
+  primaryKey: boolean;
+  references: {
+    table: string;
+    column: string;
+    onDelete?: ForeignKeyAction;
+    onUpdate?: ForeignKeyAction;
+  } | null;
+}
+
+/**
+ * Convert API table format to internal generator format.
+ */
+function convertFromApiFormat(tables: TemplateResponse["schema"]["tables"]): GeneratorTable[] {
+  return tables.map((table) => {
+    const columns: GeneratorColumn[] = Object.entries(table.columns).map(([name, col]) => {
+      const colDef: GeneratorColumn = {
+        name,
+        type: col.type,
+        primaryKey: table.pk?.includes(name) ?? false,
+        notNull: col.notNull,
+        unique: col.unique,
+        default: col.default,
+        collate: col.collate as Collation | undefined,
+        check: col.check,
+        generated: col.generated,
+        references: col.references
+          ? {
+              table: col.references.split(".")[0],
+              column: col.references.split(".")[1],
+              onDelete: col.onDelete as ForeignKeyAction | undefined,
+              onUpdate: col.onUpdate as ForeignKeyAction | undefined,
+            }
+          : null,
+      };
+      return colDef;
+    });
+
+    return {
+      name: table.name,
+      columns,
+      indexes: (table.indexes ?? []).map((idx) => ({
+        name: idx.name,
+        columns: idx.columns,
+        unique: idx.unique,
+      })),
+      ftsColumns: table.ftsColumns ?? null,
+    };
+  });
+}
+
+/**
+ * Generate TypeScript schema code from a template response.
+ */
+function generateSchemaCode(name: string, tables: GeneratorTable[]): string {
+  const lines: string[] = [
+    `import { defineSchema, defineTable, c } from "@atomicbase/schema";`,
+    ``,
+    `export default defineSchema("${name}", {`,
+  ];
+
+  for (let i = 0; i < tables.length; i++) {
+    const table = tables[i];
+    const isLast = i === tables.length - 1;
+
+    lines.push(`  ${table.name}: defineTable({`);
+
+    for (const col of table.columns) {
+      lines.push(`    ${col.name}: ${generateColumnCode(col)},`);
+    }
+
+    let tableSuffix = "})";
+
+    // Add index chains
+    for (const idx of table.indexes) {
+      const method = idx.unique ? "uniqueIndex" : "index";
+      tableSuffix += `.${method}("${idx.name}", ${JSON.stringify(idx.columns)})`;
+    }
+
+    // Add FTS chain
+    if (table.ftsColumns && table.ftsColumns.length > 0) {
+      tableSuffix += `.fts(${JSON.stringify(table.ftsColumns)})`;
+    }
+
+    tableSuffix += isLast ? "," : ",";
+    lines.push(`  ${tableSuffix}`);
+
+    if (!isLast) {
+      lines.push(``);
+    }
+  }
+
+  lines.push(`});`);
+  lines.push(``);
+
+  return lines.join("\n");
+}
+
+function generateColumnCode(col: GeneratorColumn): string {
+  let code = `c.${col.type.toLowerCase()}()`;
+
+  if (col.primaryKey) {
+    code += ".primaryKey()";
+  }
+  if (col.notNull) {
+    code += ".notNull()";
+  }
+  if (col.unique) {
+    code += ".unique()";
+  }
+  if (col.collate) {
+    code += `.collate("${col.collate}")`;
+  }
+  if (col.default !== undefined && col.default !== null) {
+    const val = typeof col.default === "string"
+      ? `"${col.default}"`
+      : col.default;
+    code += `.default(${val})`;
+  }
+  if (col.check) {
+    code += `.check("${col.check.replace(/"/g, '\\"')}")`;
+  }
+  if (col.generated) {
+    const opts = col.generated.stored ? ", { stored: true }" : "";
+    code += `.generatedAs("${col.generated.expr.replace(/"/g, '\\"')}"${opts})`;
+  }
+  if (col.references) {
+    const ref = `"${col.references.table}.${col.references.column}"`;
+    if (col.references.onDelete || col.references.onUpdate) {
+      const opts: string[] = [];
+      if (col.references.onDelete) {
+        opts.push(`onDelete: "${col.references.onDelete}"`);
+      }
+      if (col.references.onUpdate) {
+        opts.push(`onUpdate: "${col.references.onUpdate}"`);
+      }
+      code += `.references(${ref}, { ${opts.join(", ")} })`;
+    } else {
+      code += `.references(${ref})`;
+    }
+  }
+
+  return code;
+}
+
+interface PullOperation {
+  type: "add" | "update";
+  name: string;
+  version: number;
+  tableCount: number;
+  code: string;
+  outputPath: string;
+}
+
+// =============================================================================
+// Command Implementations
+// =============================================================================
+
 /**
  * List all templates.
  */
@@ -41,7 +406,7 @@ async function listTemplates(): Promise<void> {
 
     if (templates.length === 0) {
       console.log("No templates found.");
-      console.log("\nCreate one with: atomicbase push");
+      console.log("\nCreate one with: atomicbase templates push");
       return;
     }
 
@@ -261,7 +626,267 @@ async function rollbackTemplate(name: string, version: string, force: boolean): 
   }
 }
 
-// Main templates command with subcommands
+/**
+ * Push schema(s) to the server.
+ */
+async function pushTemplates(file?: string): Promise<void> {
+  const config = await loadConfig();
+  const api = new ApiClient(config);
+
+  // Load schema(s)
+  let schemas: SchemaDefinition[];
+  try {
+    schemas = file
+      ? [await loadSchema(file)]
+      : await loadAllSchemas(config.schemas);
+  } catch (err) {
+    if (err instanceof Error) {
+      console.error(`\n${err.message}`);
+    } else {
+      console.error(`\nFailed to load schemas:`, err);
+    }
+    process.exit(1);
+  }
+
+  if (schemas.length === 0) {
+    console.log(`No schema files found in ${config.schemas}/`);
+    console.log("Create a schema with: atomicbase init");
+    return;
+  }
+
+  // Check for duplicate schema names
+  const nameCount = new Map<string, number>();
+  for (const schema of schemas) {
+    nameCount.set(schema.name, (nameCount.get(schema.name) || 0) + 1);
+  }
+  const duplicates = [...nameCount.entries()].filter(([_, count]) => count > 1);
+  if (duplicates.length > 0) {
+    console.error("Error: Multiple schemas have the same name:\n");
+    for (const [name, count] of duplicates) {
+      console.error(`  "${name}" is defined ${count} times`);
+    }
+    console.error("\nEach schema must have a unique name. Check your schema files.");
+    process.exit(1);
+  }
+
+  // Push each schema
+  for (const schema of schemas) {
+    try {
+      await pushSingleSchema(api, schema);
+    } catch (err) {
+      console.error(`\nFailed to push "${schema.name}":`, err);
+      process.exit(1);
+    }
+  }
+
+  console.log("\nDone!");
+}
+
+/**
+ * Pull schemas from the server.
+ */
+async function pullTemplates(options: { yes?: boolean }): Promise<void> {
+  const config = await loadConfig();
+  const api = new ApiClient(config);
+
+  console.log("Fetching templates...");
+
+  try {
+    // Load local templates
+    let localSchemas: SchemaDefinition[] = [];
+    try {
+      localSchemas = await loadAllSchemas(config.schemas);
+    } catch {
+      // No local schemas or schemas directory doesn't exist - that's fine
+    }
+    const localTemplateNames = new Set(localSchemas.map((s) => s.name));
+
+    // Fetch cloud templates
+    const cloudTemplates = await api.listTemplates();
+
+    if (cloudTemplates.length === 0) {
+      console.log("No templates found on server.");
+      return;
+    }
+
+    // Determine operations (add vs update vs skip)
+    const operations: PullOperation[] = [];
+
+    for (const templateInfo of cloudTemplates) {
+      const template = await api.getTemplate(templateInfo.name);
+      const code = generateSchemaCode(template.name, convertFromApiFormat(template.schema.tables));
+      const outputPath = resolve(config.schemas, `${template.name}.schema.ts`);
+
+      if (!localTemplateNames.has(template.name)) {
+        // Template exists in cloud but not locally - add
+        operations.push({
+          type: "add",
+          name: template.name,
+          version: template.currentVersion,
+          tableCount: template.schema.tables.length,
+          code,
+          outputPath,
+        });
+      } else {
+        // Template exists both locally and in cloud - check for diff
+        let existingCode = "";
+        if (existsSync(outputPath)) {
+          existingCode = readFileSync(outputPath, "utf-8");
+        }
+
+        if (existingCode !== code) {
+          // Different content - update
+          operations.push({
+            type: "update",
+            name: template.name,
+            version: template.currentVersion,
+            tableCount: template.schema.tables.length,
+            code,
+            outputPath,
+          });
+        }
+        // If content is the same, skip (do nothing)
+      }
+    }
+
+    if (operations.length === 0) {
+      console.log("All local schemas are up to date.");
+      return;
+    }
+
+    // Show operations
+    const adds = operations.filter((op) => op.type === "add");
+    const updates = operations.filter((op) => op.type === "update");
+
+    console.log("");
+
+    if (adds.length > 0) {
+      console.log(`Templates to add (${adds.length}):`);
+      for (const op of adds) {
+        console.log(`  + ${op.name} (v${op.version}, ${op.tableCount} tables)`);
+      }
+    }
+
+    if (updates.length > 0) {
+      if (adds.length > 0) console.log("");
+      console.log(`Templates to update (${updates.length}):`);
+      for (const op of updates) {
+        console.log(`  ~ ${op.name} (v${op.version}, ${op.tableCount} tables)`);
+      }
+    }
+
+    // Confirm unless --yes flag is set
+    if (!options.yes) {
+      console.log("");
+      const confirmed = await confirm("Apply these changes?");
+      if (!confirmed) {
+        console.log("Aborted.");
+        return;
+      }
+    }
+
+    // Ensure schemas directory exists
+    const schemasDir = config.schemas;
+    if (!existsSync(schemasDir)) {
+      mkdirSync(schemasDir, { recursive: true });
+    }
+
+    // Apply operations
+    console.log("");
+    for (const op of operations) {
+      const outputDir = dirname(op.outputPath);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+
+      writeFileSync(op.outputPath, op.code);
+      const action = op.type === "add" ? "Added" : "Updated";
+      console.log(`  ${action} ${op.name}.schema.ts`);
+    }
+
+    console.log(`\nPulled ${operations.length} schema(s) to ${schemasDir}`);
+  } catch (err) {
+    console.error("Failed to pull schemas:", err);
+    process.exit(1);
+  }
+}
+
+/**
+ * Preview changes without applying.
+ */
+async function diffTemplates(file?: string): Promise<void> {
+  const config = await loadConfig();
+  const api = new ApiClient(config);
+
+  // Load schema(s)
+  let schemas: SchemaDefinition[];
+  try {
+    schemas = file
+      ? [await loadSchema(file)]
+      : await loadAllSchemas(config.schemas);
+  } catch (err) {
+    if (err instanceof Error) {
+      console.error(`\n${err.message}`);
+    } else {
+      console.error(`\nFailed to load schemas:`, err);
+    }
+    process.exit(1);
+  }
+
+  if (schemas.length === 0) {
+    console.log(`No schema files found in ${config.schemas}/`);
+    return;
+  }
+
+  // Diff each schema
+  for (const schema of schemas) {
+    console.log(`Diffing schema "${schema.name}"...`);
+    console.log("");
+
+    try {
+      const result = await api.diffSchema(schema.name, schema);
+
+      if (result.changes.length === 0) {
+        console.log("  No changes");
+      } else {
+        console.log("Changes:");
+        for (const change of result.changes) {
+          const prefix = change.type.startsWith("add") ? "+" :
+                        change.type.startsWith("drop") ? "-" : "~";
+          console.log(`  ${prefix} ${change.table}${change.column ? `.${change.column}` : ""} (${change.type})`);
+        }
+      }
+
+      console.log("");
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        // API returns 400 NO_CHANGES when schema is identical
+        if (err.code === "NO_CHANGES") {
+          console.log("  No changes");
+          console.log("");
+          continue;
+        }
+        // Template might not exist yet - that's fine, show what would be created
+        if (err.status === 404) {
+          console.log("  Template does not exist yet. Push will create:");
+          console.log(`  + ${schema.tables.length} table(s)`);
+          for (const table of schema.tables) {
+            const columnCount = Object.keys(table.columns).length;
+            console.log(`    + ${table.name} (${columnCount} columns)`);
+          }
+          console.log("");
+          continue;
+        }
+      }
+      console.error(`Failed to diff "${schema.name}":`, err);
+    }
+  }
+}
+
+// =============================================================================
+// Command Registration
+// =============================================================================
+
 export const templatesCommand = new Command("templates")
   .description("Manage schema templates");
 
@@ -277,6 +902,25 @@ templatesCommand
   .command("get <name>")
   .description("Get template details")
   .action(getTemplate);
+
+// templates push [file]
+templatesCommand
+  .command("push [file]")
+  .description("Push schema(s) to the server")
+  .action(pushTemplates);
+
+// templates pull
+templatesCommand
+  .command("pull")
+  .description("Pull schemas from the server")
+  .option("-y, --yes", "Skip confirmation prompt")
+  .action(pullTemplates);
+
+// templates diff [file]
+templatesCommand
+  .command("diff [file]")
+  .description("Preview changes without applying")
+  .action(diffTemplates);
 
 // templates delete <name>
 templatesCommand

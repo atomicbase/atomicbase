@@ -28,7 +28,7 @@ A Next.js todo application demonstrating Atomicbase with:
 
 3. Push the schemas to Atomicbase:
    ```bash
-   pnpm exec atomicbase push
+   npx atomicbase templates push
    ```
 
 4. Create the "primary" tenant for auth data:
