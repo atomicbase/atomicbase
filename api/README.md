@@ -72,9 +72,6 @@ CGO_ENABLED=1 go test -tags fts5 -v ./...
 # Specific package
 CGO_ENABLED=1 go test -tags fts5 -v ./data/...
 
-# Integration tests (requires Turso config)
-CGO_ENABLED=1 go test -tags "fts5 integration" -v ./...
-
 # Or use Make
 make test
 ```
