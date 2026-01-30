@@ -50,22 +50,41 @@ Atomicbase is the multi-tenant development platform. Built on SQLite and Turso, 
 
 ## Quick Start
 
-### 1. Start the Server
-
 ```bash
 cd api
-make build && make run
 ```
 
-Server runs at `http://localhost:8080`.
+### 1. Set Environment Variables
+```ini
+TURSO_API_KEY="your-turso-key"
+TURSO_ORGANIZATION="your-turso-org"
 
-### 2. Install Packages
+ATOMICBASE_CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
+ATOMICBASE_API_KEY="your-api-key"
+```
+
+### 2. Start API Server
+
+```bash
+make run
+```
+
+Server runs at `http://localhost:8080` by default.
+
+### 3. Install Packages
 
 ```bash
 npm install @atomicbase/sdk @atomicbase/schema
 ```
 
-### 3. Define & Push Schema
+### 4. Initialize Config
+
+```bash
+npx atomicbase init
+```
+Creates `atomicbase.config.ts` file & schemas folder
+
+### 5. Define & Push Schema
 
 ```typescript
 // schemas/my-app.schema.ts
@@ -84,7 +103,7 @@ export default defineSchema("my-app", {
 npx atomicbase push
 ```
 
-### 4. Create a Tenant Database
+### 6. Create a Tenant Database
 
 ```typescript
 import { createClient } from "@atomicbase/sdk";
@@ -97,7 +116,7 @@ const client = createClient({
 await client.tenants.create({ name: "acme-corp", template: "my-app" });
 ```
 
-### 5. Query Data
+### 7. Query Data
 
 ```typescript
 import { eq } from "@atomicbase/sdk";
