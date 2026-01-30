@@ -684,12 +684,12 @@ async function pushTemplates(file?: string): Promise<void> {
 
 /**
  * Pull schemas from the server.
+ * If templateName is provided, pulls only that template.
+ * Otherwise, pulls all templates.
  */
-async function pullTemplates(options: { yes?: boolean }): Promise<void> {
+async function pullTemplates(templateName: string | undefined, options: { yes?: boolean }): Promise<void> {
   const config = await loadConfig();
   const api = new ApiClient(config);
-
-  console.log("Fetching templates...");
 
   try {
     // Load local templates
@@ -701,18 +701,39 @@ async function pullTemplates(options: { yes?: boolean }): Promise<void> {
     }
     const localTemplateNames = new Set(localSchemas.map((s) => s.name));
 
-    // Fetch cloud templates
-    const cloudTemplates = await api.listTemplates();
+    // Determine which templates to fetch
+    let templatesToFetch: { name: string }[];
 
-    if (cloudTemplates.length === 0) {
-      console.log("No templates found on server.");
-      return;
+    if (templateName) {
+      // Pull specific template
+      console.log(`Fetching template "${templateName}"...`);
+      try {
+        await api.getTemplate(templateName);
+        templatesToFetch = [{ name: templateName }];
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          console.error(`Template "${templateName}" not found on server.`);
+          console.error("\nUse 'atomicbase templates list' to see available templates.");
+          process.exit(1);
+        }
+        throw err;
+      }
+    } else {
+      // Pull all templates
+      console.log("Fetching templates...");
+      const cloudTemplates = await api.listTemplates();
+
+      if (cloudTemplates.length === 0) {
+        console.log("No templates found on server.");
+        return;
+      }
+      templatesToFetch = cloudTemplates;
     }
 
     // Determine operations (add vs update vs skip)
     const operations: PullOperation[] = [];
 
-    for (const templateInfo of cloudTemplates) {
+    for (const templateInfo of templatesToFetch) {
       const template = await api.getTemplate(templateInfo.name);
       const code = generateSchemaCode(template.name, convertFromApiFormat(template.schema.tables));
       const outputPath = resolve(config.schemas, `${template.name}.schema.ts`);
@@ -750,7 +771,11 @@ async function pullTemplates(options: { yes?: boolean }): Promise<void> {
     }
 
     if (operations.length === 0) {
-      console.log("All local schemas are up to date.");
+      if (templateName) {
+        console.log(`Local schema for "${templateName}" is up to date.`);
+      } else {
+        console.log("All local schemas are up to date.");
+      }
       return;
     }
 
@@ -909,12 +934,14 @@ templatesCommand
   .description("Push schema(s) to the server")
   .action(pushTemplates);
 
-// templates pull
+// templates pull [name]
 templatesCommand
-  .command("pull")
-  .description("Pull schemas from the server")
+  .command("pull [name]")
+  .description("Pull schema(s) from the server")
   .option("-y, --yes", "Skip confirmation prompt")
-  .action(pullTemplates);
+  .action((name: string | undefined, options: { yes?: boolean }) => {
+    pullTemplates(name, options);
+  });
 
 // templates diff [file]
 templatesCommand
