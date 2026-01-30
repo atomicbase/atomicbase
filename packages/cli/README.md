@@ -54,8 +54,11 @@ npx atomicbase templates list
 # Get template details
 npx atomicbase templates get <name>
 
-# Push local schemas to server
-npx atomicbase templates push [file]
+# Push all local schemas to server
+npx atomicbase templates push
+
+# Push a specific template by name
+npx atomicbase templates push <name>
 
 # Pull all schemas from server to local files
 npx atomicbase templates pull [-y]

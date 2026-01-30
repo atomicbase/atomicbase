@@ -628,17 +628,38 @@ async function rollbackTemplate(name: string, version: string, force: boolean): 
 
 /**
  * Push schema(s) to the server.
+ * If templateName is provided, pushes only that template.
+ * Otherwise, pushes all templates.
  */
-async function pushTemplates(file?: string): Promise<void> {
+async function pushTemplates(templateName?: string): Promise<void> {
   const config = await loadConfig();
   const api = new ApiClient(config);
 
   // Load schema(s)
   let schemas: SchemaDefinition[];
   try {
-    schemas = file
-      ? [await loadSchema(file)]
-      : await loadAllSchemas(config.schemas);
+    const allSchemas = await loadAllSchemas(config.schemas);
+
+    if (templateName) {
+      // Push specific template by name
+      const matched = allSchemas.filter((s) => s.name === templateName);
+
+      if (matched.length === 0) {
+        console.error(`Template "${templateName}" not found in local schemas.`);
+        if (allSchemas.length > 0) {
+          console.error(`\nAvailable templates:`);
+          for (const s of allSchemas) {
+            console.error(`  - ${s.name}`);
+          }
+        }
+        process.exit(1);
+      }
+
+      schemas = matched;
+    } else {
+      // Push all schemas
+      schemas = allSchemas;
+    }
   } catch (err) {
     if (err instanceof Error) {
       console.error(`\n${err.message}`);
@@ -928,9 +949,9 @@ templatesCommand
   .description("Get template details")
   .action(getTemplate);
 
-// templates push [file]
+// templates push [name]
 templatesCommand
-  .command("push [file]")
+  .command("push [name]")
   .description("Push schema(s) to the server")
   .action(pushTemplates);
 
