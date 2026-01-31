@@ -18,6 +18,11 @@ const (
 	BatchSize   = 25 // Number of tenants to process concurrently
 	MaxRetries  = 5  // Maximum retry attempts for network errors
 	BaseBackoff = 100 * time.Millisecond
+
+	// Operation timeouts
+	DBOperationTimeout  = 30 * time.Second  // Timeout for local database operations
+	ExternalAPITimeout  = 60 * time.Second  // Timeout for external API calls (Turso)
+	BatchExecuteTimeout = 120 * time.Second // Timeout for batch SQL execution (per tenant)
 )
 
 // Re-export errors from tools for backward compatibility.
@@ -25,7 +30,28 @@ var (
 	ErrMigrationNotFound = tools.ErrMigrationNotFound
 	ErrMigrationLocked   = tools.ErrAtomicbaseBusy
 	ErrFirstDBFailed     = errors.New("first database migration failed")
+	ErrJobCancelled      = errors.New("migration job cancelled")
 )
+
+// withDBTimeout wraps a context with the standard database operation timeout.
+func withDBTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, DBOperationTimeout)
+}
+
+// withExternalTimeout wraps a context with the external API timeout.
+func withExternalTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, ExternalAPITimeout)
+}
+
+// checkCancelled returns an error if the context is cancelled.
+func checkCancelled(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ErrJobCancelled
+	default:
+		return nil
+	}
+}
 
 // JobManager manages background migration jobs.
 type JobManager struct {
@@ -114,8 +140,11 @@ func RunMigrationJob(ctx context.Context, jobID int64) {
 		defer jm.wg.Done()
 		defer jm.Unlock(migration.TemplateID)
 
-		// Use background context for the job - it runs independently of HTTP request
-		runMigrationJobInternal(context.Background(), migration)
+		// Use background context with cancellation for the job.
+		// The job runs independently of HTTP request but can be stopped via context.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runMigrationJobInternal(ctx, migration)
 	}()
 }
 
@@ -124,7 +153,9 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	jobID := migration.ID
 
 	// Get all pending tenants first to know total count
-	tenants, err := GetPendingTenants(ctx, jobID, migration.TemplateID, migration.ToVersion)
+	dbCtx, cancel := withDBTimeout(ctx)
+	tenants, err := GetPendingTenants(dbCtx, jobID, migration.TemplateID, migration.ToVersion)
+	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to get pending tenants: %v", jobID, err)
 		markJobFailed(ctx, jobID, 0, 0)
@@ -132,7 +163,10 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	}
 
 	// Mark job as running with total count
-	if err := StartMigration(ctx, jobID, len(tenants)); err != nil {
+	dbCtx, cancel = withDBTimeout(ctx)
+	err = StartMigration(dbCtx, jobID, len(tenants))
+	cancel()
+	if err != nil {
 		log.Printf("[job %d] failed to start migration: %v", jobID, err)
 		return
 	}
@@ -145,7 +179,9 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	}
 
 	// Pre-load all needed migrations into cache
-	migrations, err := loadMigrationCache(ctx, migration.TemplateID, tenants, migration.ToVersion)
+	dbCtx, cancel = withDBTimeout(ctx)
+	migrations, err := loadMigrationCache(dbCtx, migration.TemplateID, tenants, migration.ToVersion)
+	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to load migration cache: %v", jobID, err)
 		markJobFailed(ctx, jobID, 0, 0)
@@ -157,7 +193,11 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	tenants = tenants[1:]
 
 	result := migrateTenant(ctx, firstTenant, migrations, migration.ToVersion)
-	if err := RecordTenantMigration(ctx, jobID, firstTenant.ID, statusFromResult(result), result.Error); err != nil {
+
+	dbCtx, cancel = withDBTimeout(ctx)
+	err = RecordTenantMigration(dbCtx, jobID, firstTenant.ID, statusFromResult(result), result.Error)
+	cancel()
+	if err != nil {
 		log.Printf("[job %d] failed to record first tenant migration: %v", jobID, err)
 	}
 
@@ -169,7 +209,10 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	}
 
 	// Update first tenant version
-	if err := BatchUpdateTenantVersions(ctx, []int32{firstTenant.ID}, migration.ToVersion); err != nil {
+	dbCtx, cancel = withDBTimeout(ctx)
+	err = BatchUpdateTenantVersions(dbCtx, []int32{firstTenant.ID}, migration.ToVersion)
+	cancel()
+	if err != nil {
 		log.Printf("[job %d] failed to update first tenant version: %v", jobID, err)
 	}
 
@@ -179,6 +222,12 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	failedCount := 0
 
 	for i := 0; i < len(tenants); i += BatchSize {
+		// Check for cancellation before processing each batch
+		if err := checkCancelled(ctx); err != nil {
+			log.Printf("[job %d] job cancelled, stopping at batch %d", jobID, i/BatchSize)
+			break
+		}
+
 		end := i + BatchSize
 		if end > len(tenants) {
 			end = len(tenants)
@@ -199,14 +248,20 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 			}
 
 			// Record each tenant's result
-			if err := RecordTenantMigration(ctx, jobID, r.TenantID, statusFromResult(r), r.Error); err != nil {
+			dbCtx, cancel = withDBTimeout(ctx)
+			err = RecordTenantMigration(dbCtx, jobID, r.TenantID, statusFromResult(r), r.Error)
+			cancel()
+			if err != nil {
 				log.Printf("[job %d] failed to record tenant %d migration: %v", jobID, r.TenantID, err)
 			}
 		}
 
 		// Batch update successful tenants
 		if len(successIDs) > 0 {
-			if err := BatchUpdateTenantVersions(ctx, successIDs, migration.ToVersion); err != nil {
+			dbCtx, cancel = withDBTimeout(ctx)
+			err = BatchUpdateTenantVersions(dbCtx, successIDs, migration.ToVersion)
+			cancel()
+			if err != nil {
 				log.Printf("[job %d] failed to batch update versions: %v", jobID, err)
 			}
 		}
@@ -274,12 +329,28 @@ func migrateTenant(ctx context.Context, tenant Tenant, migrations map[int][]stri
 	// Execute with retry
 	var lastErr error
 	for attempt := 0; attempt < MaxRetries; attempt++ {
-		if attempt > 0 {
-			backoff := BaseBackoff * time.Duration(1<<uint(attempt-1))
-			time.Sleep(backoff)
+		// Check for cancellation before each retry attempt
+		if err := checkCancelled(ctx); err != nil {
+			result.Error = err.Error()
+			return result
 		}
 
-		err := BatchExecute(ctx, tenant.Name, allSQL)
+		if attempt > 0 {
+			backoff := BaseBackoff * time.Duration(1<<uint(attempt-1))
+			// Use a timer with context for cancellable sleep
+			select {
+			case <-ctx.Done():
+				result.Error = ErrJobCancelled.Error()
+				return result
+			case <-time.After(backoff):
+			}
+		}
+
+		// Execute with timeout
+		execCtx, cancel := context.WithTimeout(ctx, BatchExecuteTimeout)
+		err := BatchExecute(execCtx, tenant.Name, allSQL)
+		cancel()
+
 		if err == nil {
 			result.Success = true
 			return result
@@ -300,6 +371,19 @@ func migrateTenant(ctx context.Context, tenant Tenant, migrations map[int][]stri
 // migrateBatchConcurrent migrates a batch of tenants concurrently.
 func migrateBatchConcurrent(ctx context.Context, tenants []Tenant, migrations map[int][]string, targetVersion int) []MigrationResult {
 	results := make([]MigrationResult, len(tenants))
+
+	// Check for cancellation before starting batch
+	if err := checkCancelled(ctx); err != nil {
+		for i := range results {
+			results[i] = MigrationResult{
+				TenantID: tenants[i].ID,
+				Success:  false,
+				Error:    err.Error(),
+			}
+		}
+		return results
+	}
+
 	var wg sync.WaitGroup
 
 	for i, tenant := range tenants {
@@ -358,7 +442,9 @@ func statusFromResult(r MigrationResult) string {
 // Returns the count of retried tenants and optionally a new job ID.
 func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationResponse, error) {
 	// Get the original migration
-	migration, err := GetMigration(ctx, jobID)
+	dbCtx, cancel := withDBTimeout(ctx)
+	migration, err := GetMigration(dbCtx, jobID)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +456,9 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationRespon
 	}
 
 	// Get failed tenants
-	failedTenants, err := GetFailedTenants(ctx, jobID)
+	dbCtx, cancel = withDBTimeout(ctx)
+	failedTenants, err := GetFailedTenants(dbCtx, jobID)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +466,7 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationRespon
 	if len(failedTenants) == 0 {
 		return &RetryMigrationResponse{
 			RetriedCount: 0,
-			MigrationID:        jobID,
+			MigrationID:  jobID,
 		}, nil
 	}
 
@@ -388,8 +476,10 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationRespon
 		return nil, err
 	}
 
+	dbCtx, cancel = withDBTimeout(ctx)
+	defer cancel()
 	for _, tenant := range failedTenants {
-		_, err = conn.ExecContext(ctx, fmt.Sprintf(`
+		_, err = conn.ExecContext(dbCtx, fmt.Sprintf(`
 			DELETE FROM %s WHERE migration_id = ? AND tenant_id = ?
 		`, TableTenantMigrations), jobID, tenant.ID)
 		if err != nil {
@@ -407,7 +497,7 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationRespon
 
 	return &RetryMigrationResponse{
 		RetriedCount: len(failedTenants),
-		MigrationID:        jobID,
+		MigrationID:  jobID,
 	}, nil
 }
 
@@ -420,7 +510,10 @@ func ResumeRunningJobs(ctx context.Context) error {
 	}
 
 	// Find all running migrations
-	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
+	dbCtx, cancel := withDBTimeout(ctx)
+	defer cancel()
+
+	rows, err := conn.QueryContext(dbCtx, fmt.Sprintf(`
 		SELECT id FROM %s WHERE status = ?
 	`, TableMigrations), MigrationStatusRunning)
 	if err != nil {
@@ -460,21 +553,27 @@ func ResumeRunningJobs(ctx context.Context) error {
 
 func markJobSuccess(ctx context.Context, jobID int64, completed, failed int) {
 	state := MigrationStateSuccess
-	if err := UpdateMigrationStatus(ctx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
+	dbCtx, cancel := withDBTimeout(ctx)
+	defer cancel()
+	if err := UpdateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
 		log.Printf("[job %d] failed to mark success: %v", jobID, err)
 	}
 }
 
 func markJobPartial(ctx context.Context, jobID int64, completed, failed int) {
 	state := MigrationStatePartial
-	if err := UpdateMigrationStatus(ctx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
+	dbCtx, cancel := withDBTimeout(ctx)
+	defer cancel()
+	if err := UpdateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
 		log.Printf("[job %d] failed to mark partial: %v", jobID, err)
 	}
 }
 
 func markJobFailed(ctx context.Context, jobID int64, completed, failed int) {
 	state := MigrationStateFailed
-	if err := UpdateMigrationStatus(ctx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
+	dbCtx, cancel := withDBTimeout(ctx)
+	defer cancel()
+	if err := UpdateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
 		log.Printf("[job %d] failed to mark failed: %v", jobID, err)
 	}
 }
@@ -485,8 +584,11 @@ func updateTemplateVersion(ctx context.Context, templateID int32, version int) {
 		return
 	}
 
+	dbCtx, cancel := withDBTimeout(ctx)
+	defer cancel()
+
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
+	_, err = conn.ExecContext(dbCtx, fmt.Sprintf(`
 		UPDATE %s SET current_version = ?, updated_at = ? WHERE id = ?
 	`, TableTemplates), version, now, templateID)
 	if err != nil {
