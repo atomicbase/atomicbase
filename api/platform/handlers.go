@@ -10,8 +10,18 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/joe-ervin05/atomicbase/config"
 	"github.com/joe-ervin05/atomicbase/tools"
 )
+
+// withBody wraps handlers that read request bodies to enforce size limits.
+func withBody(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, config.Cfg.MaxRequestBody)
+		defer r.Body.Close()
+		handler(w, r)
+	}
+}
 
 func validateResourceName(name string) (code, message, hint string) {
 	if len(name) == 0 {
@@ -41,17 +51,17 @@ func RegisterRoutes(mux *http.ServeMux) {
 	// Templates
 	mux.HandleFunc("GET /platform/templates", handleListTemplates)
 	mux.HandleFunc("GET /platform/templates/{name}", handleGetTemplate)
-	mux.HandleFunc("POST /platform/templates", handleCreateTemplate)
+	mux.HandleFunc("POST /platform/templates", withBody(handleCreateTemplate))
 	mux.HandleFunc("DELETE /platform/templates/{name}", handleDeleteTemplate)
-	mux.HandleFunc("POST /platform/templates/{name}/diff", handleDiffTemplate)
-	mux.HandleFunc("POST /platform/templates/{name}/migrate", handleMigrateTemplate)
-	mux.HandleFunc("POST /platform/templates/{name}/rollback", handleRollbackTemplate)
+	mux.HandleFunc("POST /platform/templates/{name}/diff", withBody(handleDiffTemplate))
+	mux.HandleFunc("POST /platform/templates/{name}/migrate", withBody(handleMigrateTemplate))
+	mux.HandleFunc("POST /platform/templates/{name}/rollback", withBody(handleRollbackTemplate))
 	mux.HandleFunc("GET /platform/templates/{name}/history", handleGetTemplateHistory)
 
 	// Tenants
 	mux.HandleFunc("GET /platform/tenants", handleListTenants)
 	mux.HandleFunc("GET /platform/tenants/{name}", handleGetTenant)
-	mux.HandleFunc("POST /platform/tenants", handleCreateTenant)
+	mux.HandleFunc("POST /platform/tenants", withBody(handleCreateTenant))
 	mux.HandleFunc("DELETE /platform/tenants/{name}", handleDeleteTenant)
 	mux.HandleFunc("POST /platform/tenants/{name}/sync", handleSyncTenant)
 
