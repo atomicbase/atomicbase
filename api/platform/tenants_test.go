@@ -242,13 +242,6 @@ func TestListTenants_Multiple(t *testing.T) {
 	if tenants[0].Name != "tenant-a" || tenants[1].Name != "tenant-b" || tenants[2].Name != "tenant-c" {
 		t.Errorf("tenants not in expected order: %v", tenants)
 	}
-
-	// Token should be omitted in list
-	for _, tenant := range tenants {
-		if tenant.Token != "" {
-			t.Errorf("token should be omitted in list response, got: %s", tenant.Token)
-		}
-	}
 }
 
 // =============================================================================
@@ -278,9 +271,6 @@ func TestGetTenant_Found(t *testing.T) {
 	}
 	if tenant.TemplateVersion != 2 {
 		t.Errorf("templateVersion = %d, want 2", tenant.TemplateVersion)
-	}
-	if tenant.Token != "test-token" {
-		t.Errorf("token = %s, want test-token", tenant.Token)
 	}
 }
 

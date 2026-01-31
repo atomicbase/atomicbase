@@ -150,7 +150,7 @@ func initPrimaryDB() error {
 
 	// Prepare cached statement for tenant lookup (runs on every tenant request)
 	tenantLookupStmt, err = db.Prepare(fmt.Sprintf(
-		"SELECT id, token, COALESCE(template_id, 0), COALESCE(template_version, 1) FROM %s WHERE name = ?",
+		"SELECT id, COALESCE(template_id, 0), COALESCE(template_version, 1) FROM %s WHERE name = ?",
 		ReservedTableDatabases))
 	if err != nil {
 		primaryDB = nil
@@ -225,28 +225,28 @@ func updatePrimarySchema(schema SchemaCache) {
 // ConnTurso opens a connection to an external Turso database by name.
 func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 	org := config.Cfg.TursoOrganization
+	token := config.Cfg.TursoGroupAuthToken
 
 	if org == "" {
 		return Database{}, errors.New("TURSO_ORGANIZATION environment variable is not set but is required to access external databases")
 	}
 
+	if token == "" {
+		return Database{}, errors.New("TURSO_GROUP_AUTH_TOKEN environment variable is not set but is required to access external databases")
+	}
+
 	row := tenantLookupStmt.QueryRow(dbName)
 
 	var id sql.NullInt32
-	var token sql.NullString
 	var templateID int32
 	var tenantVersion int
 
-	err := row.Scan(&id, &token, &templateID, &tenantVersion)
+	err := row.Scan(&id, &templateID, &tenantVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Database{}, tools.ErrDatabaseNotFound
 		}
 		return Database{}, err
-	}
-
-	if !token.Valid {
-		return Database{}, errors.New("database token is missing")
 	}
 
 	// Get cached template (schema + current version)
@@ -261,7 +261,7 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 			tools.ErrDatabaseOutOfSync, tenantVersion, currentVersion)
 	}
 
-	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", dbName, org, token.String))
+	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", dbName, org, token))
 	if err != nil {
 		return Database{}, err
 	}

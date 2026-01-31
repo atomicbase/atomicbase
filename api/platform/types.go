@@ -157,7 +157,6 @@ type TemplateVersion struct {
 type Tenant struct {
 	ID              int32     `json:"id"`
 	Name            string    `json:"name"`
-	Token           string    `json:"token,omitempty"` // Omitted in list responses
 	TemplateID      int32     `json:"templateId"`
 	TemplateVersion int       `json:"templateVersion"`
 	CreatedAt       time.Time `json:"createdAt"`

@@ -279,7 +279,7 @@ func migrateTenant(ctx context.Context, tenant Tenant, migrations map[int][]stri
 			time.Sleep(backoff)
 		}
 
-		err := BatchExecute(ctx, tenant.Name, tenant.Token, allSQL)
+		err := BatchExecute(ctx, tenant.Name, allSQL)
 		if err == nil {
 			result.Success = true
 			return result

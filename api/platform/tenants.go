@@ -70,7 +70,7 @@ func GetTenant(ctx context.Context, name string) (*Tenant, error) {
 	}
 
 	row := conn.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT id, name, token, template_id, template_version, created_at, updated_at
+		SELECT id, name, template_id, template_version, created_at, updated_at
 		FROM %s
 		WHERE name = ?
 	`, TableTenants), name)
@@ -78,7 +78,7 @@ func GetTenant(ctx context.Context, name string) (*Tenant, error) {
 	var t Tenant
 	var createdAt, updatedAt string
 
-	if err := row.Scan(&t.ID, &t.Name, &t.Token, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrTenantNotFound
 		}
@@ -122,14 +122,6 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 		return nil, fmt.Errorf("failed to create turso database: %w", err)
 	}
 
-	// Generate database token
-	token, err := tursoCreateToken(ctx, name)
-	if err != nil {
-		// Try to clean up the database
-		_ = tursoDeleteDatabase(ctx, name)
-		return nil, fmt.Errorf("failed to create database token: %w", err)
-	}
-
 	// Initialize database with template schema
 	// Retry with backoff since newly created Turso databases may not be immediately available
 	migrationSQL := generateSchemaSQL(template.Schema)
@@ -138,7 +130,7 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
-		schemaErr = BatchExecute(ctx, name, token, migrationSQL)
+		schemaErr = BatchExecute(ctx, name, migrationSQL)
 		if schemaErr == nil {
 			break
 		}
@@ -156,9 +148,9 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 	// Insert tenant record
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := conn.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (name, token, template_id, template_version, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, TableTenants), name, token, template.ID, template.CurrentVersion, now, now)
+		INSERT INTO %s (name, template_id, template_version, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, TableTenants), name, template.ID, template.CurrentVersion, now, now)
 	if err != nil {
 		// Try to clean up
 		_ = tursoDeleteDatabase(ctx, name)
@@ -175,7 +167,6 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 	return &Tenant{
 		ID:              int32(tenantID),
 		Name:            name,
-		Token:           token,
 		TemplateID:      template.ID,
 		TemplateVersion: template.CurrentVersion,
 		CreatedAt:       createdAt,
@@ -269,7 +260,7 @@ func SyncTenant(ctx context.Context, name string) (*SyncTenantResponse, error) {
 
 	// Execute all migrations
 	if len(allSQL) > 0 {
-		if err := BatchExecute(ctx, tenant.Name, tenant.Token, allSQL); err != nil {
+		if err := BatchExecute(ctx, tenant.Name, allSQL); err != nil {
 			return nil, fmt.Errorf("migration failed: %w", err)
 		}
 	}
@@ -348,7 +339,7 @@ func GetTenantsByTemplate(ctx context.Context, templateID int32) ([]Tenant, erro
 	}
 
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
-		SELECT id, name, token, template_id, template_version, created_at, updated_at
+		SELECT id, name, template_id, template_version, created_at, updated_at
 		FROM %s
 		WHERE template_id = ?
 		ORDER BY name
@@ -362,7 +353,7 @@ func GetTenantsByTemplate(ctx context.Context, templateID int32) ([]Tenant, erro
 	for rows.Next() {
 		var t Tenant
 		var createdAt, updatedAt string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Token, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -390,7 +381,7 @@ func GetPendingTenants(ctx context.Context, migrationID int64, templateID int32,
 	}
 
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
-		SELECT t.id, t.name, t.token, t.template_id, t.template_version, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.template_id, t.template_version, t.created_at, t.updated_at
 		FROM %s t
 		WHERE t.template_id = ?
 		  AND t.template_version < ?
@@ -409,7 +400,7 @@ func GetPendingTenants(ctx context.Context, migrationID int64, templateID int32,
 	for rows.Next() {
 		var t Tenant
 		var createdAt, updatedAt string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Token, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -436,7 +427,7 @@ func GetFailedTenants(ctx context.Context, migrationID int64) ([]Tenant, error) 
 	}
 
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
-		SELECT t.id, t.name, t.token, t.template_id, t.template_version, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.template_id, t.template_version, t.created_at, t.updated_at
 		FROM %s t
 		JOIN %s tm ON tm.tenant_id = t.id
 		WHERE tm.migration_id = ? AND tm.status = 'failed'
@@ -451,7 +442,7 @@ func GetFailedTenants(ctx context.Context, migrationID int64) ([]Tenant, error) 
 	for rows.Next() {
 		var t Tenant
 		var createdAt, updatedAt string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Token, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -563,7 +554,7 @@ func tursoCreateDatabase(ctx context.Context, name string) error {
 
 	body, err := json.Marshal(map[string]string{
 		"name":  name,
-		"group": "default",
+		"group": config.Cfg.TursoGroup,
 	})
 	if err != nil {
 		return err
@@ -642,51 +633,3 @@ func tursoDeleteDatabase(ctx context.Context, name string) error {
 	return nil
 }
 
-// tursoCreateToken creates a database access token.
-func tursoCreateToken(ctx context.Context, dbName string) (string, error) {
-	org := config.Cfg.TursoOrganization
-	apiKey := config.Cfg.TursoAPIKey
-	if org == "" || apiKey == "" {
-		return "", fmt.Errorf("TURSO_ORGANIZATION and TURSO_API_KEY must be set")
-	}
-
-	// Build request body with expiration
-	expiration := config.Cfg.TursoTokenExpiration
-	body, err := json.Marshal(map[string]any{
-		"expiration": expiration,
-		"read_only":  false,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	url := fmt.Sprintf("https://api.turso.tech/v1/organizations/%s/databases/%s/auth/tokens", org, dbName)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		var errBody bytes.Buffer
-		errBody.ReadFrom(resp.Body)
-		return "", fmt.Errorf("turso API error: %s - %s", resp.Status, errBody.String())
-	}
-
-	var tokenResp struct {
-		JWT string `json:"jwt"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", fmt.Errorf("failed to parse token response: %w", err)
-	}
-
-	return tokenResp.JWT, nil
-}

@@ -54,7 +54,7 @@ type pipelineError struct {
 // This is significantly more efficient than individual ExecContext calls:
 // - 1 HTTP round-trip instead of N
 // - Turso benchmarks show ~3x improvement (5.3s for 10 individual queries vs 1.7s for 1000 batched)
-func BatchExecute(ctx context.Context, dbName, token string, statements []string) error {
+func BatchExecute(ctx context.Context, dbName string, statements []string) error {
 	if len(statements) == 0 {
 		return nil
 	}
@@ -62,6 +62,11 @@ func BatchExecute(ctx context.Context, dbName, token string, statements []string
 	org := config.Cfg.TursoOrganization
 	if org == "" {
 		return fmt.Errorf("TURSO_ORGANIZATION is not set")
+	}
+
+	token := config.Cfg.TursoGroupAuthToken
+	if token == "" {
+		return fmt.Errorf("TURSO_GROUP_AUTH_TOKEN is not set")
 	}
 
 	// Build pipeline request
