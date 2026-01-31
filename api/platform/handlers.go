@@ -219,10 +219,12 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validationResult.Valid {
-		respondJSON(w, http.StatusBadRequest, map[string]any{
-			"code":   "VALIDATION_FAILED",
-			"errors": validationResult.Errors,
-		})
+		// Join validation errors into a single message for standard format
+		errMsg := validationResult.Errors[0].Message
+		if len(validationResult.Errors) > 1 {
+			errMsg = fmt.Sprintf("%d errors: %s", len(validationResult.Errors), errMsg)
+		}
+		tools.RespErr(w, fmt.Errorf("validation failed: %s", errMsg))
 		return
 	}
 
