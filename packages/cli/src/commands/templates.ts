@@ -424,7 +424,7 @@ async function listTemplates(): Promise<void> {
 
     console.log(`\n  Total: ${templates.length} template(s)`);
   } catch (err) {
-    console.error("Failed to list templates:", err instanceof Error ? err.message : err);
+    console.error("Failed to list templates:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -456,12 +456,7 @@ async function getTemplate(name: string): Promise<void> {
       }
     }
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      console.error(`Template "${name}" not found.`);
-      console.error("\nUse 'atomicbase templates list' to see available templates.");
-      process.exit(1);
-    }
-    console.error("Failed to get template:", err instanceof Error ? err.message : err);
+    console.error("Failed to get template:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -500,18 +495,7 @@ async function deleteTemplate(name: string, force: boolean): Promise<void> {
     await api.deleteTemplate(name);
     console.log(`Deleted template "${name}"`);
   } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.status === 404) {
-        console.error(`Template "${name}" not found.`);
-        process.exit(1);
-      }
-      if (err.code === "TEMPLATE_IN_USE") {
-        console.error(`\nTemplate "${name}" is in use by tenants.`);
-        console.error("Delete all tenants using this template first.");
-        process.exit(1);
-      }
-    }
-    console.error("Failed to delete template:", err instanceof Error ? err.message : err);
+    console.error("Failed to delete template:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -545,12 +529,7 @@ async function showHistory(name: string): Promise<void> {
     console.log(`\n  Total: ${history.length} version(s)`);
     console.log(`\n  To rollback: atomicbase templates rollback ${name} <version>`);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      console.error(`Template "${name}" not found.`);
-      console.error("\nUse 'atomicbase templates list' to see available templates.");
-      process.exit(1);
-    }
-    console.error("Failed to get history:", err instanceof Error ? err.message : err);
+    console.error("Failed to get history:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -611,17 +590,11 @@ async function rollbackTemplate(name: string, version: string, force: boolean): 
     console.log(`Rollback initiated. Migration ID: ${result.migrationId}`);
     console.log(`\nTrack progress with: atomicbase migrations ${result.migrationId}`);
   } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.code === "VERSION_NOT_FOUND") {
-        console.error(`Version ${targetVersion} not found.`);
-        process.exit(1);
-      }
-      if (err.code === "NO_CHANGES") {
-        console.log("No schema changes needed for this rollback.");
-        return;
-      }
+    if (err instanceof ApiError && err.code === "NO_CHANGES") {
+      console.log("No schema changes needed for this rollback.");
+      return;
     }
-    console.error("Failed to rollback:", err instanceof Error ? err.message : err);
+    console.error("Failed to rollback:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -734,7 +707,7 @@ async function pullTemplates(templateName: string | undefined, options: { yes?: 
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           console.error(`Template "${templateName}" not found on server.`);
-          console.error("\nUse 'atomicbase templates list' to see available templates.");
+          if (err.hint) console.error(`\nHint: ${err.hint}`);
           process.exit(1);
         }
         throw err;
@@ -852,7 +825,7 @@ async function pullTemplates(templateName: string | undefined, options: { yes?: 
 
     console.log(`\nPulled ${operations.length} schema(s) to ${schemasDir}`);
   } catch (err) {
-    console.error("Failed to pull schemas:", err);
+    console.error("Failed to pull schemas:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }

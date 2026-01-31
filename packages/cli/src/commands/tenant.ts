@@ -59,7 +59,7 @@ async function listTenants(): Promise<void> {
 
     console.log(`\n  Total: ${tenants.length} tenant(s)`);
   } catch (err) {
-    console.error("Failed to list tenants:", err instanceof Error ? err.message : err);
+    console.error("Failed to list tenants:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -84,12 +84,7 @@ async function getTenant(name: string): Promise<void> {
       console.log(`  Token:            ${tenant.token}`);
     }
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      console.error(`Tenant "${name}" not found.`);
-      console.error("\nUse 'atomicbase tenant list' to see available tenants.");
-      process.exit(1);
-    }
-    console.error("Failed to get tenant:", err instanceof Error ? err.message : err);
+    console.error("Failed to get tenant:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -114,18 +109,7 @@ async function createTenant(name: string, template: string): Promise<void> {
       console.log(`  Token:            ${tenant.token}`);
     }
   } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.code === "TENANT_EXISTS") {
-        console.error(`\n✗ Tenant "${name}" already exists.`);
-        process.exit(1);
-      }
-      if (err.code === "TEMPLATE_NOT_FOUND") {
-        console.error(`\n✗ Template "${template}" not found.`);
-        console.error("\nUse 'atomicbase push' to create a template first.");
-        process.exit(1);
-      }
-    }
-    console.error("\n✗ Failed to create tenant:", err instanceof Error ? err.message : err);
+    console.error("\n✗ Failed to create tenant:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -164,11 +148,7 @@ async function deleteTenant(name: string, force: boolean): Promise<void> {
     await api.deleteTenant(name);
     console.log(`✓ Deleted tenant "${name}"`);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      console.error(`Tenant "${name}" not found.`);
-      process.exit(1);
-    }
-    console.error("Failed to delete tenant:", err instanceof Error ? err.message : err);
+    console.error("Failed to delete tenant:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -186,17 +166,11 @@ async function syncTenant(name: string): Promise<void> {
     const result = await api.syncTenant(name);
     console.log(`✓ Synced tenant "${name}" from v${result.fromVersion} to v${result.toVersion}`);
   } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.status === 404) {
-        console.error(`Tenant "${name}" not found.`);
-        process.exit(1);
-      }
-      if (err.code === "TENANT_IN_SYNC") {
-        console.log(`✓ Tenant "${name}" is already at the latest version.`);
-        return;
-      }
+    if (err instanceof ApiError && err.code === "TENANT_IN_SYNC") {
+      console.log(`✓ Tenant "${name}" is already at the latest version.`);
+      return;
     }
-    console.error("Failed to sync tenant:", err instanceof Error ? err.message : err);
+    console.error("Failed to sync tenant:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }

@@ -4,15 +4,25 @@ import type { AtomicbaseConfig } from "./config.js";
 // Re-export types from schema package (these match Go API types directly)
 export type { TableDefinition, ColumnDefinition, IndexDefinition };
 
-// Custom error class to preserve HTTP status code
+// Custom error class to preserve HTTP status code and API error details
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public code?: string
+    public code?: string,
+    public hint?: string
   ) {
     super(message);
     this.name = "ApiError";
+  }
+
+  /** Format the error for display, including hint if available */
+  format(): string {
+    let result = this.message;
+    if (this.hint) {
+      result += `\n\nHint: ${this.hint}`;
+    }
+    return result;
   }
 }
 
@@ -181,7 +191,8 @@ export class ApiClient {
       throw new ApiError(
         error.message || `API error: ${response.status} ${response.statusText}`,
         response.status,
-        error.code
+        error.code,
+        error.hint
       );
     }
 

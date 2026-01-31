@@ -54,7 +54,7 @@ async function listMigrations(options: { status?: string }): Promise<void> {
 
     console.log(`\n  Total: ${migrations.length} migration(s)`);
   } catch (err) {
-    console.error("Failed to list migrations:", err instanceof Error ? err.message : err);
+    console.error("Failed to list migrations:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -95,11 +95,7 @@ async function getMigration(migrationId: string): Promise<void> {
       }
     }
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      console.error(`Migration #${migrationId} not found.`);
-      process.exit(1);
-    }
-    console.error("Failed to get migration:", err instanceof Error ? err.message : err);
+    console.error("Failed to get migration:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -129,17 +125,7 @@ async function retryMigration(migrationId: string): Promise<void> {
       console.log(`  New migration ID: ${result.migrationId}`);
     }
   } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.status === 404) {
-        console.error(`Migration #${migrationId} not found.`);
-        process.exit(1);
-      }
-      if (err.code === "ATOMICBASE_BUSY") {
-        console.error("A migration is already in progress. Wait for it to complete.");
-        process.exit(1);
-      }
-    }
-    console.error("Failed to retry migration:", err instanceof Error ? err.message : err);
+    console.error("Failed to retry migration:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
