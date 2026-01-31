@@ -20,10 +20,10 @@ const (
 	BaseBackoff = 100 * time.Millisecond
 )
 
-// Common errors for migration operations.
+// Re-export errors from tools for backward compatibility.
 var (
-	ErrMigrationNotFound = errors.New("migration not found")
-	ErrMigrationLocked   = errors.New("migration locked: another migration is already in progress")
+	ErrMigrationNotFound = tools.ErrMigrationNotFound
+	ErrMigrationLocked   = tools.ErrAtomicbaseBusy
 	ErrFirstDBFailed     = errors.New("first database migration failed")
 )
 

@@ -14,12 +14,12 @@ import (
 	"github.com/joe-ervin05/atomicbase/tools"
 )
 
-// Common errors for template operations.
+// Re-export errors from tools for backward compatibility.
 var (
-	ErrTemplateNotFound = errors.New("template not found")
-	ErrTemplateInUse    = errors.New("template is in use by one or more tenants")
-	ErrTemplateExists   = errors.New("template already exists")
-	ErrNoChanges        = errors.New("no schema changes detected")
+	ErrTemplateNotFound = tools.ErrTemplateNotFound
+	ErrTemplateInUse    = tools.ErrTemplateInUse
+	ErrTemplateExists   = tools.ErrTemplateExists
+	ErrNoChanges        = tools.ErrNoChanges
 )
 
 // ListTemplates returns all templates.

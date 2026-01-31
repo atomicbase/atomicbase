@@ -136,6 +136,75 @@ func BuildAPIError(err error) (int, APIError) {
 			Message: err.Error(),
 			Hint:    "Add a 'Tenant' header with the database name. Use GET /platform/tenants to list available databases.",
 		}
+
+	// Platform API errors
+	case errors.Is(err, ErrInvalidJSON):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeInvalidJSON,
+			Message: err.Error(),
+			Hint:    "Check JSON syntax.",
+		}
+	case errors.Is(err, ErrTemplateExists):
+		return http.StatusConflict, APIError{
+			Code:    CodeTemplateExists,
+			Message: err.Error(),
+			Hint:    "Choose a different name or delete the existing template first.",
+		}
+	case errors.Is(err, ErrNoChanges):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeNoChanges,
+			Message: err.Error(),
+			Hint:    "The provided schema is identical to the current version.",
+		}
+	case errors.Is(err, ErrAtomicbaseBusy):
+		return http.StatusConflict, APIError{
+			Code:    CodeAtomicbaseBusy,
+			Message: err.Error(),
+			Hint:    "Wait for the current migration to complete or check job status.",
+		}
+	case errors.Is(err, ErrTenantExists):
+		return http.StatusConflict, APIError{
+			Code:    CodeTenantExists,
+			Message: err.Error(),
+			Hint:    "Choose a different name or delete the existing tenant first.",
+		}
+	case errors.Is(err, ErrTenantNotFound):
+		return http.StatusNotFound, APIError{
+			Code:    CodeTenantNotFound,
+			Message: err.Error(),
+			Hint:    "Use GET /platform/tenants to list available tenants.",
+		}
+	case errors.Is(err, ErrTenantInSync):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeTenantInSync,
+			Message: err.Error(),
+			Hint:    "The tenant is already at the current template version.",
+		}
+	case errors.Is(err, ErrMigrationNotFound):
+		return http.StatusNotFound, APIError{
+			Code:    CodeMigrationNotFound,
+			Message: err.Error(),
+			Hint:    "The migration may have been deleted or never existed.",
+		}
+	case errors.Is(err, ErrVersionNotFound):
+		return http.StatusNotFound, APIError{
+			Code:    CodeVersionNotFound,
+			Message: err.Error(),
+			Hint:    "Use GET /platform/templates/{name}/history to see available versions.",
+		}
+	case errors.Is(err, ErrInvalidMigration):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeInvalidMigration,
+			Message: err.Error(),
+			Hint:    "Check the migration plan for errors.",
+		}
+	case strings.HasPrefix(err.Error(), "invalid request:"):
+		return http.StatusBadRequest, APIError{
+			Code:    CodeInvalidRequest,
+			Message: strings.TrimPrefix(err.Error(), "invalid request: "),
+			Hint:    "Check the request parameters.",
+		}
+
 	case errors.Is(err, ErrReservedTable):
 		return http.StatusForbidden, APIError{
 			Code:    CodeReservedTable,

@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/joe-ervin05/atomicbase/config"
+	"github.com/joe-ervin05/atomicbase/tools"
 )
 
-// Common errors for tenant operations.
+// Re-export errors from tools for backward compatibility.
 var (
-	ErrTenantNotFound = errors.New("tenant not found")
-	ErrTenantExists   = errors.New("tenant already exists")
-	ErrTenantInSync   = errors.New("tenant is already at current version")
+	ErrTenantNotFound = tools.ErrTenantNotFound
+	ErrTenantExists   = tools.ErrTenantExists
+	ErrTenantInSync   = tools.ErrTenantInSync
 )
 
 // ListTenants returns all tenants.
@@ -632,4 +633,3 @@ func tursoDeleteDatabase(ctx context.Context, name string) error {
 
 	return nil
 }
-

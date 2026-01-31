@@ -4,12 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/joe-ervin05/atomicbase/tools"
@@ -70,7 +68,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	templates, err := ListTemplates(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -80,18 +78,13 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template name is required"))
 		return
 	}
 
 	template, err := GetTemplate(r.Context(), name)
 	if err != nil {
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", err.Error(),
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -101,33 +94,28 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	var req CreateTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "Check JSON syntax.")
+		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
 
 	if req.Name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("name is required"))
 		return
 	}
 
-	if code, msg, hint := validateResourceName(req.Name); code != "" {
-		respondError(w, http.StatusBadRequest, code, msg, hint)
+	if code, msg, _ := validateResourceName(req.Name); code != "" {
+		tools.RespErr(w, tools.InvalidRequestErr(msg))
 		return
 	}
 
 	if len(req.Schema.Tables) == 0 {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "schema must have at least one table", "")
+		tools.RespErr(w, tools.InvalidRequestErr("schema must have at least one table"))
 		return
 	}
 
 	template, err := CreateTemplate(r.Context(), req.Name, req.Schema)
 	if err != nil {
-		if errors.Is(err, ErrTemplateExists) {
-			respondError(w, http.StatusConflict, "TEMPLATE_EXISTS", err.Error(),
-				"Choose a different name or delete the existing template first.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -137,23 +125,13 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 func handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template name is required"))
 		return
 	}
 
 	err := DeleteTemplate(r.Context(), name)
 	if err != nil {
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", err.Error(),
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		if errors.Is(err, ErrTemplateInUse) {
-			respondError(w, http.StatusConflict, "TEMPLATE_IN_USE", err.Error(),
-				"Delete all tenants using this template first.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -163,29 +141,19 @@ func handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 func handleDiffTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template name is required"))
 		return
 	}
 
 	var req DiffRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "Check JSON syntax.")
+		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
 
 	result, err := DiffTemplate(r.Context(), name, req.Schema)
 	if err != nil {
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", err.Error(),
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		if errors.Is(err, ErrNoChanges) {
-			respondError(w, http.StatusBadRequest, "NO_CHANGES", err.Error(),
-				"The provided schema is identical to the current version.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -195,13 +163,13 @@ func handleDiffTemplate(w http.ResponseWriter, r *http.Request) {
 func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template name is required"))
 		return
 	}
 
 	var req MigrateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "Check JSON syntax.")
+		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
 
@@ -210,36 +178,28 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	// Get current template
 	template, err := GetTemplate(ctx, name)
 	if err != nil {
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", err.Error(),
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
 	// Check for concurrent migration
 	jm := GetJobManager()
 	if jm.IsRunning(template.ID) {
-		respondError(w, http.StatusConflict, "ATOMICBASE_BUSY",
-			"another migration is already in progress",
-			"Wait for the current migration to complete or check job status.")
+		tools.RespErr(w, tools.ErrAtomicbaseBusy)
 		return
 	}
 
 	// Diff schemas
 	changes := diffSchemas(template.Schema, req.Schema)
 	if len(changes) == 0 {
-		respondError(w, http.StatusBadRequest, "NO_CHANGES", "no schema changes detected",
-			"The provided schema is identical to the current version.")
+		tools.RespErr(w, tools.ErrNoChanges)
 		return
 	}
 
 	// Generate migration plan
 	plan, err := GenerateMigrationPlan(template.Schema, req.Schema, changes, req.Merge)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_MIGRATION", err.Error(), "")
+		tools.RespErr(w, tools.InvalidMigrationErr(err.Error()))
 		return
 	}
 
@@ -247,14 +207,14 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	// Get first tenant for probe database (if any exist)
 	tenants, err := GetTenantsByTemplate(ctx, template.ID)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
 	// Validate FK references (no DB needed)
 	validationResult, err := ValidateMigrationPlan(ctx, req.Schema, nil)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -270,7 +230,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	newVersion := template.CurrentVersion + 1
 	schemaJSON, err := encodeSchemaForStorage(req.Schema)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 	hash := sha256.Sum256(schemaJSON)
@@ -278,7 +238,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := getDB()
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -288,7 +248,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	if len(tenants) == 0 {
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			tools.RespErr(w, err)
 			return
 		}
 		defer tx.Rollback()
@@ -299,7 +259,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 			VALUES (?, ?, ?, ?, ?)
 		`, TableTemplatesHistory), template.ID, newVersion, schemaJSON, checksum, now)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			tools.RespErr(w, err)
 			return
 		}
 
@@ -308,13 +268,13 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 			UPDATE %s SET current_version = ?, updated_at = ? WHERE id = ?
 		`, TableTemplates), newVersion, now, template.ID)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			tools.RespErr(w, err)
 			return
 		}
 
 		// Commit transaction
 		if err := tx.Commit(); err != nil {
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+			tools.RespErr(w, err)
 			return
 		}
 
@@ -343,14 +303,14 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?)
 	`, TableTemplatesHistory), template.ID, newVersion, schemaJSON, checksum, now)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
 	// Create migration record
 	migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -363,18 +323,18 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template name is required"))
 		return
 	}
 
 	var req RollbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "Check JSON syntax.")
+		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
 
 	if req.Version < 1 {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "version must be at least 1", "")
+		tools.RespErr(w, tools.InvalidRequestErr("version must be at least 1"))
 		return
 	}
 
@@ -383,36 +343,26 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 	// Get current template
 	template, err := GetTemplate(ctx, name)
 	if err != nil {
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", err.Error(),
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
 	if req.Version >= template.CurrentVersion {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST",
-			"rollback version must be less than current version",
-			fmt.Sprintf("Current version is %d.", template.CurrentVersion))
+		tools.RespErr(w, tools.InvalidRequestErr(fmt.Sprintf("rollback version must be less than current version %d", template.CurrentVersion)))
 		return
 	}
 
 	// Check for concurrent migration
 	jm := GetJobManager()
 	if jm.IsRunning(template.ID) {
-		respondError(w, http.StatusConflict, "ATOMICBASE_BUSY",
-			"another migration is already in progress",
-			"Wait for the current migration to complete or check job status.")
+		tools.RespErr(w, tools.ErrAtomicbaseBusy)
 		return
 	}
 
 	// Get target version schema
 	targetVersion, err := GetTemplateVersion(ctx, template.ID, req.Version)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "VERSION_NOT_FOUND", err.Error(),
-			"Use GET /platform/templates/{name}/history to see available versions.")
+		tools.RespErr(w, tools.VersionNotFoundErr(req.Version))
 		return
 	}
 
@@ -422,7 +372,7 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 	// Generate migration plan (current -> target)
 	plan, err := GenerateMigrationPlan(template.Schema, targetVersion.Schema, changes, nil)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_MIGRATION", err.Error(), "")
+		tools.RespErr(w, tools.InvalidMigrationErr(err.Error()))
 		return
 	}
 
@@ -430,7 +380,7 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 	newVersion := template.CurrentVersion + 1
 	schemaJSON, err := encodeSchemaForStorage(targetVersion.Schema)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 	hash := sha256.Sum256(schemaJSON)
@@ -438,7 +388,7 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := getDB()
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -448,14 +398,14 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?)
 	`, TableTemplatesHistory), template.ID, newVersion, schemaJSON, checksum, now)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
 	// Create migration record
 	migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -468,18 +418,13 @@ func handleRollbackTemplate(w http.ResponseWriter, r *http.Request) {
 func handleGetTemplateHistory(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template name is required"))
 		return
 	}
 
 	history, err := GetTemplateHistory(r.Context(), name)
 	if err != nil {
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", err.Error(),
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -493,7 +438,7 @@ func handleGetTemplateHistory(w http.ResponseWriter, r *http.Request) {
 func handleListTenants(w http.ResponseWriter, r *http.Request) {
 	tenants, err := ListTenants(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -503,18 +448,13 @@ func handleListTenants(w http.ResponseWriter, r *http.Request) {
 func handleGetTenant(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "tenant name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("tenant name is required"))
 		return
 	}
 
 	tenant, err := GetTenant(r.Context(), name)
 	if err != nil {
-		if errors.Is(err, ErrTenantNotFound) {
-			respondError(w, http.StatusNotFound, "TENANT_NOT_FOUND", err.Error(),
-				"Use GET /platform/tenants to list available tenants.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -524,43 +464,28 @@ func handleGetTenant(w http.ResponseWriter, r *http.Request) {
 func handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	var req CreateTenantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "Check JSON syntax.")
+		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
 
 	if req.Name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("name is required"))
 		return
 	}
 
-	if code, msg, hint := validateResourceName(req.Name); code != "" {
-		respondError(w, http.StatusBadRequest, code, msg, hint)
+	if code, msg, _ := validateResourceName(req.Name); code != "" {
+		tools.RespErr(w, tools.InvalidRequestErr(msg))
 		return
 	}
 
 	if req.Template == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "template is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("template is required"))
 		return
 	}
 
 	tenant, err := CreateTenant(r.Context(), req.Name, req.Template)
 	if err != nil {
-		if errors.Is(err, ErrTenantExists) {
-			respondError(w, http.StatusConflict, "TENANT_EXISTS", err.Error(),
-				"Choose a different name or delete the existing tenant first.")
-			return
-		}
-		if errors.Is(err, ErrTemplateNotFound) {
-			respondError(w, http.StatusNotFound, "TEMPLATE_NOT_FOUND", "template not found",
-				"Use GET /platform/templates to list available templates.")
-			return
-		}
-		// Check for Turso errors
-		if strings.Contains(err.Error(), "turso") || strings.Contains(err.Error(), "TURSO") {
-			tools.RespErr(w, err)
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -570,23 +495,13 @@ func handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 func handleDeleteTenant(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "tenant name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("tenant name is required"))
 		return
 	}
 
 	err := DeleteTenant(r.Context(), name)
 	if err != nil {
-		if errors.Is(err, ErrTenantNotFound) {
-			respondError(w, http.StatusNotFound, "TENANT_NOT_FOUND", err.Error(),
-				"Use GET /platform/tenants to list available tenants.")
-			return
-		}
-		// Check for Turso errors
-		if strings.Contains(err.Error(), "turso") || strings.Contains(err.Error(), "TURSO") {
-			tools.RespErr(w, err)
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -596,28 +511,13 @@ func handleDeleteTenant(w http.ResponseWriter, r *http.Request) {
 func handleSyncTenant(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "tenant name is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("tenant name is required"))
 		return
 	}
 
 	result, err := SyncTenant(r.Context(), name)
 	if err != nil {
-		if errors.Is(err, ErrTenantNotFound) {
-			respondError(w, http.StatusNotFound, "TENANT_NOT_FOUND", err.Error(),
-				"Use GET /platform/tenants to list available tenants.")
-			return
-		}
-		if errors.Is(err, ErrTenantInSync) {
-			respondError(w, http.StatusBadRequest, "TENANT_IN_SYNC", err.Error(),
-				"The tenant is already at the current template version.")
-			return
-		}
-		// Check for Turso errors
-		if strings.Contains(err.Error(), "turso") || strings.Contains(err.Error(), "TURSO") {
-			tools.RespErr(w, err)
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -634,7 +534,7 @@ func handleListMigrations(w http.ResponseWriter, r *http.Request) {
 
 	migrations, err := ListMigrations(r.Context(), status)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -644,24 +544,19 @@ func handleListMigrations(w http.ResponseWriter, r *http.Request) {
 func handleGetMigration(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "migration id is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("migration id is required"))
 		return
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid migration id", "Migration ID must be a number.")
+		tools.RespErr(w, tools.InvalidRequestErr("invalid migration id"))
 		return
 	}
 
 	migration, err := GetMigration(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, ErrMigrationNotFound) {
-			respondError(w, http.StatusNotFound, "MIGRATION_NOT_FOUND", err.Error(),
-				"The migration may have been deleted or never existed.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -671,29 +566,19 @@ func handleGetMigration(w http.ResponseWriter, r *http.Request) {
 func handleRetryMigration(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "migration id is required", "")
+		tools.RespErr(w, tools.InvalidRequestErr("migration id is required"))
 		return
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid migration id", "Migration ID must be a number.")
+		tools.RespErr(w, tools.InvalidRequestErr("invalid migration id"))
 		return
 	}
 
 	result, err := RetryFailedTenants(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, ErrMigrationNotFound) {
-			respondError(w, http.StatusNotFound, "MIGRATION_NOT_FOUND", err.Error(),
-				"The migration may have been deleted or never existed.")
-			return
-		}
-		if errors.Is(err, ErrMigrationLocked) {
-			respondError(w, http.StatusConflict, "ATOMICBASE_BUSY", err.Error(),
-				"Wait for the current migration to complete.")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), "")
+		tools.RespErr(w, err)
 		return
 	}
 
@@ -708,17 +593,4 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
-}
-
-func respondError(w http.ResponseWriter, status int, code, message, hint string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	resp := map[string]string{
-		"code":    code,
-		"message": message,
-	}
-	if hint != "" {
-		resp["hint"] = hint
-	}
-	json.NewEncoder(w).Encode(resp)
 }

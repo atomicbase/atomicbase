@@ -35,6 +35,20 @@ const (
 	CodeInvalidName         = "INVALID_NAME"
 	CodeInternalError       = "INTERNAL_ERROR"
 
+	// Platform API error codes
+	CodeInvalidJSON       = "INVALID_JSON"
+	CodeInvalidRequest    = "INVALID_REQUEST"
+	CodeTemplateExists    = "TEMPLATE_EXISTS"
+	CodeNoChanges         = "NO_CHANGES"
+	CodeAtomicbaseBusy    = "ATOMICBASE_BUSY"
+	CodeTenantExists      = "TENANT_EXISTS"
+	CodeTenantNotFound    = "TENANT_NOT_FOUND"
+	CodeTenantInSync      = "TENANT_IN_SYNC"
+	CodeMigrationNotFound = "MIGRATION_NOT_FOUND"
+	CodeVersionNotFound   = "VERSION_NOT_FOUND"
+	CodeInvalidMigration  = "INVALID_MIGRATION"
+	CodeValidationFailed  = "VALIDATION_FAILED"
+
 	// Turso-specific error codes
 	CodeTursoConfigMissing = "TURSO_CONFIG_MISSING"
 	CodeTursoAuthFailed    = "TURSO_AUTH_FAILED"
@@ -81,6 +95,18 @@ var (
 	ErrInArrayTooLarge    = errors.New("IN array exceeds maximum size")
 	ErrBatchTooLarge      = errors.New("batch exceeds maximum number of operations")
 	ErrMissingTenant      = errors.New("Tenant header is required")
+
+	// Platform API errors
+	ErrInvalidJSON       = errors.New("invalid request body")
+	ErrTemplateExists    = errors.New("template already exists")
+	ErrNoChanges         = errors.New("no schema changes detected")
+	ErrAtomicbaseBusy    = errors.New("another migration is already in progress")
+	ErrTenantExists      = errors.New("tenant already exists")
+	ErrTenantNotFound    = errors.New("tenant not found")
+	ErrTenantInSync      = errors.New("tenant is already at current version")
+	ErrMigrationNotFound = errors.New("migration not found")
+	ErrVersionNotFound   = errors.New("version not found")
+	ErrInvalidMigration  = errors.New("invalid migration")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.
@@ -101,4 +127,19 @@ func ColumnNotFoundErr(table, column string) error {
 // NoRelationshipErr returns an error indicating no FK relationship exists.
 func NoRelationshipErr(table1, table2 string) error {
 	return fmt.Errorf("%w: %s and %s", ErrNoRelationship, table1, table2)
+}
+
+// InvalidRequestErr returns an error for invalid request validation.
+func InvalidRequestErr(msg string) error {
+	return fmt.Errorf("invalid request: %s", msg)
+}
+
+// InvalidMigrationErr returns an error for migration validation failures.
+func InvalidMigrationErr(msg string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidMigration, msg)
+}
+
+// VersionNotFoundErr returns an error for missing template version.
+func VersionNotFoundErr(version int) error {
+	return fmt.Errorf("%w: version %d", ErrVersionNotFound, version)
 }
