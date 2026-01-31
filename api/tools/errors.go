@@ -32,6 +32,7 @@ const (
 	CodeNoFTSIndex          = "NO_FTS_INDEX"
 	CodeBatchTooLarge       = "BATCH_TOO_LARGE"
 	CodeMissingTenant       = "MISSING_TENANT"
+	CodeInvalidName         = "INVALID_NAME"
 	CodeInternalError       = "INTERNAL_ERROR"
 
 	// Turso-specific error codes
