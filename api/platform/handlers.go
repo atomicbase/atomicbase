@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -256,7 +255,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// If no tenants, use a transaction to atomically create version and update template
+	// If no tenants, use a transaction to atomically create version, history, and migration record
 	if len(tenants) == 0 {
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
@@ -284,6 +283,13 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Create migration record within transaction
+		migration, err := CreateMigrationTx(ctx, tx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
+		if err != nil {
+			tools.RespErr(w, err)
+			return
+		}
+
 		// Commit transaction
 		if err := tx.Commit(); err != nil {
 			tools.RespErr(w, err)
@@ -293,15 +299,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		// Invalidate schema cache so next request loads the new version
 		tools.InvalidateTemplate(template.ID)
 
-		// Create migration record (outside transaction, ok if this fails)
-		migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
-		if err != nil {
-			// Migration record is optional for tracking, version update already succeeded
-			log.Printf("Warning: failed to create migration record: %v", err)
-			respondJSON(w, http.StatusAccepted, MigrateResponse{MigrationID: 0})
-			return
-		}
-
+		// Update migration status (outside transaction, non-critical)
 		state := MigrationStateSuccess
 		_ = UpdateMigrationStatus(ctx, migration.ID, MigrationStatusComplete, &state, 0, 0)
 
@@ -309,8 +307,15 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// With tenants: insert history first, then start background job
-	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
+	// With tenants: use transaction for history and migration record, then start background job
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		tools.RespErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (template_id, version, schema, checksum, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, TableTemplatesHistory), template.ID, newVersion, schemaJSON, checksum, now)
@@ -319,9 +324,14 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create migration record
-	migration, err := CreateMigration(ctx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
+	// Create migration record within transaction
+	migration, err := CreateMigrationTx(ctx, tx, template.ID, template.CurrentVersion, newVersion, plan.SQL)
 	if err != nil {
+		tools.RespErr(w, err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
 		tools.RespErr(w, err)
 		return
 	}

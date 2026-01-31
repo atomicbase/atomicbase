@@ -608,13 +608,22 @@ func getDefaultForType(colType string) string {
 	}
 }
 
+// Execer is an interface for executing SQL statements (satisfied by *sql.DB and *sql.Tx).
+type Execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // CreateMigration creates a new migration record in the database.
 func CreateMigration(ctx context.Context, templateID int32, fromVersion, toVersion int, sqlStatements []string) (*Migration, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
 	}
+	return CreateMigrationTx(ctx, conn, templateID, fromVersion, toVersion, sqlStatements)
+}
 
+// CreateMigrationTx creates a new migration record using the provided executor (DB or Tx).
+func CreateMigrationTx(ctx context.Context, exec Execer, templateID int32, fromVersion, toVersion int, sqlStatements []string) (*Migration, error) {
 	now := time.Now().UTC()
 
 	sqlJSON, err := json.Marshal(sqlStatements)
@@ -622,7 +631,7 @@ func CreateMigration(ctx context.Context, templateID int32, fromVersion, toVersi
 		return nil, fmt.Errorf("failed to marshal SQL: %w", err)
 	}
 
-	result, err := conn.ExecContext(ctx, fmt.Sprintf(`
+	result, err := exec.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (template_id, from_version, to_version, sql, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, TableMigrations), templateID, fromVersion, toVersion, string(sqlJSON), MigrationStatusPending, now.Format(time.RFC3339))
