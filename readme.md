@@ -145,22 +145,28 @@ await acme.from("users").delete().where(eq("id", 1));
 
 ## Important decisions
 
-**1. Reliability Over Control**
+### 1. Reliability Over Control
+
 Tight rules like typescript-only schemas and no direct SQL access tradeoff control for reliability. A system like database-per-tenant has a lot of moving parts. And these multi-tenant systems are most often used in B2B situations where high security and reliability is crucial. One small mistake can cause a database to go out of sync or make it vulnerable to attacks directly through the API. That's exactly why we avoid custom SQL, define schemas idempotently per template, and put querying in a completely separate API from schema changes.
 
-**2. Single Binary**
+### 2. Single Binary
+
 Atomicbase was built on top of Go and SQLite for an important reason. They're both incredibly simple and powerful. They make it easy to set up your architecture, maintain it, and scale it. We feel strongly that Atomicbase must live up to this same standard. Packing everything into a single binary and paying attention to all the tiny details that make a software feel simple to use is how we live up to this standard.
 
-**3. TypeScript Schema Templates**
+### 3. TypeScript Schema Templates
+
 We decided to make our schema templates idempotent TypeScript files so that schemas felt easy to manage and ready for the future of development with AI. Anyone can setup their entire platform's schema through TypeScript and our CLI.
 
-**4. Strict Database Versions**
+### 4. Strict Database Versions
+
 We decided that requiring each database to be on the latest version of its template to be accessed was the best way to prevent weird/silent errors. If you change the expected shape of your databases, having a database left out of sync could create weird, potentially dangerous behaviour. Even though we strive to make our migration system as robust as it can be, it's always possible to have a database out of sync when you're managing so many.
 
-**5. Session-based Authentication**
+### 5. Session-based Authentication
+
 This is another design choice centered around simplicity and security. JWTs are not inherently insecure, but making them fully secure is overly complicated for both us and anyone using Atomicbase. Sessions are uniquely powerful for an SQLite system as well because database reads are incredibly fast and inexpensive. Lucia has a great discussion about why they switched from JWTs to sessions: [Lucia discussion](https://github.com/lucia-auth/lucia/discussions/112)
 
-**6. POST-only query API**
+### 6. POST-only query API
+
 All query operations go through one route: `POST /data/query`. While it feels wrong to do a select or a delete through POST, we tested full REST-style and it was just too cumbersome. Adding where conditions, joins, ordering, etc to GET and DELETE methods that don't support request bodies has too many edge cases.
 
 ## Examples
