@@ -8,8 +8,8 @@ Atomicbase is the Turso development platform, packaged as a single Go executable
 
 At its core, Atomicbase was built to make multi-tenant systems more predictable and reliable. There are a lot of moving parts in a multi-tenant system. And in situations where multi-tenancy is used, high security and reliablity are #1 priorities. One small mistake can cause a database to go out of sync, corrupt, or be vulnerable to attacks. Every design choice was made with security and reliability first. We're not just building a reliable platform. We're creating a platform that makes building reliable applications on top of it feel easy.
 
-[!WARNING]
-**Atomicbase is in experimental preview.** There are many known and unknown bugs. APIs are likely to change.
+> [!WARNING]
+> **Atomicbase is in experimental preview.** There are many known and unknown bugs. APIs are likely to change.
 
 ## Status
 
