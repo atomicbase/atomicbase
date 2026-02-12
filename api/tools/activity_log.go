@@ -24,7 +24,7 @@ type ActivityLog struct {
 	Status     int
 	DurationMs int64
 	ClientIP   string
-	Tenant     string
+	Database   string
 	RequestID  string
 	Error      string
 }
@@ -105,7 +105,7 @@ func initActivityLoggerInternal() error {
 			status INTEGER NOT NULL,
 			duration_ms INTEGER NOT NULL,
 			client_ip TEXT,
-			tenant TEXT,
+			database TEXT,
 			request_id TEXT,
 			error TEXT
 		);
@@ -119,7 +119,7 @@ func initActivityLoggerInternal() error {
 	}
 
 	insertStmt, err := db.Prepare(`
-		INSERT INTO activity_log (created_at, level, message, api, method, path, status, duration_ms, client_ip, tenant, request_id, error)
+		INSERT INTO activity_log (created_at, level, message, api, method, path, status, duration_ms, client_ip, database, request_id, error)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -177,8 +177,8 @@ func (h *ActivityHandler) Handle(_ context.Context, r slog.Record) error {
 			log.DurationMs = a.Value.Int64()
 		case "client_ip":
 			log.ClientIP = a.Value.String()
-		case "tenant":
-			log.Tenant = a.Value.String()
+		case "database":
+			log.Database = a.Value.String()
 		case "request_id":
 			log.RequestID = a.Value.String()
 		case "error":
@@ -249,7 +249,7 @@ func (h *ActivityHandler) flushLocked() {
 			log.Status,
 			log.DurationMs,
 			log.ClientIP,
-			log.Tenant,
+			log.Database,
 			log.RequestID,
 			log.Error,
 		)
@@ -310,7 +310,7 @@ func (h *ActivityHandler) runCleanup() {
 }
 
 // LogActivity logs a request activity entry.
-func LogActivity(api, method, path string, status int, durationMs int64, clientIP, tenant, requestID, errMsg string) {
+func LogActivity(api, method, path string, status int, durationMs int64, clientIP, database, requestID, errMsg string) {
 	if activityHandler == nil {
 		return
 	}
@@ -323,7 +323,7 @@ func LogActivity(api, method, path string, status int, durationMs int64, clientI
 		slog.Int("status", status),
 		slog.Int64("duration_ms", durationMs),
 		slog.String("client_ip", clientIP),
-		slog.String("tenant", tenant),
+		slog.String("database", database),
 		slog.String("request_id", requestID),
 		slog.String("error", errMsg),
 	)

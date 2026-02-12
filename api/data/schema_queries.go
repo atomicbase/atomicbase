@@ -48,7 +48,7 @@ func (dao *Database) InvalidateSchema(ctx context.Context) error {
 		return nil
 	}
 
-	// Tenant databases: reload from template cache
+	// Database instances: reload from template cache
 	// This will fetch the latest version if needed
 	schema, version, err := GetCachedTemplate(nil, dao.TemplateID)
 	if err != nil {

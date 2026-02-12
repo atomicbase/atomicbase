@@ -2,8 +2,8 @@
 // Client
 // =============================================================================
 
-export { AtomicbaseClient, TenantClient, createClient } from "./AtomicbaseClient.js";
-export { TenantsClient } from "./TenantsClient.js";
+export { AtomicbaseClient, DatabaseClient, createClient } from "./AtomicbaseClient.js";
+export { DatabasesClient } from "./DatabasesClient.js";
 
 // =============================================================================
 // Builders (for advanced usage / extension)
@@ -74,8 +74,8 @@ export type {
   OrderDirection,
   // Join types
   JoinClause,
-  // Tenant types (Platform API)
-  Tenant,
-  CreateTenantOptions,
-  SyncTenantResponse,
+  // Database types (Platform API)
+  Database,
+  CreateDatabaseOptions,
+  SyncDatabaseResponse,
 } from "./types.js";

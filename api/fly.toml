@@ -10,7 +10,7 @@ primary_region = 'sjc'
 
 [env]
   DATA_DIR = '/data'
-  DB_PATH = '/data/tenants.db'
+  DB_PATH = '/data/primary.db'
   PORT = ':8080'
 
 [[mounts]]

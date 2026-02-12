@@ -124,13 +124,13 @@ export type AtomicbaseBatchResponse<T extends unknown[] = unknown[]> =
   | { data: null; error: AtomicbaseError };
 
 // =============================================================================
-// Tenant Types (Platform API)
+// Database Types (Platform API)
 // =============================================================================
 
 /**
- * Tenant database information.
+ * Database information.
  */
-export interface Tenant {
+export interface Database {
   id: number;
   name: string;
   token?: string;
@@ -141,19 +141,19 @@ export interface Tenant {
 }
 
 /**
- * Options for creating a new tenant.
+ * Options for creating a new database.
  */
-export interface CreateTenantOptions {
-  /** Unique name for the tenant database */
+export interface CreateDatabaseOptions {
+  /** Unique name for the database */
   name: string;
   /** Name of the template to use for the database schema */
   template: string;
 }
 
 /**
- * Response from syncing a tenant to the latest template version.
+ * Response from syncing a database to the latest template version.
  */
-export interface SyncTenantResponse {
+export interface SyncDatabaseResponse {
   fromVersion: number;
   toVersion: number;
 }

@@ -98,8 +98,8 @@ export interface RollbackResponse {
   migrationId: number;
 }
 
-// Tenant represents a tenant database (matches Go API)
-export interface Tenant {
+// Database represents a database record (matches Go API)
+export interface Database {
   id: number;
   name: string;
   token?: string;  // Omitted in list responses
@@ -109,8 +109,8 @@ export interface Tenant {
   updatedAt: string;
 }
 
-// SyncTenantResponse is returned by the sync endpoint (matches Go API)
-export interface SyncTenantResponse {
+// SyncDatabaseResponse is returned by the sync endpoint (matches Go API)
+export interface SyncDatabaseResponse {
   fromVersion: number;
   toVersion: number;
 }
@@ -275,7 +275,7 @@ export class ApiClient {
 
   /**
    * Delete a template.
-   * Only succeeds if no tenants are using it.
+   * Only succeeds if no databases are using it.
    */
   async deleteTemplate(name: string): Promise<void> {
     await this.request<void>("DELETE", `/platform/templates/${name}`);
@@ -325,44 +325,44 @@ export class ApiClient {
   }
 
   // =========================================================================
-  // Tenant Management
+  // Database Management
   // =========================================================================
 
   /**
-   * List all tenants.
+   * List all databases.
    */
-  async listTenants(): Promise<Tenant[]> {
-    return this.request<Tenant[]>("GET", "/platform/tenants");
+  async listDatabases(): Promise<Database[]> {
+    return this.request<Database[]>("GET", "/platform/databases");
   }
 
   /**
-   * Get a tenant by name.
+   * Get a database by name.
    */
-  async getTenant(name: string): Promise<Tenant> {
-    return this.request<Tenant>("GET", `/platform/tenants/${name}`);
+  async getDatabase(name: string): Promise<Database> {
+    return this.request<Database>("GET", `/platform/databases/${name}`);
   }
 
   /**
-   * Create a new tenant.
+   * Create a new database.
    */
-  async createTenant(name: string, template: string): Promise<Tenant> {
-    return this.request<Tenant>("POST", "/platform/tenants", {
+  async createDatabase(name: string, template: string): Promise<Database> {
+    return this.request<Database>("POST", "/platform/databases", {
       name,
       template,
     });
   }
 
   /**
-   * Delete a tenant.
+   * Delete a database.
    */
-  async deleteTenant(name: string): Promise<void> {
-    await this.request<void>("DELETE", `/platform/tenants/${name}`);
+  async deleteDatabase(name: string): Promise<void> {
+    await this.request<void>("DELETE", `/platform/databases/${name}`);
   }
 
   /**
-   * Sync a tenant to the latest template version.
+   * Sync a database to the latest template version.
    */
-  async syncTenant(name: string): Promise<SyncTenantResponse> {
-    return this.request<SyncTenantResponse>("POST", `/platform/tenants/${name}/sync`);
+  async syncDatabase(name: string): Promise<SyncDatabaseResponse> {
+    return this.request<SyncDatabaseResponse>("POST", `/platform/databases/${name}/sync`);
   }
 }

@@ -17,13 +17,13 @@ import (
 
 // Re-export errors from tools for backward compatibility.
 var (
-	ErrTenantNotFound = tools.ErrTenantNotFound
-	ErrTenantExists   = tools.ErrTenantExists
-	ErrTenantInSync   = tools.ErrTenantInSync
+	ErrDatabaseNotFound = tools.ErrDatabaseNotFoundPlatform
+	ErrDatabaseExists   = tools.ErrDatabaseExists
+	ErrDatabaseInSync   = tools.ErrDatabaseInSync
 )
 
-// ListTenants returns all tenants.
-func ListTenants(ctx context.Context) ([]Tenant, error) {
+// ListDatabases returns all databases.
+func ListDatabases(ctx context.Context) ([]Database, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
@@ -33,15 +33,15 @@ func ListTenants(ctx context.Context) ([]Tenant, error) {
 		SELECT id, name, template_id, template_version, created_at, updated_at
 		FROM %s
 		ORDER BY name
-	`, TableTenants))
+	`, TableDatabases))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var tenants []Tenant
+	var databases []Database
 	for rows.Next() {
-		var t Tenant
+		var t Database
 		var createdAt, updatedAt string
 		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
@@ -49,22 +49,22 @@ func ListTenants(ctx context.Context) ([]Tenant, error) {
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 		// Token is omitted in list responses
-		tenants = append(tenants, t)
+		databases = append(databases, t)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if tenants == nil {
-		tenants = []Tenant{}
+	if databases == nil {
+		databases = []Database{}
 	}
 
-	return tenants, nil
+	return databases, nil
 }
 
-// GetTenant returns a tenant by name.
-func GetTenant(ctx context.Context, name string) (*Tenant, error) {
+// GetDatabase returns a database by name.
+func GetDatabase(ctx context.Context, name string) (*Database, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
@@ -74,14 +74,14 @@ func GetTenant(ctx context.Context, name string) (*Tenant, error) {
 		SELECT id, name, template_id, template_version, created_at, updated_at
 		FROM %s
 		WHERE name = ?
-	`, TableTenants), name)
+	`, TableDatabases), name)
 
-	var t Tenant
+	var t Database
 	var createdAt, updatedAt string
 
 	if err := row.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrTenantNotFound
+			return nil, ErrDatabaseNotFound
 		}
 		return nil, err
 	}
@@ -92,9 +92,9 @@ func GetTenant(ctx context.Context, name string) (*Tenant, error) {
 	return &t, nil
 }
 
-// CreateTenant creates a new tenant database using the specified template.
+// CreateDatabase creates a new database using the specified template.
 // Creates a Turso database, generates a token, and initializes the schema.
-func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, error) {
+func CreateDatabase(ctx context.Context, name, templateName string) (*Database, error) {
 	// Get template to verify it exists and get current version
 	template, err := GetTemplate(ctx, templateName)
 	if err != nil {
@@ -106,16 +106,16 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 		return nil, err
 	}
 
-	// Check if tenant already exists
+	// Check if database already exists
 	var exists int
 	err = conn.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT COUNT(*) FROM %s WHERE name = ?
-	`, TableTenants), name).Scan(&exists)
+	`, TableDatabases), name).Scan(&exists)
 	if err != nil {
 		return nil, err
 	}
 	if exists > 0 {
-		return nil, ErrTenantExists
+		return nil, ErrDatabaseExists
 	}
 
 	// Create Turso database
@@ -146,12 +146,12 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 		return nil, fmt.Errorf("failed to initialize database schema: %w", schemaErr)
 	}
 
-	// Insert tenant record
+	// Insert database record
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := conn.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (name, template_id, template_version, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
-	`, TableTenants), name, template.ID, template.CurrentVersion, now, now)
+	`, TableDatabases), name, template.ID, template.CurrentVersion, now, now)
 	if err != nil {
 		// Try to clean up
 		_ = tursoDeleteDatabase(ctx, name)
@@ -165,7 +165,7 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 
 	createdAt, _ := time.Parse(time.RFC3339, now)
 
-	return &Tenant{
+	return &Database{
 		ID:              int32(tenantID),
 		Name:            name,
 		TemplateID:      template.ID,
@@ -175,21 +175,21 @@ func CreateTenant(ctx context.Context, name, templateName string) (*Tenant, erro
 	}, nil
 }
 
-// DeleteTenant deletes a tenant and its Turso database.
-func DeleteTenant(ctx context.Context, name string) error {
+// DeleteDatabase deletes a database and its Turso database.
+func DeleteDatabase(ctx context.Context, name string) error {
 	conn, err := getDB()
 	if err != nil {
 		return err
 	}
 
-	// Check if tenant exists
+	// Check if database exists
 	var tenantID int32
 	err = conn.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT id FROM %s WHERE name = ?
-	`, TableTenants), name).Scan(&tenantID)
+	`, TableDatabases), name).Scan(&tenantID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrTenantNotFound
+			return ErrDatabaseNotFound
 		}
 		return err
 	}
@@ -199,18 +199,18 @@ func DeleteTenant(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to delete turso database: %w", err)
 	}
 
-	// Delete tenant migration records
+	// Delete database migration records
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
-		DELETE FROM %s WHERE tenant_id = ?
-	`, TableTenantMigrations), tenantID)
+		DELETE FROM %s WHERE database_id = ?
+	`, TableDatabaseMigrations), tenantID)
 	if err != nil {
 		return err
 	}
 
-	// Delete tenant record
+	// Delete database record
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
 		DELETE FROM %s WHERE id = ?
-	`, TableTenants), tenantID)
+	`, TableDatabases), tenantID)
 	if err != nil {
 		return err
 	}
@@ -218,12 +218,12 @@ func DeleteTenant(ctx context.Context, name string) error {
 	return nil
 }
 
-// SyncTenant synchronizes a tenant to the template's current version.
+// SyncDatabase synchronizes a database to the template's current version.
 // Applies chained migrations if needed (e.g., v1->v2->v3).
 // This is synchronous - waits for completion.
-func SyncTenant(ctx context.Context, name string) (*SyncTenantResponse, error) {
-	// Get tenant
-	tenant, err := GetTenant(ctx, name)
+func SyncDatabase(ctx context.Context, name string) (*SyncDatabaseResponse, error) {
+	// Get database
+	database, err := GetDatabase(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -237,22 +237,22 @@ func SyncTenant(ctx context.Context, name string) (*SyncTenantResponse, error) {
 	var currentVersion int
 	err = conn.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT current_version FROM %s WHERE id = ?
-	`, TableTemplates), tenant.TemplateID).Scan(&currentVersion)
+	`, TableTemplates), database.TemplateID).Scan(&currentVersion)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check if already at current version
-	if tenant.TemplateVersion >= currentVersion {
-		return nil, ErrTenantInSync
+	if database.TemplateVersion >= currentVersion {
+		return nil, ErrDatabaseInSync
 	}
 
-	fromVersion := tenant.TemplateVersion
+	fromVersion := database.TemplateVersion
 
-	// Collect all migration SQL from tenant's version to current
+	// Collect all migration SQL from database's version to current
 	var allSQL []string
-	for v := tenant.TemplateVersion; v < currentVersion; v++ {
-		migration, err := GetMigrationByVersions(ctx, tenant.TemplateID, v, v+1)
+	for v := database.TemplateVersion; v < currentVersion; v++ {
+		migration, err := GetMigrationByVersions(ctx, database.TemplateID, v, v+1)
 		if err != nil {
 			return nil, fmt.Errorf("migration from v%d to v%d not found: %w", v, v+1, err)
 		}
@@ -261,21 +261,21 @@ func SyncTenant(ctx context.Context, name string) (*SyncTenantResponse, error) {
 
 	// Execute all migrations
 	if len(allSQL) > 0 {
-		if err := BatchExecute(ctx, tenant.Name, allSQL); err != nil {
+		if err := BatchExecute(ctx, database.Name, allSQL); err != nil {
 			return nil, fmt.Errorf("migration failed: %w", err)
 		}
 	}
 
-	// Update tenant version
+	// Update database version
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s SET template_version = ?, updated_at = ? WHERE id = ?
-	`, TableTenants), currentVersion, now, tenant.ID)
+	`, TableDatabases), currentVersion, now, database.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SyncTenantResponse{
+	return &SyncDatabaseResponse{
 		FromVersion: fromVersion,
 		ToVersion:   currentVersion,
 	}, nil
@@ -332,8 +332,8 @@ func GetMigrationByVersions(ctx context.Context, templateID int32, fromVersion, 
 	return &m, nil
 }
 
-// GetTenantsByTemplate returns all tenants using a specific template.
-func GetTenantsByTemplate(ctx context.Context, templateID int32) ([]Tenant, error) {
+// GetDatabasesByTemplate returns all databases using a specific template.
+func GetDatabasesByTemplate(ctx context.Context, templateID int32) ([]Database, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
@@ -344,38 +344,38 @@ func GetTenantsByTemplate(ctx context.Context, templateID int32) ([]Tenant, erro
 		FROM %s
 		WHERE template_id = ?
 		ORDER BY name
-	`, TableTenants), templateID)
+	`, TableDatabases), templateID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var tenants []Tenant
+	var databases []Database
 	for rows.Next() {
-		var t Tenant
+		var t Database
 		var createdAt, updatedAt string
 		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-		tenants = append(tenants, t)
+		databases = append(databases, t)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if tenants == nil {
-		tenants = []Tenant{}
+	if databases == nil {
+		databases = []Database{}
 	}
 
-	return tenants, nil
+	return databases, nil
 }
 
-// GetPendingTenants returns tenants that need migration for a given job.
+// GetPendingDatabases returns databases that need migration for a given job.
 // Pending = template_version < target AND not in tenant_migrations table for this job.
-func GetPendingTenants(ctx context.Context, migrationID int64, templateID int32, targetVersion int) ([]Tenant, error) {
+func GetPendingDatabases(ctx context.Context, migrationID int64, templateID int32, targetVersion int) ([]Database, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
@@ -388,40 +388,40 @@ func GetPendingTenants(ctx context.Context, migrationID int64, templateID int32,
 		  AND t.template_version < ?
 		  AND NOT EXISTS (
 			SELECT 1 FROM %s tm
-			WHERE tm.tenant_id = t.id AND tm.migration_id = ?
+			WHERE tm.database_id = t.id AND tm.migration_id = ?
 		  )
 		ORDER BY t.name
-	`, TableTenants, TableTenantMigrations), templateID, targetVersion, migrationID)
+	`, TableDatabases, TableDatabaseMigrations), templateID, targetVersion, migrationID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var tenants []Tenant
+	var databases []Database
 	for rows.Next() {
-		var t Tenant
+		var t Database
 		var createdAt, updatedAt string
 		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-		tenants = append(tenants, t)
+		databases = append(databases, t)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if tenants == nil {
-		tenants = []Tenant{}
+	if databases == nil {
+		databases = []Database{}
 	}
 
-	return tenants, nil
+	return databases, nil
 }
 
-// GetFailedTenants returns tenants that failed migration for a given job.
-func GetFailedTenants(ctx context.Context, migrationID int64) ([]Tenant, error) {
+// GetFailedDatabases returns databases that failed migration for a given job.
+func GetFailedDatabases(ctx context.Context, migrationID int64) ([]Database, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
@@ -430,40 +430,40 @@ func GetFailedTenants(ctx context.Context, migrationID int64) ([]Tenant, error) 
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
 		SELECT t.id, t.name, t.template_id, t.template_version, t.created_at, t.updated_at
 		FROM %s t
-		JOIN %s tm ON tm.tenant_id = t.id
+		JOIN %s tm ON tm.database_id = t.id
 		WHERE tm.migration_id = ? AND tm.status = 'failed'
 		ORDER BY t.name
-	`, TableTenants, TableTenantMigrations), migrationID)
+	`, TableDatabases, TableDatabaseMigrations), migrationID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var tenants []Tenant
+	var databases []Database
 	for rows.Next() {
-		var t Tenant
+		var t Database
 		var createdAt, updatedAt string
 		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-		tenants = append(tenants, t)
+		databases = append(databases, t)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if tenants == nil {
-		tenants = []Tenant{}
+	if databases == nil {
+		databases = []Database{}
 	}
 
-	return tenants, nil
+	return databases, nil
 }
 
-// BatchUpdateTenantVersions updates template_version for multiple tenants in one query.
-func BatchUpdateTenantVersions(ctx context.Context, tenantIDs []int32, version int) error {
+// BatchUpdateDatabaseVersions updates template_version for multiple databases in one query.
+func BatchUpdateDatabaseVersions(ctx context.Context, tenantIDs []int32, version int) error {
 	if len(tenantIDs) == 0 {
 		return nil
 	}
@@ -488,13 +488,13 @@ func BatchUpdateTenantVersions(ctx context.Context, tenantIDs []int32, version i
 
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s SET template_version = ?, updated_at = ? WHERE id IN (%s)
-	`, TableTenants, string(placeholders)), args...)
+	`, TableDatabases, string(placeholders)), args...)
 
 	return err
 }
 
-// RecordTenantMigration records the outcome of a tenant migration.
-func RecordTenantMigration(ctx context.Context, migrationID int64, tenantID int32, status, errMsg string) error {
+// RecordDatabaseMigration records the outcome of a database migration.
+func RecordDatabaseMigration(ctx context.Context, migrationID int64, tenantID int32, status, errMsg string) error {
 	conn, err := getDB()
 	if err != nil {
 		return err
@@ -504,14 +504,14 @@ func RecordTenantMigration(ctx context.Context, migrationID int64, tenantID int3
 
 	// Use INSERT OR REPLACE to handle retries
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (migration_id, tenant_id, status, error, attempts, updated_at)
+		INSERT INTO %s (migration_id, database_id, status, error, attempts, updated_at)
 		VALUES (?, ?, ?, ?, 1, ?)
-		ON CONFLICT(migration_id, tenant_id) DO UPDATE SET
+		ON CONFLICT(migration_id, database_id) DO UPDATE SET
 			status = excluded.status,
 			error = excluded.error,
 			attempts = attempts + 1,
 			updated_at = excluded.updated_at
-	`, TableTenantMigrations), migrationID, tenantID, status, errMsg, now)
+	`, TableDatabaseMigrations), migrationID, tenantID, status, errMsg, now)
 
 	return err
 }

@@ -81,7 +81,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			wrapped.status,
 			duration.Milliseconds(),
 			clientIP,
-			r.Header.Get("Tenant"),
+			r.Header.Get("Database"),
 			requestID,
 			"", // error field
 		)
@@ -148,7 +148,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 		// Handle preflight requests
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Tenant, DB-Token, Prefer")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Database, DB-Token, Prefer")
 			w.Header().Set("Access-Control-Max-Age", "86400")
 			w.WriteHeader(http.StatusNoContent)
 			return

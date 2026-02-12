@@ -1,15 +1,15 @@
 # Atomicbase API
 
-The Go backend server for Atomicbase. A multi-tenant REST API built on SQLite and Turso.
+The Go backend server for Atomicbase. A multi-database REST API built on SQLite and Turso.
 
 ## Overview
 
 The Atomicbase API provides two main interfaces:
 
-- **Data API** (`/data/*`) - CRUD operations, batch transactions, and schema introspection for tenant databases
-- **Platform API** (`/platform/*`) - Multi-tenant management including templates, tenants, migrations, and jobs
+- **Data API** (`/data/*`) - CRUD operations, batch transactions, and schema introspection for target databases
+- **Platform API** (`/platform/*`) - Database management including templates, databases, migrations, and jobs
 
-The server is packaged as a single Go executable with SQLite embedded. For multi-tenant deployments, it integrates with Turso for remote database hosting.
+The server is packaged as a single Go executable with SQLite embedded. For multi-database deployments, it integrates with Turso for remote database hosting.
 
 ## Getting Started
 
@@ -43,7 +43,7 @@ ATOMICBASE_API_KEY=your-secret-key
 # CORS (empty = disabled, * = allow all)
 ATOMICBASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
-# For multi-tenant Turso deployments
+# For multi-database Turso deployments
 TURSO_API_KEY=your-turso-key
 TURSO_ORGANIZATION=your-org
 ```
@@ -91,7 +91,7 @@ POST /data/query/{table}
 | Header | Description |
 |--------|-------------|
 | `Authorization` | `Bearer <api-key>` (if auth enabled) |
-| `Tenant` | Target tenant database name |
+| `Database` | Target database name |
 | `Prefer` | Operation type and options |
 
 #### Operations
@@ -99,7 +99,7 @@ POST /data/query/{table}
 **Select**
 ```bash
 curl -X POST http://localhost:8080/data/query/users \
-  -H "Tenant: acme-corp" \
+  -H "Database: acme-corp" \
   -H "Prefer: operation=select" \
   -H "Content-Type: application/json" \
   -d '{"select": ["id", "name", "email"], "where": {"id": {"eq": 1}}}'
@@ -108,7 +108,7 @@ curl -X POST http://localhost:8080/data/query/users \
 **Insert**
 ```bash
 curl -X POST http://localhost:8080/data/query/users \
-  -H "Tenant: acme-corp" \
+  -H "Database: acme-corp" \
   -H "Prefer: operation=insert" \
   -H "Content-Type: application/json" \
   -d '{"values": {"name": "Alice", "email": "alice@example.com"}}'
@@ -117,7 +117,7 @@ curl -X POST http://localhost:8080/data/query/users \
 **Upsert** (insert or replace on conflict)
 ```bash
 curl -X POST http://localhost:8080/data/query/users \
-  -H "Tenant: acme-corp" \
+  -H "Database: acme-corp" \
   -H "Prefer: operation=insert, on-conflict=replace" \
   -H "Content-Type: application/json" \
   -d '{"values": {"id": 1, "name": "Alice Updated"}}'
@@ -126,7 +126,7 @@ curl -X POST http://localhost:8080/data/query/users \
 **Update** (requires where clause)
 ```bash
 curl -X POST http://localhost:8080/data/query/users \
-  -H "Tenant: acme-corp" \
+  -H "Database: acme-corp" \
   -H "Prefer: operation=update" \
   -H "Content-Type: application/json" \
   -d '{"set": {"name": "Alicia"}, "where": {"id": {"eq": 1}}}'
@@ -135,7 +135,7 @@ curl -X POST http://localhost:8080/data/query/users \
 **Delete** (requires where clause)
 ```bash
 curl -X POST http://localhost:8080/data/query/users \
-  -H "Tenant: acme-corp" \
+  -H "Database: acme-corp" \
   -H "Prefer: operation=delete" \
   -H "Content-Type: application/json" \
   -d '{"where": {"id": {"eq": 1}}}'
@@ -180,7 +180,7 @@ Supported operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `glob`, `in`
 **Batch operations** (atomic transactions):
 ```bash
 curl -X POST http://localhost:8080/data/batch \
-  -H "Tenant: acme-corp" \
+  -H "Database: acme-corp" \
   -H "Content-Type: application/json" \
   -d '{
     "operations": [
@@ -240,26 +240,26 @@ GET /platform/templates/{name}/history
 DELETE /platform/templates/{name}
 ```
 
-#### Tenants
+#### Databases
 
-Tenants are database instances created from templates.
+Databases are database instances created from templates.
 
 ```bash
-# List tenants
-GET /platform/tenants
+# List databases
+GET /platform/databases
 
-# Get tenant
-GET /platform/tenants/{name}
+# Get database
+GET /platform/databases/{name}
 
-# Create tenant
-POST /platform/tenants
+# Create database
+POST /platform/databases
 {"name": "acme-corp", "template": "my-app"}
 
-# Sync tenant to latest template version
-POST /platform/tenants/{name}/sync
+# Sync database to latest template version
+POST /platform/databases/{name}/sync
 
-# Delete tenant
-DELETE /platform/tenants/{name}
+# Delete database
+DELETE /platform/databases/{name}
 ```
 
 #### Migrations
@@ -273,7 +273,7 @@ GET /platform/migrations?status=running
 # Get migration details
 GET /platform/migrations/{id}
 
-# Retry failed tenant migrations
+# Retry failed database migrations
 POST /platform/migrations/{id}/retry
 ```
 
@@ -297,7 +297,7 @@ GET /docs
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `:8080` | HTTP server port |
-| `DB_PATH` | `atomicdata/tenants.db` | Primary database path |
+| `DB_PATH` | `atomicdata/primary.db` | Primary database path |
 | `DATA_DIR` | `atomicdata` | Data directory |
 | `ATOMICBASE_REQUEST_TIMEOUT` | `30` | Request timeout in seconds |
 
@@ -328,7 +328,7 @@ GET /docs
 | `ATOMICBASE_MAX_QUERY_LIMIT` | `1000` | Max rows per query (0 = unlimited) |
 | `ATOMICBASE_DEFAULT_LIMIT` | `100` | Default limit when not specified |
 
-### Turso (Multi-tenant)
+### Turso (Multi-database)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -356,10 +356,10 @@ api/
 │   ├── build_query.go   # SQL construction with joins
 │   ├── batch.go         # Atomic batch transactions
 │   └── schema.go        # Schema introspection
-├── platform/            # Platform API - Multi-tenant management
+├── platform/            # Platform API - Database management
 │   ├── handlers.go      # HTTP route handlers
 │   ├── templates.go     # Template CRUD
-│   ├── tenants.go       # Tenant management
+│   ├── databases.go     # Database management
 │   ├── migrations.go    # Schema migration planning
 │   └── jobs.go          # Background migration jobs
 └── tools/               # Shared utilities
@@ -381,19 +381,19 @@ Requests flow through middleware in this order:
 
 ### Database Architecture
 
-- **Primary Database**: Stores templates, tenant metadata, and migration history
-- **Tenant Databases**: Separate SQLite/Turso databases per tenant
+- **Primary Database**: Stores templates, database metadata, and migration history
+- **Managed Databases**: Separate SQLite/Turso databases per database
 - **Schema Cache**: In-memory cache of table definitions for query validation
 
 ## Strengths
 
 - **Simple deployment**: Single binary with embedded SQLite, no external dependencies
-- **True multi-tenancy**: Each tenant gets a separate database with complete isolation
+- **Database-per-customer isolation**: Each customer gets a separate database with complete isolation
 - **Schema versioning**: Templates with version history, migrations, and rollback
 - **Flexible queries**: Complex filtering, joins, pagination, and full-text search
 - **Atomic operations**: Batch transactions with all-or-nothing execution
 - **Low latency**: Schema caching and connection pooling
-- **Turso integration**: Scale to thousands of tenants with remote databases
+- **Turso integration**: Scale to thousands of databases with remote hosting
 - **Background migrations**: Non-blocking schema updates with job tracking
 
 ## Limitations
@@ -505,7 +505,7 @@ fly deploy
 - [ ] Set strong `ATOMICBASE_API_KEY`
 - [ ] Configure `ATOMICBASE_CORS_ORIGINS` (don't use `*`)
 - [ ] Enable rate limiting for public APIs
-- [ ] Use Turso for multi-tenant deployments
+- [ ] Use Turso for multi-database deployments
 - [ ] Set up persistent storage for SQLite
 - [ ] Configure reverse proxy (nginx/caddy) with TLS
 - [ ] Monitor health endpoint
@@ -529,14 +529,14 @@ Common error codes:
 |------|--------|-------------|
 | `TABLE_NOT_FOUND` | 404 | Table doesn't exist |
 | `COLUMN_NOT_FOUND` | 404 | Column doesn't exist |
-| `DATABASE_NOT_FOUND` | 404 | Tenant database not found |
-| `DATABASE_OUT_OF_SYNC` | 409 | Tenant version != template version |
+| `DATABASE_NOT_FOUND` | 404 | Database not found |
+| `DATABASE_OUT_OF_SYNC` | 409 | Database version != template version |
 | `MISSING_WHERE_CLAUSE` | 400 | UPDATE/DELETE requires where |
 | `UNIQUE_VIOLATION` | 409 | Unique constraint failed |
 | `FOREIGN_KEY_VIOLATION` | 409 | FK constraint failed |
 | `QUERY_TOO_DEEP` | 400 | Exceeded max nesting depth |
 | `BATCH_TOO_LARGE` | 400 | Exceeded max batch operations |
-| `MISSING_TENANT` | 400 | Tenant header required |
+| `MISSING_DATABASE` | 400 | Database header required |
 
 ## License
 

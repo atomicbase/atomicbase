@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getUserTenant } from "@/lib/db";
+import { getUserDatabase } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TodoList } from "@/components/todo-list";
 import { AddTodoForm } from "@/components/add-todo-form";
@@ -23,9 +23,9 @@ export default async function DashboardPage() {
     redirect("/");
   }
 
-  // Fetch todos from user's tenant database
-  const userTenant = getUserTenant(user.tenantName);
-  const { data: todos } = await userTenant
+  // Fetch todos from user's database
+  const userDatabase = getUserDatabase(user.tenantName);
+  const { data: todos } = await userDatabase
     .from<Todo>("todos")
     .select()
     .orderBy("created_at", "desc");

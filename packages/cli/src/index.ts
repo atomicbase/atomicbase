@@ -3,7 +3,7 @@ import { config as loadEnv } from "dotenv";
 import { Command } from "commander";
 import { initCommand } from "./commands/init.js";
 import { templatesCommand } from "./commands/templates.js";
-import { tenantsCommand } from "./commands/tenant.js";
+import { databasesCommand } from "./commands/databases.js";
 import { migrationsCommand } from "./commands/migrations.js";
 
 // Load environment variables from .env file in the user's working directory
@@ -37,7 +37,7 @@ program
 // Register commands
 program.addCommand(initCommand);
 program.addCommand(templatesCommand);
-program.addCommand(tenantsCommand);
+program.addCommand(databasesCommand);
 program.addCommand(migrationsCommand);
 
 program.parse();

@@ -41,7 +41,7 @@ func BuildAPIError(err error) (int, APIError) {
 		return http.StatusNotFound, APIError{
 			Code:    CodeDatabaseNotFound,
 			Message: err.Error(),
-			Hint:    "The database specified in the Tenant header was not found. Use the platform API or CLI to list all available tenant databases",
+			Hint:    "The database specified in the Database header was not found. Use the platform API or CLI to list all available databases",
 		}
 	case errors.Is(err, ErrDatabaseOutOfSync):
 		return http.StatusConflict, APIError{
@@ -130,11 +130,11 @@ func BuildAPIError(err error) (int, APIError) {
 			Message: err.Error(),
 			Hint:    fmt.Sprintf("Split the batch into multiple requests with at most %d operations each.", MaxBatchOperations),
 		}
-	case errors.Is(err, ErrMissingTenant):
+	case errors.Is(err, ErrMissingDatabase):
 		return http.StatusBadRequest, APIError{
-			Code:    CodeMissingTenant,
+			Code:    CodeMissingDatabase,
 			Message: err.Error(),
-			Hint:    "Add a 'Tenant' header with the database name. Use GET /platform/tenants to list available databases.",
+			Hint:    "Add a 'Database' header with the database name. Use GET /platform/databases to list available databases.",
 		}
 
 	// Platform API errors
@@ -162,23 +162,23 @@ func BuildAPIError(err error) (int, APIError) {
 			Message: err.Error(),
 			Hint:    "Wait for the current migration to complete or check job status.",
 		}
-	case errors.Is(err, ErrTenantExists):
+	case errors.Is(err, ErrDatabaseExists):
 		return http.StatusConflict, APIError{
-			Code:    CodeTenantExists,
+			Code:    CodeDatabaseExists,
 			Message: err.Error(),
-			Hint:    "Choose a different name or delete the existing tenant first.",
+			Hint:    "Choose a different name or delete the existing database first.",
 		}
-	case errors.Is(err, ErrTenantNotFound):
+	case errors.Is(err, ErrDatabaseNotFoundPlatform):
 		return http.StatusNotFound, APIError{
-			Code:    CodeTenantNotFound,
+			Code:    CodeDatabaseNotFoundPlatform,
 			Message: err.Error(),
-			Hint:    "Use GET /platform/tenants to list available tenants.",
+			Hint:    "Use GET /platform/databases to list available databases.",
 		}
-	case errors.Is(err, ErrTenantInSync):
+	case errors.Is(err, ErrDatabaseInSync):
 		return http.StatusBadRequest, APIError{
-			Code:    CodeTenantInSync,
+			Code:    CodeDatabaseInSync,
 			Message: err.Error(),
-			Hint:    "The tenant is already at the current template version.",
+			Hint:    "The database is already at the current template version.",
 		}
 	case errors.Is(err, ErrMigrationNotFound):
 		return http.StatusNotFound, APIError{

@@ -472,7 +472,7 @@ func TestGetDefaultValue(t *testing.T) {
 		{"TEXT", ""},
 		{"text", ""},
 		{"BLOB", []byte{}},
-		{"VARCHAR", ""},  // unknown types default to string
+		{"VARCHAR", ""}, // unknown types default to string
 		{"CUSTOM", ""},
 	}
 

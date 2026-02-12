@@ -103,20 +103,20 @@ const (
 	MigrationStateFailed  = "failed"
 )
 
-// TenantMigration tracks per-tenant migration outcome.
-type TenantMigration struct {
+// DatabaseMigration tracks per-database migration outcome.
+type DatabaseMigration struct {
 	MigrationID int64     `json:"migrationId"`
-	TenantID    int32     `json:"tenantId"`
+	DatabaseID  int32     `json:"databaseId"`
 	Status      string    `json:"status"` // success, failed
 	Error       string    `json:"error,omitempty"`
 	Attempts    int       `json:"attempts"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-// TenantMigration status constants.
+// DatabaseMigration status constants.
 const (
-	TenantMigrationStatusSuccess = "success"
-	TenantMigrationStatusFailed  = "failed"
+	DatabaseMigrationStatusSuccess = "success"
+	DatabaseMigrationStatusFailed  = "failed"
 )
 
 // ValidationError represents a pre-migration validation error.
@@ -128,7 +128,7 @@ type ValidationError struct {
 	SQL     string `json:"sql,omitempty"`    // SQL that caused the error (for syntax errors)
 }
 
-// Template represents a schema template for multi-tenant databases.
+// Template represents a schema template for multi-database systems.
 type Template struct {
 	ID             int32     `json:"id"`
 	Name           string    `json:"name"`
@@ -153,8 +153,8 @@ type TemplateVersion struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
-// Tenant represents a tenant database.
-type Tenant struct {
+// Database represents a provisioned database.
+type Database struct {
 	ID              int32     `json:"id"`
 	Name            string    `json:"name"`
 	TemplateID      int32     `json:"templateId"`
@@ -197,14 +197,14 @@ type RollbackResponse struct {
 	MigrationID int64 `json:"migrationId"`
 }
 
-// CreateTenantRequest is the request body for POST /platform/tenants.
-type CreateTenantRequest struct {
+// CreateDatabaseRequest is the request body for POST /platform/databases.
+type CreateDatabaseRequest struct {
 	Name     string `json:"name"`
 	Template string `json:"template"`
 }
 
-// SyncTenantResponse is the response for POST /platform/tenants/{name}/sync.
-type SyncTenantResponse struct {
+// SyncDatabaseResponse is the response for POST /platform/databases/{name}/sync.
+type SyncDatabaseResponse struct {
 	FromVersion int `json:"fromVersion"`
 	ToVersion   int `json:"toVersion"`
 }

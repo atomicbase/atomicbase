@@ -1,4 +1,4 @@
-import { createClient, type AtomicbaseClient, type TenantClient } from "@atomicbase/sdk";
+import { createClient, type AtomicbaseClient, type DatabaseClient } from "@atomicbase/sdk";
 
 // Lazy initialization to avoid build-time errors
 let _client: AtomicbaseClient | null = null;
@@ -18,37 +18,35 @@ function getClient(): AtomicbaseClient {
 }
 
 /**
- * Ensure the primary tenant database exists.
+ * Ensure the primary database exists.
  * Creates it with the "primary" template if it doesn't exist.
  * Safe to call multiple times - only runs once.
  */
-export async function ensurePrimaryTenant(): Promise<void> {
+export async function ensurePrimaryDatabase(): Promise<void> {
   if (_initialized) return;
 
   const c = getClient();
 
-  // Check if primary tenant exists
-  const { error } = await c.tenants.get("primary");
-
-  console.log(error);
+  // Check if primary database exists
+  const { error } = await c.databases.get("primary");
 
   if (error) {
-    // Tenant doesn't exist, create it
+    // Database doesn't exist, create it
     if (error.status === 404) {
-      const { error: createError } = await c.tenants.create({
+      const { error: createError } = await c.databases.create({
         name: "primary",
         template: "primary",
       });
 
       if (createError) {
-        console.error("Failed to create primary tenant:", createError.message);
-        throw new Error(`Failed to create primary tenant: ${createError.message}`);
+        console.error("Failed to create primary database:", createError.message);
+        throw new Error(`Failed to create primary database: ${createError.message}`);
       }
 
-      console.log("Created primary tenant database");
+      console.log("Created primary database");
     } else {
-      console.error("Failed to check primary tenant:", error.message);
-      throw new Error(`Failed to check primary tenant: ${error.message}`);
+      console.error("Failed to check primary database:", error.message);
+      throw new Error(`Failed to check primary database: ${error.message}`);
     }
   }
 
@@ -57,17 +55,17 @@ export async function ensurePrimaryTenant(): Promise<void> {
 
 // Export getter functions instead of direct client
 export const client = {
-  get tenants() {
-    return getClient().tenants;
+  get databases() {
+    return getClient().databases;
   },
-  tenant(tenantId: string): TenantClient {
-    return getClient().tenant(tenantId);
+  database(databaseId: string): DatabaseClient {
+    return getClient().database(databaseId);
   },
 };
 
 // Primary database for auth operations
-export function getPrimaryDb(): TenantClient {
-  return getClient().tenant("primary");
+export function getPrimaryDb(): DatabaseClient {
+  return getClient().database("primary");
 }
 
 // Alias for backwards compatibility
@@ -77,7 +75,7 @@ export const primaryDb = {
   },
 };
 
-// Get user's tenant database for their todos
-export function getUserTenant(tenantName: string): TenantClient {
-  return getClient().tenant(tenantName);
+// Get user's database for their todos
+export function getUserDatabase(databaseName: string): DatabaseClient {
+  return getClient().database(databaseName);
 }

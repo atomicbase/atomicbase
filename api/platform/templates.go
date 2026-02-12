@@ -165,7 +165,7 @@ func CreateTemplate(ctx context.Context, name string, schema Schema) (*TemplateW
 	}, nil
 }
 
-// DeleteTemplate deletes a template if no tenants are using it.
+// DeleteTemplate deletes a template if no databases are using it.
 func DeleteTemplate(ctx context.Context, name string) error {
 	conn, err := getDB()
 	if err != nil {
@@ -190,11 +190,11 @@ func DeleteTemplate(ctx context.Context, name string) error {
 		return err
 	}
 
-	// Check if any tenants are using this template
+	// Check if any databases are using this template
 	var tenantCount int
 	err = tx.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT COUNT(*) FROM %s WHERE template_id = ?
-	`, TableTenants), templateID).Scan(&tenantCount)
+	`, TableDatabases), templateID).Scan(&tenantCount)
 	if err != nil {
 		return err
 	}

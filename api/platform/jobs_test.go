@@ -134,14 +134,14 @@ func TestIsRetryableError_ForeignKeyViolation(t *testing.T) {
 
 func TestStatusFromResult_Success(t *testing.T) {
 	result := MigrationResult{Success: true}
-	if statusFromResult(result) != TenantMigrationStatusSuccess {
+	if statusFromResult(result) != DatabaseMigrationStatusSuccess {
 		t.Error("success result should map to success status")
 	}
 }
 
 func TestStatusFromResult_Failed(t *testing.T) {
 	result := MigrationResult{Success: false, Error: "some error"}
-	if statusFromResult(result) != TenantMigrationStatusFailed {
+	if statusFromResult(result) != DatabaseMigrationStatusFailed {
 		t.Error("failed result should map to failed status")
 	}
 }
@@ -163,13 +163,13 @@ func TestLoadMigrationCache(t *testing.T) {
 	insertTestMigration(t, testDB, templateID, 1, 2)
 	insertTestMigration(t, testDB, templateID, 2, 3)
 
-	// Tenants at different versions
-	tenants := []Tenant{
+	// Databases at different versions
+	databases := []Database{
 		{ID: 1, TemplateVersion: 1},
 		{ID: 2, TemplateVersion: 2},
 	}
 
-	cache, err := loadMigrationCache(context.Background(), templateID, tenants, 3)
+	cache, err := loadMigrationCache(context.Background(), templateID, databases, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -194,22 +194,22 @@ func TestLoadMigrationCache_MissingMigration(t *testing.T) {
 	// Only insert v1->v2, missing v2->v3
 	insertTestMigration(t, testDB, templateID, 1, 2)
 
-	tenants := []Tenant{
+	databases := []Database{
 		{ID: 1, TemplateVersion: 1},
 	}
 
-	_, err := loadMigrationCache(context.Background(), templateID, tenants, 3)
+	_, err := loadMigrationCache(context.Background(), templateID, databases, 3)
 	if err == nil {
 		t.Error("expected error for missing migration")
 	}
 }
 
 // =============================================================================
-// RetryFailedTenants Tests
+// RetryFailedDatabases Tests
 // Criteria C: Complex state management
 // =============================================================================
 
-func TestRetryFailedTenants_NoFailed(t *testing.T) {
+func TestRetryFailedDatabases_NoFailed(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -218,7 +218,7 @@ func TestRetryFailedTenants_NoFailed(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	resp, err := RetryFailedTenants(context.Background(), migrationID)
+	resp, err := RetryFailedDatabases(context.Background(), migrationID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRetryFailedTenants_NoFailed(t *testing.T) {
 	}
 }
 
-func TestRetryFailedTenants_MigrationLocked(t *testing.T) {
+func TestRetryFailedDatabases_MigrationLocked(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -242,7 +242,7 @@ func TestRetryFailedTenants_MigrationLocked(t *testing.T) {
 	jm.TryLock(templateID)
 	defer jm.Unlock(templateID)
 
-	_, err := RetryFailedTenants(context.Background(), migrationID)
+	_, err := RetryFailedDatabases(context.Background(), migrationID)
 	if err != ErrMigrationLocked {
 		t.Errorf("expected ErrMigrationLocked, got: %v", err)
 	}
@@ -272,13 +272,13 @@ func TestResumeRunningJobs_NoRunning(t *testing.T) {
 
 func TestMigrationResult_Fields(t *testing.T) {
 	result := MigrationResult{
-		TenantID: 42,
-		Success:  false,
-		Error:    "connection timeout",
+		DatabaseID: 42,
+		Success:    false,
+		Error:      "connection timeout",
 	}
 
-	if result.TenantID != 42 {
-		t.Errorf("TenantID = %d, want 42", result.TenantID)
+	if result.DatabaseID != 42 {
+		t.Errorf("DatabaseID = %d, want 42", result.DatabaseID)
 	}
 	if result.Success {
 		t.Error("Success should be false")

@@ -69,7 +69,7 @@ npx atomicbase templates pull <name> [-y]
 # Preview changes without applying
 npx atomicbase templates diff [file]
 
-# Delete a template (only if no tenants use it)
+# Delete a template (only if no databases use it)
 npx atomicbase templates delete <name> [-f]
 
 # View version history
@@ -79,25 +79,25 @@ npx atomicbase templates history <name>
 npx atomicbase templates rollback <name> <version> [-f]
 ```
 
-### Tenants
+### Databases
 
-Manage tenant databases.
+Manage databases.
 
 ```bash
-# List all tenants
-npx atomicbase tenants list
+# List all databases
+npx atomicbase databases list
 
-# Get tenant details
-npx atomicbase tenants get <name>
+# Get database details
+npx atomicbase databases get <name>
 
-# Create a new tenant
-npx atomicbase tenants create <name> --template <template>
+# Create a new database
+npx atomicbase databases create <name> --template <template>
 
-# Delete a tenant
-npx atomicbase tenants delete <name> [-f]
+# Delete a database
+npx atomicbase databases delete <name> [-f]
 
-# Sync tenant to latest template version
-npx atomicbase tenants sync <name>
+# Sync database to latest template version
+npx atomicbase databases sync <name>
 ```
 
 ### Jobs
@@ -111,7 +111,7 @@ npx atomicbase jobs [--status <status>]
 # Get job details
 npx atomicbase jobs <job_id>
 
-# Retry failed tenants in a job
+# Retry failed databases in a job
 npx atomicbase jobs retry <job_id>
 ```
 
@@ -138,7 +138,7 @@ export default defineSchema("my-app", {
 1. Define schema locally in `schemas/`
 2. Preview changes: `npx atomicbase templates diff`
 3. Push to server: `npx atomicbase templates push`
-4. Create tenants: `npx atomicbase tenants create acme --template my-app`
+4. Create databases: `npx atomicbase databases create acme --template my-app`
 5. Track migrations: `npx atomicbase jobs`
 
 ## Options

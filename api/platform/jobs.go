@@ -15,14 +15,14 @@ import (
 
 // Job processing constants.
 const (
-	BatchSize   = 25 // Number of tenants to process concurrently
+	BatchSize   = 25 // Number of databases to process concurrently
 	MaxRetries  = 5  // Maximum retry attempts for network errors
 	BaseBackoff = 100 * time.Millisecond
 
 	// Operation timeouts
 	DBOperationTimeout  = 30 * time.Second  // Timeout for local database operations
 	ExternalAPITimeout  = 60 * time.Second  // Timeout for external API calls (Turso)
-	BatchExecuteTimeout = 120 * time.Second // Timeout for batch SQL execution (per tenant)
+	BatchExecuteTimeout = 120 * time.Second // Timeout for batch SQL execution (per database)
 )
 
 // Re-export errors from tools for backward compatibility.
@@ -106,19 +106,18 @@ func (jm *JobManager) Wait() {
 	jm.wg.Wait()
 }
 
-
-// MigrationResult tracks the outcome of a single tenant migration.
+// MigrationResult tracks the outcome of a single database migration.
 type MigrationResult struct {
-	TenantID int32
-	Success  bool
-	Error    string
+	DatabaseID int32
+	Success    bool
+	Error      string
 }
 
 // RunMigrationJob executes a migration job in the background.
 // This implements the migration flow from the design doc:
 // 1. Migrate first DB synchronously (abort if fails)
 // 2. Migrate remaining DBs in batches of 25 concurrently
-// 3. Update job status and tenant versions
+// 3. Update job status and database versions
 func RunMigrationJob(ctx context.Context, jobID int64) {
 	jm := GetJobManager()
 
@@ -152,27 +151,27 @@ func RunMigrationJob(ctx context.Context, jobID int64) {
 func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	jobID := migration.ID
 
-	// Get all pending tenants first to know total count
+	// Get all pending databases first to know total count
 	dbCtx, cancel := withDBTimeout(ctx)
-	tenants, err := GetPendingTenants(dbCtx, jobID, migration.TemplateID, migration.ToVersion)
+	databases, err := GetPendingDatabases(dbCtx, jobID, migration.TemplateID, migration.ToVersion)
 	cancel()
 	if err != nil {
-		log.Printf("[job %d] failed to get pending tenants: %v", jobID, err)
+		log.Printf("[job %d] failed to get pending databases: %v", jobID, err)
 		markJobFailed(ctx, jobID, 0, 0)
 		return
 	}
 
 	// Mark job as running with total count
 	dbCtx, cancel = withDBTimeout(ctx)
-	err = StartMigration(dbCtx, jobID, len(tenants))
+	err = StartMigration(dbCtx, jobID, len(databases))
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to start migration: %v", jobID, err)
 		return
 	}
 
-	// No tenants to migrate
-	if len(tenants) == 0 {
+	// No databases to migrate
+	if len(databases) == 0 {
 		markJobSuccess(ctx, jobID, 0, 0)
 		updateTemplateVersion(ctx, migration.TemplateID, migration.ToVersion)
 		return
@@ -180,7 +179,7 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 
 	// Pre-load all needed migrations into cache
 	dbCtx, cancel = withDBTimeout(ctx)
-	migrations, err := loadMigrationCache(dbCtx, migration.TemplateID, tenants, migration.ToVersion)
+	migrations, err := loadMigrationCache(dbCtx, migration.TemplateID, databases, migration.ToVersion)
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to load migration cache: %v", jobID, err)
@@ -188,17 +187,17 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 		return
 	}
 
-	// First Database Strategy: migrate first tenant synchronously
-	firstTenant := tenants[0]
-	tenants = tenants[1:]
+	// First Database Strategy: migrate first database synchronously
+	firstTenant := databases[0]
+	databases = databases[1:]
 
 	result := migrateTenant(ctx, firstTenant, migrations, migration.ToVersion)
 
 	dbCtx, cancel = withDBTimeout(ctx)
-	err = RecordTenantMigration(dbCtx, jobID, firstTenant.ID, statusFromResult(result), result.Error)
+	err = RecordDatabaseMigration(dbCtx, jobID, firstTenant.ID, statusFromResult(result), result.Error)
 	cancel()
 	if err != nil {
-		log.Printf("[job %d] failed to record first tenant migration: %v", jobID, err)
+		log.Printf("[job %d] failed to record first database migration: %v", jobID, err)
 	}
 
 	if !result.Success {
@@ -208,20 +207,20 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 		return
 	}
 
-	// Update first tenant version
+	// Update first database version
 	dbCtx, cancel = withDBTimeout(ctx)
-	err = BatchUpdateTenantVersions(dbCtx, []int32{firstTenant.ID}, migration.ToVersion)
+	err = BatchUpdateDatabaseVersions(dbCtx, []int32{firstTenant.ID}, migration.ToVersion)
 	cancel()
 	if err != nil {
-		log.Printf("[job %d] failed to update first tenant version: %v", jobID, err)
+		log.Printf("[job %d] failed to update first database version: %v", jobID, err)
 	}
 
-	// Process remaining tenants in batches
-	// Start with 1 completed (first tenant)
+	// Process remaining databases in batches
+	// Start with 1 completed (first database)
 	completedCount := 1
 	failedCount := 0
 
-	for i := 0; i < len(tenants); i += BatchSize {
+	for i := 0; i < len(databases); i += BatchSize {
 		// Check for cancellation before processing each batch
 		if err := checkCancelled(ctx); err != nil {
 			log.Printf("[job %d] job cancelled, stopping at batch %d", jobID, i/BatchSize)
@@ -229,37 +228,37 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 		}
 
 		end := i + BatchSize
-		if end > len(tenants) {
-			end = len(tenants)
+		if end > len(databases) {
+			end = len(databases)
 		}
-		batch := tenants[i:end]
+		batch := databases[i:end]
 
 		// Migrate batch concurrently
 		results := migrateBatchConcurrent(ctx, batch, migrations, migration.ToVersion)
 
-		// Collect successful tenant IDs
+		// Collect successful database IDs
 		var successIDs []int32
 		for _, r := range results {
 			if r.Success {
-				successIDs = append(successIDs, r.TenantID)
+				successIDs = append(successIDs, r.DatabaseID)
 				completedCount++
 			} else {
 				failedCount++
 			}
 
-			// Record each tenant's result
+			// Record each database's result
 			dbCtx, cancel = withDBTimeout(ctx)
-			err = RecordTenantMigration(dbCtx, jobID, r.TenantID, statusFromResult(r), r.Error)
+			err = RecordDatabaseMigration(dbCtx, jobID, r.DatabaseID, statusFromResult(r), r.Error)
 			cancel()
 			if err != nil {
-				log.Printf("[job %d] failed to record tenant %d migration: %v", jobID, r.TenantID, err)
+				log.Printf("[job %d] failed to record database %d migration: %v", jobID, r.DatabaseID, err)
 			}
 		}
 
-		// Batch update successful tenants
+		// Batch update successful databases
 		if len(successIDs) > 0 {
 			dbCtx, cancel = withDBTimeout(ctx)
-			err = BatchUpdateTenantVersions(dbCtx, successIDs, migration.ToVersion)
+			err = BatchUpdateDatabaseVersions(dbCtx, successIDs, migration.ToVersion)
 			cancel()
 			if err != nil {
 				log.Printf("[job %d] failed to batch update versions: %v", jobID, err)
@@ -283,10 +282,10 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 }
 
 // loadMigrationCache pre-loads all needed migrations for the job.
-func loadMigrationCache(ctx context.Context, templateID int32, tenants []Tenant, targetVersion int) (map[int][]string, error) {
-	// Find minimum tenant version
+func loadMigrationCache(ctx context.Context, templateID int32, databases []Database, targetVersion int) (map[int][]string, error) {
+	// Find minimum database version
 	minVersion := targetVersion
-	for _, t := range tenants {
+	for _, t := range databases {
 		if t.TemplateVersion < minVersion {
 			minVersion = t.TemplateVersion
 		}
@@ -305,13 +304,13 @@ func loadMigrationCache(ctx context.Context, templateID int32, tenants []Tenant,
 	return cache, nil
 }
 
-// migrateTenant migrates a single tenant with retry logic.
-func migrateTenant(ctx context.Context, tenant Tenant, migrations map[int][]string, targetVersion int) MigrationResult {
-	result := MigrationResult{TenantID: tenant.ID}
+// migrateTenant migrates a single database with retry logic.
+func migrateTenant(ctx context.Context, database Database, migrations map[int][]string, targetVersion int) MigrationResult {
+	result := MigrationResult{DatabaseID: database.ID}
 
-	// Build chained SQL for this tenant
+	// Build chained SQL for this database
 	var allSQL []string
-	for v := tenant.TemplateVersion; v < targetVersion; v++ {
+	for v := database.TemplateVersion; v < targetVersion; v++ {
 		sql, ok := migrations[v]
 		if !ok {
 			result.Error = fmt.Sprintf("missing migration v%d->v%d", v, v+1)
@@ -348,7 +347,7 @@ func migrateTenant(ctx context.Context, tenant Tenant, migrations map[int][]stri
 
 		// Execute with timeout
 		execCtx, cancel := context.WithTimeout(ctx, BatchExecuteTimeout)
-		err := BatchExecute(execCtx, tenant.Name, allSQL)
+		err := BatchExecute(execCtx, database.Name, allSQL)
 		cancel()
 
 		if err == nil {
@@ -368,17 +367,17 @@ func migrateTenant(ctx context.Context, tenant Tenant, migrations map[int][]stri
 	return result
 }
 
-// migrateBatchConcurrent migrates a batch of tenants concurrently.
-func migrateBatchConcurrent(ctx context.Context, tenants []Tenant, migrations map[int][]string, targetVersion int) []MigrationResult {
-	results := make([]MigrationResult, len(tenants))
+// migrateBatchConcurrent migrates a batch of databases concurrently.
+func migrateBatchConcurrent(ctx context.Context, databases []Database, migrations map[int][]string, targetVersion int) []MigrationResult {
+	results := make([]MigrationResult, len(databases))
 
 	// Check for cancellation before starting batch
 	if err := checkCancelled(ctx); err != nil {
 		for i := range results {
 			results[i] = MigrationResult{
-				TenantID: tenants[i].ID,
-				Success:  false,
-				Error:    err.Error(),
+				DatabaseID: databases[i].ID,
+				Success:    false,
+				Error:      err.Error(),
 			}
 		}
 		return results
@@ -386,12 +385,12 @@ func migrateBatchConcurrent(ctx context.Context, tenants []Tenant, migrations ma
 
 	var wg sync.WaitGroup
 
-	for i, tenant := range tenants {
+	for i, database := range databases {
 		wg.Add(1)
-		go func(idx int, t Tenant) {
+		go func(idx int, t Database) {
 			defer wg.Done()
 			results[idx] = migrateTenant(ctx, t, migrations, targetVersion)
-		}(i, tenant)
+		}(i, database)
 	}
 
 	wg.Wait()
@@ -433,14 +432,14 @@ func isRetryableError(err error) bool {
 // statusFromResult converts a MigrationResult to status string.
 func statusFromResult(r MigrationResult) string {
 	if r.Success {
-		return TenantMigrationStatusSuccess
+		return DatabaseMigrationStatusSuccess
 	}
-	return TenantMigrationStatusFailed
+	return DatabaseMigrationStatusFailed
 }
 
-// RetryFailedTenants retries all failed tenants from a migration job.
-// Returns the count of retried tenants and optionally a new job ID.
-func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationResponse, error) {
+// RetryFailedDatabases retries all failed databases from a migration job.
+// Returns the count of retried databases and optionally a new job ID.
+func RetryFailedDatabases(ctx context.Context, jobID int64) (*RetryMigrationResponse, error) {
 	// Get the original migration
 	dbCtx, cancel := withDBTimeout(ctx)
 	migration, err := GetMigration(dbCtx, jobID)
@@ -455,9 +454,9 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationRespon
 		return nil, ErrMigrationLocked
 	}
 
-	// Get failed tenants
+	// Get failed databases
 	dbCtx, cancel = withDBTimeout(ctx)
-	failedTenants, err := GetFailedTenants(dbCtx, jobID)
+	failedTenants, err := GetFailedDatabases(dbCtx, jobID)
 	cancel()
 	if err != nil {
 		return nil, err
@@ -478,10 +477,10 @@ func RetryFailedTenants(ctx context.Context, jobID int64) (*RetryMigrationRespon
 
 	dbCtx, cancel = withDBTimeout(ctx)
 	defer cancel()
-	for _, tenant := range failedTenants {
+	for _, database := range failedTenants {
 		_, err = conn.ExecContext(dbCtx, fmt.Sprintf(`
-			DELETE FROM %s WHERE migration_id = ? AND tenant_id = ?
-		`, TableTenantMigrations), jobID, tenant.ID)
+			DELETE FROM %s WHERE migration_id = ? AND database_id = ?
+		`, TableDatabaseMigrations), jobID, database.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to clear failed status: %w", err)
 		}

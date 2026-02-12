@@ -1,6 +1,6 @@
 import { defineSchema, defineTable, c } from "@atomicbase/schema";
 
-export default defineSchema("tenant", {
+export default defineSchema("todos", {
   todos: defineTable({
     completed: c.integer().notNull().default(0),
     created_at: c.text().notNull().default("CURRENT_TIMESTAMP"),

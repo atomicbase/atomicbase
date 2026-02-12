@@ -6,7 +6,7 @@ Atomicbase is the Turso development platform, packaged as a single Go executable
 
 ## Philosophy
 
-At its core, Atomicbase was built to make multi-tenant systems more predictable and reliable. There are a lot of moving parts in a multi-tenant system. And in situations where multi-tenancy is used, high security and reliablity are #1 priorities. One small mistake can cause a database to go out of sync, corrupt, or be vulnerable to attacks. Every design choice was made with security and reliability first. We're not just building a reliable platform. We're creating a platform that makes building reliable applications on top of it feel easy.
+At its core, Atomicbase was built to make multi-database systems more predictable and reliable. There are a lot of moving parts in a multi-database system. And in situations where this architecture is used, high security and reliability are the top priorities. One small mistake can cause a database to go out of sync, corrupt, or be vulnerable to attacks. Every design choice was made with security and reliability first. We're not just building a reliable platform. We're creating a platform that makes building reliable applications on top of it feel easy.
 
 > [!WARNING]
 > **Atomicbase is in experimental preview.** There are many known and unknown bugs. APIs are likely to change.
@@ -21,7 +21,7 @@ At its core, Atomicbase was built to make multi-tenant systems more predictable 
 | Schema Templates | Experimental |
 | Schema Package   | Alpha        |
 | CLI              | Alpha        |
-| Authentication   | Planned      |
+| Authentication   | In progress  |
 | File Storage     | Planned      |
 | Realtime         | Planned      |
 | Dashboard        | Planned      |
@@ -36,14 +36,14 @@ At its core, Atomicbase was built to make multi-tenant systems more predictable 
 │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
 │   │    Auth     │  │    Data     │  │  Platform   │  │   Storage   │       │
 │   │             │  │             │  │             │  │             │       │
-│   │ • Users     │  │ • Queries   │  │ • Tenants   │  │ • Uploads   │       │
+│   │ • Users     │  │ • Queries   │  │ • Databases │  │ • Uploads   │       │
 │   │ • Orgs      │  │ • Validation│  │ • Templates │  │ • Transforms│       │
-│   │ • Roles     │  │ • Tenant    │  │ • Migrations│  │ • CDN       │       │
+│   │ • Roles     │  │ • DBs       │  │ • Migrations│  │ • CDN       │       │
 │   │ • SSO       │  │   routing   │  │ • Syncing   │  │ • Caching   │       │
 │   └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘       │
 │                                                                            │
 │   ┌─────────────────────────────────────────────────────────────────┐      │
-│   │                     Tenant Databases                            │      │
+│   │                     Databases                                   │      │
 │   │    ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │      │
 │   │    │ Acme Co │  │ Beta Inc│  │Gamma LLC│  │  ...    │           │      │
 │   │    └─────────┘  └─────────┘  └─────────┘  └─────────┘           │      │
@@ -109,7 +109,7 @@ export default defineSchema("my-app", {
 npx atomicbase templates push
 ```
 
-### 6. Create a Tenant Database
+### 6. Create a Database
 
 ```typescript
 import { createClient } from "@atomicbase/sdk";
@@ -119,7 +119,7 @@ const client = createClient({
   apiKey: "your-api-key",
 });
 
-await client.tenants.create({ name: "acme-corp", template: "my-app" });
+await client.databases.create({ name: "acme-corp", template: "my-app" });
 ```
 
 ### 7. Query Data
@@ -127,7 +127,7 @@ await client.tenants.create({ name: "acme-corp", template: "my-app" });
 ```typescript
 import { eq } from "@atomicbase/sdk";
 
-const acme = client.tenant("acme-corp");
+const acme = client.database("acme-corp");
 
 // Insert
 await acme.from("users").insert({ name: "Alice", email: "alice@example.com" });
@@ -146,7 +146,7 @@ await acme.from("users").delete().where(eq("id", 1));
 
 ### 1. Reliability Over Control
 
-Tight rules like typescript-only schemas and no direct SQL access tradeoff control for reliability. A system like database-per-tenant has a lot of moving parts. And these multi-tenant systems are most often used in B2B situations where high security and reliability is crucial. One small mistake can cause a database to go out of sync or make it vulnerable to attacks directly through the API. That's exactly why we avoid custom SQL, define schemas idempotently per template, and put querying in a completely separate API from schema changes.
+Tight rules like TypeScript-only schemas and no direct SQL access trade off control for reliability. A database-per-customer system has a lot of moving parts. These multi-database systems are often used in B2B situations where high security and reliability are crucial. One small mistake can cause a database to go out of sync or make it vulnerable to attacks directly through the API. That's exactly why we avoid custom SQL, define schemas idempotently per template, and put querying in a completely separate API from schema changes.
 
 ### 2. Fair-Source License
 

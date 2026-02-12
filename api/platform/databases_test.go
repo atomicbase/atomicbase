@@ -56,9 +56,9 @@ func setupTenantTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("failed to create templates_history table: %v", err)
 	}
 
-	// Create tenants table
+	// Create databases table
 	_, err = testDB.Exec(`
-		CREATE TABLE IF NOT EXISTS ` + TableTenants + ` (
+		CREATE TABLE IF NOT EXISTS ` + TableDatabases + ` (
 			id INTEGER PRIMARY KEY,
 			name TEXT UNIQUE NOT NULL,
 			token TEXT NOT NULL,
@@ -70,7 +70,7 @@ func setupTenantTestDB(t *testing.T) *sql.DB {
 	`)
 	if err != nil {
 		testDB.Close()
-		t.Fatalf("failed to create tenants table: %v", err)
+		t.Fatalf("failed to create databases table: %v", err)
 	}
 
 	// Create migrations table
@@ -98,14 +98,14 @@ func setupTenantTestDB(t *testing.T) *sql.DB {
 
 	// Create tenant_migrations table
 	_, err = testDB.Exec(`
-		CREATE TABLE IF NOT EXISTS ` + TableTenantMigrations + ` (
+		CREATE TABLE IF NOT EXISTS ` + TableDatabaseMigrations + ` (
 			migration_id INTEGER NOT NULL,
-			tenant_id INTEGER NOT NULL,
+			database_id INTEGER NOT NULL,
 			status TEXT NOT NULL,
 			error TEXT,
 			attempts INTEGER NOT NULL DEFAULT 1,
 			updated_at TEXT NOT NULL,
-			PRIMARY KEY (migration_id, tenant_id)
+			PRIMARY KEY (migration_id, database_id)
 		)
 	`)
 	if err != nil {
@@ -162,17 +162,17 @@ func insertTestTemplate(t *testing.T, testDB *sql.DB, name string, version int) 
 	return int32(id)
 }
 
-// insertTestTenant inserts a tenant for testing.
+// insertTestTenant inserts a database for testing.
 func insertTestTenant(t *testing.T, testDB *sql.DB, name string, templateID int32, version int) int32 {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	result, err := testDB.Exec(`
-		INSERT INTO `+TableTenants+` (name, token, template_id, template_version, created_at, updated_at)
+		INSERT INTO `+TableDatabases+` (name, token, template_id, template_version, created_at, updated_at)
 		VALUES (?, 'test-token', ?, ?, ?, ?)
 	`, name, templateID, version, now, now)
 	if err != nil {
-		t.Fatalf("failed to insert tenant: %v", err)
+		t.Fatalf("failed to insert database: %v", err)
 	}
 
 	id, _ := result.LastInsertId()
@@ -198,91 +198,91 @@ func insertTestMigration(t *testing.T, testDB *sql.DB, templateID int32, fromVer
 }
 
 // =============================================================================
-// ListTenants Tests
+// ListDatabases Tests
 // Criteria B: Various database states
 // =============================================================================
 
-func TestListTenants_Empty(t *testing.T) {
+func TestListDatabases_Empty(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
-	tenants, err := ListTenants(context.Background())
+	databases, err := ListDatabases(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(tenants) != 0 {
-		t.Errorf("expected empty list, got %d tenants", len(tenants))
+	if len(databases) != 0 {
+		t.Errorf("expected empty list, got %d databases", len(databases))
 	}
 }
 
-func TestListTenants_Multiple(t *testing.T) {
+func TestListDatabases_Multiple(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
 	templateID := insertTestTemplate(t, testDB, "myapp", 1)
-	insertTestTenant(t, testDB, "tenant-a", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-b", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-c", templateID, 1)
+	insertTestTenant(t, testDB, "database-a", templateID, 1)
+	insertTestTenant(t, testDB, "database-b", templateID, 1)
+	insertTestTenant(t, testDB, "database-c", templateID, 1)
 
-	tenants, err := ListTenants(context.Background())
+	databases, err := ListDatabases(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(tenants) != 3 {
-		t.Fatalf("expected 3 tenants, got %d", len(tenants))
+	if len(databases) != 3 {
+		t.Fatalf("expected 3 databases, got %d", len(databases))
 	}
 
 	// Should be ordered by name
-	if tenants[0].Name != "tenant-a" || tenants[1].Name != "tenant-b" || tenants[2].Name != "tenant-c" {
-		t.Errorf("tenants not in expected order: %v", tenants)
+	if databases[0].Name != "database-a" || databases[1].Name != "database-b" || databases[2].Name != "database-c" {
+		t.Errorf("databases not in expected order: %v", databases)
 	}
 }
 
 // =============================================================================
-// GetTenant Tests
+// GetDatabase Tests
 // Criteria B: Various scenarios
 // =============================================================================
 
-func TestGetTenant_Found(t *testing.T) {
+func TestGetDatabase_Found(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
-	insertTestTenant(t, testDB, "my-tenant", templateID, 2)
+	insertTestTenant(t, testDB, "my-database", templateID, 2)
 
-	tenant, err := GetTenant(context.Background(), "my-tenant")
+	database, err := GetDatabase(context.Background(), "my-database")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if tenant.Name != "my-tenant" {
-		t.Errorf("name = %s, want my-tenant", tenant.Name)
+	if database.Name != "my-database" {
+		t.Errorf("name = %s, want my-database", database.Name)
 	}
-	if tenant.TemplateID != templateID {
-		t.Errorf("templateID = %d, want %d", tenant.TemplateID, templateID)
+	if database.TemplateID != templateID {
+		t.Errorf("templateID = %d, want %d", database.TemplateID, templateID)
 	}
-	if tenant.TemplateVersion != 2 {
-		t.Errorf("templateVersion = %d, want 2", tenant.TemplateVersion)
+	if database.TemplateVersion != 2 {
+		t.Errorf("templateVersion = %d, want 2", database.TemplateVersion)
 	}
 }
 
-func TestGetTenant_NotFound(t *testing.T) {
+func TestGetDatabase_NotFound(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
-	_, err := GetTenant(context.Background(), "nonexistent")
-	if err != ErrTenantNotFound {
-		t.Errorf("expected ErrTenantNotFound, got: %v", err)
+	_, err := GetDatabase(context.Background(), "nonexistent")
+	if err != ErrDatabaseNotFound {
+		t.Errorf("expected ErrDatabaseNotFound, got: %v", err)
 	}
 }
 
@@ -331,11 +331,11 @@ func TestGetMigrationByVersions_NotFound(t *testing.T) {
 }
 
 // =============================================================================
-// GetTenantsByTemplate Tests
-// Criteria C: Complex context - relationship between tenants and templates
+// GetDatabasesByTemplate Tests
+// Criteria C: Complex context - relationship between databases and templates
 // =============================================================================
 
-func TestGetTenantsByTemplate_Found(t *testing.T) {
+func TestGetDatabasesByTemplate_Found(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -344,27 +344,27 @@ func TestGetTenantsByTemplate_Found(t *testing.T) {
 	template1 := insertTestTemplate(t, testDB, "app1", 1)
 	template2 := insertTestTemplate(t, testDB, "app2", 1)
 
-	insertTestTenant(t, testDB, "tenant-1a", template1, 1)
-	insertTestTenant(t, testDB, "tenant-1b", template1, 1)
-	insertTestTenant(t, testDB, "tenant-2a", template2, 1)
+	insertTestTenant(t, testDB, "database-1a", template1, 1)
+	insertTestTenant(t, testDB, "database-1b", template1, 1)
+	insertTestTenant(t, testDB, "database-2a", template2, 1)
 
-	tenants, err := GetTenantsByTemplate(context.Background(), template1)
+	databases, err := GetDatabasesByTemplate(context.Background(), template1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(tenants) != 2 {
-		t.Fatalf("expected 2 tenants for template1, got %d", len(tenants))
+	if len(databases) != 2 {
+		t.Fatalf("expected 2 databases for template1, got %d", len(databases))
 	}
 
-	for _, tenant := range tenants {
-		if tenant.TemplateID != template1 {
-			t.Errorf("tenant %s has wrong templateID: %d", tenant.Name, tenant.TemplateID)
+	for _, database := range databases {
+		if database.TemplateID != template1 {
+			t.Errorf("database %s has wrong templateID: %d", database.Name, database.TemplateID)
 		}
 	}
 }
 
-func TestGetTenantsByTemplate_Empty(t *testing.T) {
+func TestGetDatabasesByTemplate_Empty(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -372,22 +372,22 @@ func TestGetTenantsByTemplate_Empty(t *testing.T) {
 
 	templateID := insertTestTemplate(t, testDB, "unused", 1)
 
-	tenants, err := GetTenantsByTemplate(context.Background(), templateID)
+	databases, err := GetDatabasesByTemplate(context.Background(), templateID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(tenants) != 0 {
-		t.Errorf("expected 0 tenants, got %d", len(tenants))
+	if len(databases) != 0 {
+		t.Errorf("expected 0 databases, got %d", len(databases))
 	}
 }
 
 // =============================================================================
-// GetPendingTenants Tests
+// GetPendingDatabases Tests
 // Criteria C: Complex query with NOT EXISTS subquery
 // =============================================================================
 
-func TestGetPendingTenants_AllPending(t *testing.T) {
+func TestGetPendingDatabases_AllPending(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -396,21 +396,21 @@ func TestGetPendingTenants_AllPending(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	insertTestTenant(t, testDB, "tenant-1", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-2", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-3", templateID, 1)
+	insertTestTenant(t, testDB, "database-1", templateID, 1)
+	insertTestTenant(t, testDB, "database-2", templateID, 1)
+	insertTestTenant(t, testDB, "database-3", templateID, 1)
 
-	pending, err := GetPendingTenants(context.Background(), migrationID, templateID, 2)
+	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(pending) != 3 {
-		t.Errorf("expected 3 pending tenants, got %d", len(pending))
+		t.Errorf("expected 3 pending databases, got %d", len(pending))
 	}
 }
 
-func TestGetPendingTenants_SomeAlreadyMigrated(t *testing.T) {
+func TestGetPendingDatabases_SomeAlreadyMigrated(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -419,35 +419,35 @@ func TestGetPendingTenants_SomeAlreadyMigrated(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	tenant1 := insertTestTenant(t, testDB, "tenant-1", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-2", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-3", templateID, 2) // Already at version 2
+	tenant1 := insertTestTenant(t, testDB, "database-1", templateID, 1)
+	insertTestTenant(t, testDB, "database-2", templateID, 1)
+	insertTestTenant(t, testDB, "database-3", templateID, 2) // Already at version 2
 
-	// Mark tenant-1 as already processed
+	// Mark database-1 as already processed
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := testDB.Exec(`
-		INSERT INTO `+TableTenantMigrations+` (migration_id, tenant_id, status, updated_at)
+		INSERT INTO `+TableDatabaseMigrations+` (migration_id, database_id, status, updated_at)
 		VALUES (?, ?, 'success', ?)
 	`, migrationID, tenant1, now)
 	if err != nil {
-		t.Fatalf("failed to insert tenant migration: %v", err)
+		t.Fatalf("failed to insert database migration: %v", err)
 	}
 
-	pending, err := GetPendingTenants(context.Background(), migrationID, templateID, 2)
+	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Only tenant-2 should be pending (tenant-1 already processed, tenant-3 at current version)
+	// Only database-2 should be pending (database-1 already processed, database-3 at current version)
 	if len(pending) != 1 {
-		t.Fatalf("expected 1 pending tenant, got %d", len(pending))
+		t.Fatalf("expected 1 pending database, got %d", len(pending))
 	}
-	if pending[0].Name != "tenant-2" {
-		t.Errorf("expected tenant-2, got %s", pending[0].Name)
+	if pending[0].Name != "database-2" {
+		t.Errorf("expected database-2, got %s", pending[0].Name)
 	}
 }
 
-func TestGetPendingTenants_NoPending(t *testing.T) {
+func TestGetPendingDatabases_NoPending(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -456,26 +456,26 @@ func TestGetPendingTenants_NoPending(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	// All tenants already at version 2
-	insertTestTenant(t, testDB, "tenant-1", templateID, 2)
-	insertTestTenant(t, testDB, "tenant-2", templateID, 2)
+	// All databases already at version 2
+	insertTestTenant(t, testDB, "database-1", templateID, 2)
+	insertTestTenant(t, testDB, "database-2", templateID, 2)
 
-	pending, err := GetPendingTenants(context.Background(), migrationID, templateID, 2)
+	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(pending) != 0 {
-		t.Errorf("expected 0 pending tenants, got %d", len(pending))
+		t.Errorf("expected 0 pending databases, got %d", len(pending))
 	}
 }
 
 // =============================================================================
-// GetFailedTenants Tests
+// GetFailedDatabases Tests
 // Criteria C: Join query for failed migrations
 // =============================================================================
 
-func TestGetFailedTenants_SomeFailed(t *testing.T) {
+func TestGetFailedDatabases_SomeFailed(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -484,30 +484,30 @@ func TestGetFailedTenants_SomeFailed(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	tenant1 := insertTestTenant(t, testDB, "tenant-1", templateID, 1)
-	tenant2 := insertTestTenant(t, testDB, "tenant-2", templateID, 1)
-	tenant3 := insertTestTenant(t, testDB, "tenant-3", templateID, 1)
+	tenant1 := insertTestTenant(t, testDB, "database-1", templateID, 1)
+	tenant2 := insertTestTenant(t, testDB, "database-2", templateID, 1)
+	tenant3 := insertTestTenant(t, testDB, "database-3", templateID, 1)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// tenant-1: success
-	_, _ = testDB.Exec(`INSERT INTO `+TableTenantMigrations+` VALUES (?, ?, 'success', NULL, 1, ?)`, migrationID, tenant1, now)
-	// tenant-2: failed
-	_, _ = testDB.Exec(`INSERT INTO `+TableTenantMigrations+` VALUES (?, ?, 'failed', 'connection error', 1, ?)`, migrationID, tenant2, now)
-	// tenant-3: failed
-	_, _ = testDB.Exec(`INSERT INTO `+TableTenantMigrations+` VALUES (?, ?, 'failed', 'timeout', 2, ?)`, migrationID, tenant3, now)
+	// database-1: success
+	_, _ = testDB.Exec(`INSERT INTO `+TableDatabaseMigrations+` VALUES (?, ?, 'success', NULL, 1, ?)`, migrationID, tenant1, now)
+	// database-2: failed
+	_, _ = testDB.Exec(`INSERT INTO `+TableDatabaseMigrations+` VALUES (?, ?, 'failed', 'connection error', 1, ?)`, migrationID, tenant2, now)
+	// database-3: failed
+	_, _ = testDB.Exec(`INSERT INTO `+TableDatabaseMigrations+` VALUES (?, ?, 'failed', 'timeout', 2, ?)`, migrationID, tenant3, now)
 
-	failed, err := GetFailedTenants(context.Background(), migrationID)
+	failed, err := GetFailedDatabases(context.Background(), migrationID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(failed) != 2 {
-		t.Fatalf("expected 2 failed tenants, got %d", len(failed))
+		t.Fatalf("expected 2 failed databases, got %d", len(failed))
 	}
 }
 
-func TestGetFailedTenants_NoneProcessed(t *testing.T) {
+func TestGetFailedDatabases_NoneProcessed(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -516,72 +516,72 @@ func TestGetFailedTenants_NoneProcessed(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	failed, err := GetFailedTenants(context.Background(), migrationID)
+	failed, err := GetFailedDatabases(context.Background(), migrationID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(failed) != 0 {
-		t.Errorf("expected 0 failed tenants, got %d", len(failed))
+		t.Errorf("expected 0 failed databases, got %d", len(failed))
 	}
 }
 
 // =============================================================================
-// BatchUpdateTenantVersions Tests
+// BatchUpdateDatabaseVersions Tests
 // Criteria B: Batch update edge cases
 // =============================================================================
 
-func TestBatchUpdateTenantVersions_Multiple(t *testing.T) {
+func TestBatchUpdateDatabaseVersions_Multiple(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
-	id1 := insertTestTenant(t, testDB, "tenant-1", templateID, 1)
-	id2 := insertTestTenant(t, testDB, "tenant-2", templateID, 1)
-	insertTestTenant(t, testDB, "tenant-3", templateID, 1) // Not updated
+	id1 := insertTestTenant(t, testDB, "database-1", templateID, 1)
+	id2 := insertTestTenant(t, testDB, "database-2", templateID, 1)
+	insertTestTenant(t, testDB, "database-3", templateID, 1) // Not updated
 
-	err := BatchUpdateTenantVersions(context.Background(), []int32{id1, id2}, 2)
+	err := BatchUpdateDatabaseVersions(context.Background(), []int32{id1, id2}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Verify updates
 	var v1, v2, v3 int
-	testDB.QueryRow(`SELECT template_version FROM `+TableTenants+` WHERE id = ?`, id1).Scan(&v1)
-	testDB.QueryRow(`SELECT template_version FROM `+TableTenants+` WHERE id = ?`, id2).Scan(&v2)
-	testDB.QueryRow(`SELECT template_version FROM `+TableTenants+` WHERE name = 'tenant-3'`).Scan(&v3)
+	testDB.QueryRow(`SELECT template_version FROM `+TableDatabases+` WHERE id = ?`, id1).Scan(&v1)
+	testDB.QueryRow(`SELECT template_version FROM `+TableDatabases+` WHERE id = ?`, id2).Scan(&v2)
+	testDB.QueryRow(`SELECT template_version FROM ` + TableDatabases + ` WHERE name = 'database-3'`).Scan(&v3)
 
 	if v1 != 2 {
-		t.Errorf("tenant-1 version = %d, want 2", v1)
+		t.Errorf("database-1 version = %d, want 2", v1)
 	}
 	if v2 != 2 {
-		t.Errorf("tenant-2 version = %d, want 2", v2)
+		t.Errorf("database-2 version = %d, want 2", v2)
 	}
 	if v3 != 1 {
-		t.Errorf("tenant-3 version = %d, want 1 (unchanged)", v3)
+		t.Errorf("database-3 version = %d, want 1 (unchanged)", v3)
 	}
 }
 
-func TestBatchUpdateTenantVersions_Empty(t *testing.T) {
+func TestBatchUpdateDatabaseVersions_Empty(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
-	err := BatchUpdateTenantVersions(context.Background(), []int32{}, 2)
+	err := BatchUpdateDatabaseVersions(context.Background(), []int32{}, 2)
 	if err != nil {
 		t.Errorf("empty batch should not error: %v", err)
 	}
 }
 
 // =============================================================================
-// RecordTenantMigration Tests
+// RecordDatabaseMigration Tests
 // Criteria B: Insert and retry scenarios
 // =============================================================================
 
-func TestRecordTenantMigration_Success(t *testing.T) {
+func TestRecordDatabaseMigration_Success(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -589,16 +589,16 @@ func TestRecordTenantMigration_Success(t *testing.T) {
 
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
-	tenantID := insertTestTenant(t, testDB, "tenant-1", templateID, 1)
+	tenantID := insertTestTenant(t, testDB, "database-1", templateID, 1)
 
-	err := RecordTenantMigration(context.Background(), migrationID, tenantID, "success", "")
+	err := RecordDatabaseMigration(context.Background(), migrationID, tenantID, "success", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var status string
 	var attempts int
-	testDB.QueryRow(`SELECT status, attempts FROM `+TableTenantMigrations+` WHERE migration_id = ? AND tenant_id = ?`,
+	testDB.QueryRow(`SELECT status, attempts FROM `+TableDatabaseMigrations+` WHERE migration_id = ? AND database_id = ?`,
 		migrationID, tenantID).Scan(&status, &attempts)
 
 	if status != "success" {
@@ -609,7 +609,7 @@ func TestRecordTenantMigration_Success(t *testing.T) {
 	}
 }
 
-func TestRecordTenantMigration_Retry(t *testing.T) {
+func TestRecordDatabaseMigration_Retry(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -617,23 +617,23 @@ func TestRecordTenantMigration_Retry(t *testing.T) {
 
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
-	tenantID := insertTestTenant(t, testDB, "tenant-1", templateID, 1)
+	tenantID := insertTestTenant(t, testDB, "database-1", templateID, 1)
 
 	// First attempt - failed
-	err := RecordTenantMigration(context.Background(), migrationID, tenantID, "failed", "connection error")
+	err := RecordDatabaseMigration(context.Background(), migrationID, tenantID, "failed", "connection error")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Second attempt - success
-	err = RecordTenantMigration(context.Background(), migrationID, tenantID, "success", "")
+	err = RecordDatabaseMigration(context.Background(), migrationID, tenantID, "success", "")
 	if err != nil {
 		t.Fatalf("unexpected error on retry: %v", err)
 	}
 
 	var status string
 	var attempts int
-	testDB.QueryRow(`SELECT status, attempts FROM `+TableTenantMigrations+` WHERE migration_id = ? AND tenant_id = ?`,
+	testDB.QueryRow(`SELECT status, attempts FROM `+TableDatabaseMigrations+` WHERE migration_id = ? AND database_id = ?`,
 		migrationID, tenantID).Scan(&status, &attempts)
 
 	if status != "success" {

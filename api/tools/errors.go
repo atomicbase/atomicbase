@@ -31,23 +31,23 @@ const (
 	CodeNotNullViolation    = "NOT_NULL_VIOLATION"
 	CodeNoFTSIndex          = "NO_FTS_INDEX"
 	CodeBatchTooLarge       = "BATCH_TOO_LARGE"
-	CodeMissingTenant       = "MISSING_TENANT"
+	CodeMissingDatabase     = "MISSING_DATABASE"
 	CodeInvalidName         = "INVALID_NAME"
 	CodeInternalError       = "INTERNAL_ERROR"
 
 	// Platform API error codes
-	CodeInvalidJSON       = "INVALID_JSON"
-	CodeInvalidRequest    = "INVALID_REQUEST"
-	CodeTemplateExists    = "TEMPLATE_EXISTS"
-	CodeNoChanges         = "NO_CHANGES"
-	CodeAtomicbaseBusy    = "ATOMICBASE_BUSY"
-	CodeTenantExists      = "TENANT_EXISTS"
-	CodeTenantNotFound    = "TENANT_NOT_FOUND"
-	CodeTenantInSync      = "TENANT_IN_SYNC"
-	CodeMigrationNotFound = "MIGRATION_NOT_FOUND"
-	CodeVersionNotFound   = "VERSION_NOT_FOUND"
-	CodeInvalidMigration  = "INVALID_MIGRATION"
-	CodeValidationFailed  = "VALIDATION_FAILED"
+	CodeInvalidJSON              = "INVALID_JSON"
+	CodeInvalidRequest           = "INVALID_REQUEST"
+	CodeTemplateExists           = "TEMPLATE_EXISTS"
+	CodeNoChanges                = "NO_CHANGES"
+	CodeAtomicbaseBusy           = "ATOMICBASE_BUSY"
+	CodeDatabaseExists           = "DATABASE_EXISTS"
+	CodeDatabaseNotFoundPlatform = "DATABASE_NOT_FOUND"
+	CodeDatabaseInSync           = "DATABASE_IN_SYNC"
+	CodeMigrationNotFound        = "MIGRATION_NOT_FOUND"
+	CodeVersionNotFound          = "VERSION_NOT_FOUND"
+	CodeInvalidMigration         = "INVALID_MIGRATION"
+	CodeValidationFailed         = "VALIDATION_FAILED"
 
 	// Turso-specific error codes
 	CodeTursoConfigMissing = "TURSO_CONFIG_MISSING"
@@ -94,19 +94,19 @@ var (
 	ErrTemplateInUse      = errors.New("template is in use by one or more databases")
 	ErrInArrayTooLarge    = errors.New("IN array exceeds maximum size")
 	ErrBatchTooLarge      = errors.New("batch exceeds maximum number of operations")
-	ErrMissingTenant      = errors.New("Tenant header is required")
+	ErrMissingDatabase    = errors.New("Database header is required")
 
 	// Platform API errors
-	ErrInvalidJSON       = errors.New("invalid request body")
-	ErrTemplateExists    = errors.New("template already exists")
-	ErrNoChanges         = errors.New("no schema changes detected")
-	ErrAtomicbaseBusy    = errors.New("another migration is already in progress")
-	ErrTenantExists      = errors.New("tenant already exists")
-	ErrTenantNotFound    = errors.New("tenant not found")
-	ErrTenantInSync      = errors.New("tenant is already at current version")
-	ErrMigrationNotFound = errors.New("migration not found")
-	ErrVersionNotFound   = errors.New("version not found")
-	ErrInvalidMigration  = errors.New("invalid migration")
+	ErrInvalidJSON              = errors.New("invalid request body")
+	ErrTemplateExists           = errors.New("template already exists")
+	ErrNoChanges                = errors.New("no schema changes detected")
+	ErrAtomicbaseBusy           = errors.New("another migration is already in progress")
+	ErrDatabaseExists           = errors.New("database already exists")
+	ErrDatabaseNotFoundPlatform = errors.New("database not found")
+	ErrDatabaseInSync           = errors.New("database is already at current version")
+	ErrMigrationNotFound        = errors.New("migration not found")
+	ErrVersionNotFound          = errors.New("version not found")
+	ErrInvalidMigration         = errors.New("invalid migration")
 )
 
 // InvalidTypeErr returns an error indicating an invalid column type was specified.

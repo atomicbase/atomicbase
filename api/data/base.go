@@ -20,10 +20,10 @@ import (
 
 // Primary database connection (reused across requests)
 var (
-	primaryDB        *sql.DB
-	primarySchema    SchemaCache
-	schemaMu         sync.RWMutex
-	tenantLookupStmt *sql.Stmt // Cached prepared statement for tenant lookup
+	primaryDB          *sql.DB
+	primarySchema      SchemaCache
+	schemaMu           sync.RWMutex
+	databaseLookupStmt *sql.Stmt // Cached prepared statement for database lookup
 )
 
 func init() {
@@ -148,14 +148,14 @@ func initPrimaryDB() error {
 
 	primaryDB = db
 
-	// Prepare cached statement for tenant lookup (runs on every tenant request)
-	tenantLookupStmt, err = db.Prepare(fmt.Sprintf(
+	// Prepare cached statement for database lookup (runs on every database request)
+	databaseLookupStmt, err = db.Prepare(fmt.Sprintf(
 		"SELECT id, COALESCE(template_id, 0), COALESCE(template_version, 1) FROM %s WHERE name = ?",
 		ReservedTableDatabases))
 	if err != nil {
 		primaryDB = nil
 		db.Close()
-		return fmt.Errorf("failed to prepare tenant lookup statement: %w", err)
+		return fmt.Errorf("failed to prepare database lookup statement: %w", err)
 	}
 
 	// Load schema for primary database
@@ -184,8 +184,8 @@ func initPrimaryDB() error {
 
 // ClosePrimaryDB closes the primary database connection. Call on shutdown.
 func ClosePrimaryDB() error {
-	if tenantLookupStmt != nil {
-		tenantLookupStmt.Close()
+	if databaseLookupStmt != nil {
+		databaseLookupStmt.Close()
 	}
 	if primaryDB != nil {
 		return primaryDB.Close()
@@ -235,13 +235,13 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, errors.New("TURSO_GROUP_AUTH_TOKEN environment variable is not set but is required to access external databases")
 	}
 
-	row := tenantLookupStmt.QueryRow(dbName)
+	row := databaseLookupStmt.QueryRow(dbName)
 
 	var id sql.NullInt32
 	var templateID int32
-	var tenantVersion int
+	var databaseVersion int
 
-	err := row.Scan(&id, &templateID, &tenantVersion)
+	err := row.Scan(&id, &templateID, &databaseVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Database{}, tools.ErrDatabaseNotFound
@@ -255,10 +255,10 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, fmt.Errorf("failed to load schema: %w", err)
 	}
 
-	// Check if tenant is in sync with current template version
-	if templateID != 0 && tenantVersion != currentVersion {
-		return Database{}, fmt.Errorf("%w: tenant at version %d, current is %d",
-			tools.ErrDatabaseOutOfSync, tenantVersion, currentVersion)
+	// Check if database is in sync with current template version
+	if templateID != 0 && databaseVersion != currentVersion {
+		return Database{}, fmt.Errorf("%w: database at version %d, current is %d",
+			tools.ErrDatabaseOutOfSync, databaseVersion, currentVersion)
 	}
 
 	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", dbName, org, token))

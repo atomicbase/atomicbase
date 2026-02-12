@@ -35,7 +35,7 @@ EXPOSE 8080
 
 # Set default environment variables
 ENV PORT=:8080
-ENV DB_PATH=/data/tenants.db
+ENV DB_PATH=/data/primary.db
 ENV DATA_DIR=/data
 
 # Run the server

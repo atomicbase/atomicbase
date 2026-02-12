@@ -1,38 +1,38 @@
 import { AtomicbaseError } from "./AtomicbaseError.js";
 import type {
   AtomicbaseResponse,
-  Tenant,
-  CreateTenantOptions,
-  SyncTenantResponse,
+  Database,
+  CreateDatabaseOptions,
+  SyncDatabaseResponse,
 } from "./types.js";
 
 /**
- * Client for managing tenants via the Platform API.
+ * Client for managing databases via the Platform API.
  *
  * @example
  * ```ts
  * const client = createClient({ url: 'http://localhost:8080', apiKey: 'key' })
  *
- * // List all tenants
- * const { data: tenants } = await client.tenants.list()
+ * // List all databases
+ * const { data: databases } = await client.databases.list()
  *
- * // Create a new tenant
- * const { data: tenant } = await client.tenants.create({
+ * // Create a new database
+ * const { data: database } = await client.databases.create({
  *   name: 'acme-corp',
  *   template: 'my-app'
  * })
  *
- * // Get tenant details
- * const { data: tenant } = await client.tenants.get('acme-corp')
+ * // Get database details
+ * const { data: database } = await client.databases.get('acme-corp')
  *
- * // Sync tenant to latest template version
- * const { data: result } = await client.tenants.sync('acme-corp')
+ * // Sync database to latest template version
+ * const { data: result } = await client.databases.sync('acme-corp')
  *
- * // Delete a tenant
- * const { error } = await client.tenants.delete('acme-corp')
+ * // Delete a database
+ * const { error } = await client.databases.delete('acme-corp')
  * ```
  */
-export class TenantsClient {
+export class DatabasesClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
   private readonly headers: Record<string, string>;
@@ -64,21 +64,21 @@ export class TenantsClient {
   }
 
   /**
-   * List all tenants.
+   * List all databases.
    *
    * @example
    * ```ts
-   * const { data, error } = await client.tenants.list()
+   * const { data, error } = await client.databases.list()
    * if (error) {
-   *   console.error('Failed to list tenants:', error.message)
+   *   console.error('Failed to list databases:', error.message)
    * } else {
-   *   console.log('Tenants:', data)
+   *   console.log('Databases:', data)
    * }
    * ```
    */
-  async list(): Promise<AtomicbaseResponse<Tenant[]>> {
+  async list(): Promise<AtomicbaseResponse<Database[]>> {
     try {
-      const response = await this.fetchFn(`${this.baseUrl}/platform/tenants`, {
+      const response = await this.fetchFn(`${this.baseUrl}/platform/databases`, {
         method: "GET",
         headers: this.getHeaders(),
       });
@@ -98,22 +98,22 @@ export class TenantsClient {
   }
 
   /**
-   * Get a tenant by name.
+   * Get a database by name.
    *
    * @example
    * ```ts
-   * const { data, error } = await client.tenants.get('acme-corp')
+   * const { data, error } = await client.databases.get('acme-corp')
    * if (error) {
-   *   console.error('Tenant not found:', error.message)
+   *   console.error('Database not found:', error.message)
    * } else {
-   *   console.log('Tenant:', data)
+   *   console.log('Database:', data)
    * }
    * ```
    */
-  async get(name: string): Promise<AtomicbaseResponse<Tenant>> {
+  async get(name: string): Promise<AtomicbaseResponse<Database>> {
     try {
       const response = await this.fetchFn(
-        `${this.baseUrl}/platform/tenants/${encodeURIComponent(name)}`,
+        `${this.baseUrl}/platform/databases/${encodeURIComponent(name)}`,
         {
           method: "GET",
           headers: this.getHeaders(),
@@ -135,24 +135,24 @@ export class TenantsClient {
   }
 
   /**
-   * Create a new tenant database from a template.
+  * Create a new database from a template.
    *
    * @example
    * ```ts
-   * const { data, error } = await client.tenants.create({
+   * const { data, error } = await client.databases.create({
    *   name: 'acme-corp',
    *   template: 'my-app'
    * })
    * if (error) {
-   *   console.error('Failed to create tenant:', error.message)
+   *   console.error('Failed to create database:', error.message)
    * } else {
-   *   console.log('Created tenant:', data.name)
+   *   console.log('Created database:', data.name)
    * }
    * ```
    */
-  async create(options: CreateTenantOptions): Promise<AtomicbaseResponse<Tenant>> {
+  async create(options: CreateDatabaseOptions): Promise<AtomicbaseResponse<Database>> {
     try {
-      const response = await this.fetchFn(`${this.baseUrl}/platform/tenants`, {
+      const response = await this.fetchFn(`${this.baseUrl}/platform/databases`, {
         method: "POST",
         headers: this.getHeaders(),
         body: JSON.stringify(options),
@@ -173,22 +173,22 @@ export class TenantsClient {
   }
 
   /**
-   * Delete a tenant database.
+  * Delete a database.
    *
    * @example
    * ```ts
-   * const { error } = await client.tenants.delete('acme-corp')
+   * const { error } = await client.databases.delete('acme-corp')
    * if (error) {
-   *   console.error('Failed to delete tenant:', error.message)
+   *   console.error('Failed to delete database:', error.message)
    * } else {
-   *   console.log('Tenant deleted')
+   *   console.log('Database deleted')
    * }
    * ```
    */
   async delete(name: string): Promise<AtomicbaseResponse<void>> {
     try {
       const response = await this.fetchFn(
-        `${this.baseUrl}/platform/tenants/${encodeURIComponent(name)}`,
+        `${this.baseUrl}/platform/databases/${encodeURIComponent(name)}`,
         {
           method: "DELETE",
           headers: this.getHeaders(),
@@ -210,15 +210,15 @@ export class TenantsClient {
   }
 
   /**
-   * Sync a tenant to the latest template version.
-   * This applies any pending schema migrations to the tenant database.
+   * Sync a database to the latest template version.
+   * This applies any pending schema migrations to the database.
    *
    * @example
    * ```ts
-   * const { data, error } = await client.tenants.sync('acme-corp')
+   * const { data, error } = await client.databases.sync('acme-corp')
    * if (error) {
-   *   if (error.code === 'TENANT_IN_SYNC') {
-   *     console.log('Tenant is already up to date')
+   *   if (error.code === 'DATABASE_IN_SYNC') {
+   *     console.log('Database is already up to date')
    *   } else {
    *     console.error('Sync failed:', error.message)
    *   }
@@ -227,10 +227,10 @@ export class TenantsClient {
    * }
    * ```
    */
-  async sync(name: string): Promise<AtomicbaseResponse<SyncTenantResponse>> {
+  async sync(name: string): Promise<AtomicbaseResponse<SyncDatabaseResponse>> {
     try {
       const response = await this.fetchFn(
-        `${this.baseUrl}/platform/tenants/${encodeURIComponent(name)}/sync`,
+        `${this.baseUrl}/platform/databases/${encodeURIComponent(name)}/sync`,
         {
           method: "POST",
           headers: this.getHeaders(),

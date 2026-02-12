@@ -13,11 +13,11 @@ import (
 
 // Table names for internal platform tables.
 const (
-	TableTemplates        = "atomicbase_schema_templates"
-	TableTemplatesHistory = "atomicbase_templates_history"
-	TableTenants          = "atomicbase_tenants"
-	TableMigrations       = "atomicbase_migrations"
-	TableTenantMigrations = "atomicbase_tenant_migrations"
+	TableTemplates          = "atomicbase_schema_templates"
+	TableTemplatesHistory   = "atomicbase_templates_history"
+	TableDatabases          = "atomicbase_databases"
+	TableMigrations         = "atomicbase_migrations"
+	TableDatabaseMigrations = "atomicbase_database_migrations"
 )
 
 // Primary database connection for platform operations.
@@ -38,7 +38,7 @@ func InitDB() error {
 
 	conn, err := sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
 	if err != nil {
-		conn, err = sql.Open("sqlite3", "file:atomicdata/tenants.db")
+		conn, err = sql.Open("sqlite3", "file:atomicdata/databases.db")
 		if err != nil {
 			return err
 		}
@@ -76,16 +76,16 @@ func InitDB() error {
 
 	// Create tenant_migrations table if it doesn't exist
 	_, err = conn.Exec(`
-		CREATE TABLE IF NOT EXISTS ` + TableTenantMigrations + ` (
+		CREATE TABLE IF NOT EXISTS ` + TableDatabaseMigrations + ` (
 			migration_id INTEGER NOT NULL REFERENCES ` + TableMigrations + `(id),
-			tenant_id INTEGER NOT NULL REFERENCES ` + TableTenants + `(id),
+			database_id INTEGER NOT NULL REFERENCES ` + TableDatabases + `(id),
 			status TEXT NOT NULL,
 			error TEXT,
 			attempts INTEGER NOT NULL DEFAULT 1,
 			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (migration_id, tenant_id)
+			PRIMARY KEY (migration_id, database_id)
 		);
-		CREATE INDEX IF NOT EXISTS idx_tenant_migrations_status ON ` + TableTenantMigrations + `(status);
+		CREATE INDEX IF NOT EXISTS idx_database_migrations_status ON ` + TableDatabaseMigrations + `(status);
 	`)
 	if err != nil {
 		conn.Close()

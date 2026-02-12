@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getUserTenant } from "@/lib/db";
+import { getUserDatabase } from "@/lib/db";
 import { eq } from "@atomicbase/sdk";
 import { deleteSessionCookie, invalidateSession } from "@/lib/session";
 
@@ -17,8 +17,8 @@ export async function addTodo(formData: FormData): Promise<ActionResult> {
     return { error: "Title is required" };
   }
 
-  const userTenant = getUserTenant(user.tenantName);
-  const { error } = await userTenant.from("todos").insert({
+  const userDatabase = getUserDatabase(user.tenantName);
+  const { error } = await userDatabase.from("todos").insert({
     title: title.trim(),
     completed: 0,
   });
@@ -34,10 +34,10 @@ export async function addTodo(formData: FormData): Promise<ActionResult> {
 export async function toggleTodo(todoId: number): Promise<ActionResult> {
   const { user } = await requireAuth();
 
-  const userTenant = getUserTenant(user.tenantName);
+  const userDatabase = getUserDatabase(user.tenantName);
 
   // Get current state
-  const { data: todo, error: fetchError } = await userTenant
+  const { data: todo, error: fetchError } = await userDatabase
     .from("todos")
     .select()
     .where(eq("id", todoId))
@@ -52,7 +52,7 @@ export async function toggleTodo(todoId: number): Promise<ActionResult> {
   }
 
   // Toggle completed state
-  const { error: updateError } = await userTenant
+  const { error: updateError } = await userDatabase
     .from("todos")
     .update({
       completed: todo.completed ? 0 : 1,
@@ -71,8 +71,8 @@ export async function toggleTodo(todoId: number): Promise<ActionResult> {
 export async function deleteTodo(todoId: number): Promise<ActionResult> {
   const { user } = await requireAuth();
 
-  const userTenant = getUserTenant(user.tenantName);
-  const { error } = await userTenant.from("todos").delete().where(eq("id", todoId));
+  const userDatabase = getUserDatabase(user.tenantName);
+  const { error } = await userDatabase.from("todos").delete().where(eq("id", todoId));
 
   if (error) {
     return { error: error.message };

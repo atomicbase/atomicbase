@@ -31,9 +31,9 @@ A Next.js todo application demonstrating Atomicbase with:
    npx atomicbase templates push
    ```
 
-4. Create the "primary" tenant for auth data:
+4. Create the "primary" database for auth data:
    ```bash
-   curl -X POST http://localhost:8080/platform/tenants \
+   curl -X POST http://localhost:8080/platform/databases \
      -H "Content-Type: application/json" \
      -H "Authorization: Bearer your-api-key" \
      -d '{"name": "primary", "template": "primary"}'
@@ -50,8 +50,8 @@ A Next.js todo application demonstrating Atomicbase with:
 
 ### Database Model
 
-- **Primary database** (`primary` tenant): Stores users and sessions for authentication
-- **User tenant databases** (`user-{googleId}`): Each user gets their own database for todos
+- **Primary database** (`primary` database): Stores users and sessions for authentication
+- **User databases** (`user-{googleId}`): Each user gets their own database for todos
 
 ### Schema Templates
 
@@ -59,14 +59,14 @@ A Next.js todo application demonstrating Atomicbase with:
 - `users` - User accounts linked to Google OAuth
 - `sessions` - Session tokens with expiration
 
-**Tenant** (`schemas/tenant.ts`):
+**Todos** (`schemas/todos.schema.ts`):
 - `todos` - User's todo items
 
 ### Auth Flow
 
 1. User clicks "Sign in with Google"
 2. Redirected to Google OAuth consent screen
-3. On callback, user is created (if new) along with their tenant database
+3. On callback, user is created (if new) along with their database
 4. Session token is hashed (SHA-256) and stored, cookie set
 5. User redirected to dashboard
 

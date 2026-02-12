@@ -87,8 +87,8 @@ export async function GET(request: Request): Promise<Response> {
         return redirectToError(request, "Failed to update user profile. Please try again.");
       }
     } else {
-      // New user - create user and tenant database
-      const tenantName = `user-${googleId}`;
+      // New user - create user and database
+      const databaseName = `user-${googleId}`;
 
       // Create user record
       const { data: insertResult, error: insertError } = await primaryDb.from("users").insert({
@@ -96,7 +96,7 @@ export async function GET(request: Request): Promise<Response> {
         email,
         name,
         picture,
-        tenant_name: tenantName,
+        tenant_name: databaseName,
         created_at: new Date().toISOString(),
       });
 
@@ -107,14 +107,14 @@ export async function GET(request: Request): Promise<Response> {
 
       userId = (insertResult as InsertResult).last_insert_id;
 
-      // Create tenant database for user's todos
-      const { error: tenantError } = await client.tenants.create({
-        name: tenantName,
-        template: "tenant",
+      // Create database for user's todos
+      const { error: databaseError } = await client.databases.create({
+        name: databaseName,
+        template: "todos",
       });
 
-      if (tenantError) {
-        console.error("Failed to create tenant:", tenantError);
+      if (databaseError) {
+        console.error("Failed to create database:", databaseError);
         return redirectToError(request, "Failed to set up your workspace. Please try again.");
       }
     }

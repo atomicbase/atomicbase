@@ -6,7 +6,7 @@ import {
   inArray,
   AtomicbaseError,
   onEq,
-  TenantClient,
+  DatabaseClient,
 } from "./src/index.js";
 
 interface RowSdkTest {
@@ -38,8 +38,8 @@ const client = createClient({
   url: BASE_URL,
 });
 
-// Will be set after tenant creation
-let tenant: TenantClient;
+// Will be set after database creation
+let tenant: DatabaseClient;
 
 async function test(name: string, fn: () => Promise<void>) {
   try {
@@ -52,7 +52,7 @@ async function test(name: string, fn: () => Promise<void>) {
 }
 
 // Create tenant client
-tenant = client.tenant(TEST_TENANT);
+tenant = client.database(TEST_TENANT);
 
 async function runTests() {
   console.log("\n=== SDK Integration Tests ===\n");

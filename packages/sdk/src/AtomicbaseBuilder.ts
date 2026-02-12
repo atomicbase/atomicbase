@@ -36,7 +36,7 @@ export interface BuilderConfig {
   table: string;
   baseUrl: string;
   apiKey?: string;
-  tenant?: string;
+  database?: string;
   fetch: typeof fetch;
   headers?: Record<string, string>;
 }
@@ -49,7 +49,7 @@ export abstract class AtomicbaseBuilder<T> implements PromiseLike<AtomicbaseResp
   protected state: QueryState;
   protected readonly baseUrl: string;
   protected readonly apiKey?: string;
-  protected readonly tenant?: string;
+  protected readonly database?: string;
   protected readonly fetchFn: typeof fetch;
   protected readonly defaultHeaders: Record<string, string>;
   protected signal?: AbortSignal;
@@ -73,7 +73,7 @@ export abstract class AtomicbaseBuilder<T> implements PromiseLike<AtomicbaseResp
     };
     this.baseUrl = config.baseUrl;
     this.apiKey = config.apiKey;
-    this.tenant = config.tenant;
+    this.database = config.database;
     this.fetchFn = config.fetch;
     this.defaultHeaders = config.headers ?? {};
   }
@@ -377,8 +377,8 @@ export abstract class AtomicbaseBuilder<T> implements PromiseLike<AtomicbaseResp
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
 
-    if (this.tenant) {
-      headers["Tenant"] = this.tenant;
+    if (this.database) {
+      headers["Database"] = this.database;
     }
 
     // Build Prefer header based on operation

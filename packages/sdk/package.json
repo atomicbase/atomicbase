@@ -17,7 +17,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test:contract": "pnpm build && node --test contract/**/*.test.mjs"
   },
   "keywords": [
     "atomicbase",

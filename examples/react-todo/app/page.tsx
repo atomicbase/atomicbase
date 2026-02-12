@@ -20,7 +20,7 @@ export default async function Home() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-8">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Multi-Tenant Todo App</CardTitle>
+          <CardTitle className="text-2xl">Multi-Database Todo App</CardTitle>
           <CardDescription>Sign in to manage your todos</CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">

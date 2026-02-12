@@ -99,7 +99,7 @@ func Load() Config {
 
 	return Config{
 		Port:             getEnv("PORT", ":8080"),
-		PrimaryDBPath:    getEnv("DB_PATH", "atomicdata/tenants.db"),
+		PrimaryDBPath:    getEnv("DB_PATH", "atomicdata/primary.db"),
 		DataDir:          getEnv("DATA_DIR", "atomicdata"),
 		MaxRequestBody:   1 << 20, // 1MB
 		APIKey:           os.Getenv("ATOMICBASE_API_KEY"),

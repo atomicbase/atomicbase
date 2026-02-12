@@ -12,7 +12,7 @@ import (
 // Test Setup
 // =============================================================================
 
-// Schema for platform tables (templates, history, tenants)
+// Schema for platform tables (templates, history, databases)
 const platformSchema = `
 CREATE TABLE atomicbase_schema_templates (
 	id INTEGER PRIMARY KEY,
@@ -32,7 +32,7 @@ CREATE TABLE atomicbase_templates_history (
 	UNIQUE(template_id, version)
 );
 
-CREATE TABLE atomicbase_tenants (
+CREATE TABLE atomicbase_databases (
 	id INTEGER PRIMARY KEY,
 	name TEXT UNIQUE,
 	token TEXT,
@@ -714,11 +714,11 @@ func TestDeleteTemplate_InUse(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	// Create a tenant using this template
-	_, err = conn.Exec("INSERT INTO atomicbase_tenants (name, template_id, template_version) VALUES (?, ?, 1)",
+	// Create a database using this template
+	_, err = conn.Exec("INSERT INTO atomicbase_databases (name, template_id, template_version) VALUES (?, ?, 1)",
 		"test_tenant", template.ID)
 	if err != nil {
-		t.Fatalf("failed to create tenant: %v", err)
+		t.Fatalf("failed to create database: %v", err)
 	}
 
 	// Try to delete - should fail

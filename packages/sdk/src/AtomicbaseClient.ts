@@ -1,42 +1,42 @@
 import { AtomicbaseQueryBuilder } from "./AtomicbaseQueryBuilder.js";
 import { AtomicbaseBuilder } from "./AtomicbaseBuilder.js";
 import { AtomicbaseError } from "./AtomicbaseError.js";
-import { TenantsClient } from "./TenantsClient.js";
+import { DatabasesClient } from "./DatabasesClient.js";
 import type { AtomicbaseClientOptions, AtomicbaseBatchResponse } from "./types.js";
 
 /**
- * Tenant-scoped client for database operations.
- * Created by calling `client.tenant('tenant-name')`.
+ * Database-scoped client for operations.
+ * Created by calling `client.database('database-name')`.
  *
  * @example
  * ```ts
- * const tenantClient = client.tenant('acme-corp')
+ * const databaseClient = client.database('acme-corp')
  *
  * // Query with fluent filters
- * const { data, error } = await tenantClient
+ * const { data, error } = await databaseClient
  *   .from('users')
  *   .select('id', 'name')
  *   .eq('status', 'active')
  *   .limit(10)
  *
  * // Insert data
- * const { data } = await tenantClient
+ * const { data } = await databaseClient
  *   .from('users')
  *   .insert({ name: 'Alice', email: 'alice@example.com' })
  * ```
  */
-export class TenantClient {
+export class DatabaseClient {
   readonly baseUrl: string;
   readonly apiKey?: string;
   readonly headers: Record<string, string>;
-  readonly tenantId: string;
+  readonly databaseId: string;
   private readonly fetchFn: typeof fetch;
 
-  constructor(options: AtomicbaseClientOptions & { tenantId: string }) {
+  constructor(options: AtomicbaseClientOptions & { databaseId: string }) {
     this.baseUrl = options.url.replace(/\/$/, "");
     this.apiKey = options.apiKey;
     this.headers = options.headers ?? {};
-    this.tenantId = options.tenantId;
+    this.databaseId = options.databaseId;
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -45,7 +45,7 @@ export class TenantClient {
    *
    * @example
    * ```ts
-   * const { data } = await tenantClient.from('users').select()
+   * const { data } = await databaseClient.from('users').select()
    * ```
    */
   from<T = Record<string, unknown>>(table: string): AtomicbaseQueryBuilder<T> {
@@ -56,7 +56,7 @@ export class TenantClient {
       fetch: this.fetchFn,
       headers: {
         ...this.headers,
-        Tenant: this.tenantId,
+        Database: this.databaseId,
       },
     });
   }
@@ -67,10 +67,10 @@ export class TenantClient {
    *
    * @example
    * ```ts
-   * const { data, error } = await tenantClient.batch([
-   *   tenantClient.from('users').insert({ name: 'Alice' }),
-   *   tenantClient.from('users').insert({ name: 'Bob' }),
-   *   tenantClient.from('counters').update({ count: 2 }).eq('id', 1),
+   * const { data, error } = await databaseClient.batch([
+   *   databaseClient.from('users').insert({ name: 'Alice' }),
+   *   databaseClient.from('users').insert({ name: 'Bob' }),
+   *   databaseClient.from('counters').update({ count: 2 }).eq('id', 1),
    * ])
    * ```
    */
@@ -82,7 +82,7 @@ export class TenantClient {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...this.headers,
-      Tenant: this.tenantId,
+      Database: this.databaseId,
     };
 
     if (this.apiKey) {
@@ -149,9 +149,9 @@ export class TenantClient {
 }
 
 /**
- * Atomicbase client for multi-tenant database operations.
- * Use `.tenant()` to get a tenant-scoped client for querying.
- * Use `.tenants` to manage tenants (create, delete, sync).
+ * Atomicbase client for multi-database operations.
+ * Use `.database()` to get a database-scoped client for querying.
+ * Use `.databases` to manage databases (create, delete, sync).
  *
  * @example
  * ```ts
@@ -162,16 +162,16 @@ export class TenantClient {
  *   apiKey: 'your-api-key',
  * })
  *
- * // Manage tenants
- * const { data: tenant } = await client.tenants.create({
+ * // Manage databases
+ * const { data: database } = await client.databases.create({
  *   name: 'acme-corp',
  *   template: 'my-app'
  * })
  *
- * // Get a tenant-scoped client for database operations
- * const acme = client.tenant('acme-corp')
+ * // Get a database-scoped client for operations
+ * const acme = client.database('acme-corp')
  *
- * // Query the tenant's database
+ * // Query the database
  * const { data, error } = await acme
  *   .from('users')
  *   .select('id', 'name')
@@ -186,30 +186,30 @@ export class AtomicbaseClient {
   private readonly fetchFn: typeof fetch;
 
   /**
-   * Client for managing tenants (CRUD operations).
+   * Client for managing databases (CRUD operations).
    *
    * @example
    * ```ts
-   * // List all tenants
-   * const { data: tenants } = await client.tenants.list()
+   * // List all databases
+   * const { data: databases } = await client.databases.list()
    *
-   * // Create a new tenant
-   * const { data: tenant } = await client.tenants.create({
+   * // Create a new database
+   * const { data: database } = await client.databases.create({
    *   name: 'acme-corp',
    *   template: 'my-app'
    * })
    *
-   * // Get tenant details
-   * const { data: tenant } = await client.tenants.get('acme-corp')
+   * // Get database details
+   * const { data: database } = await client.databases.get('acme-corp')
    *
-   * // Sync tenant to latest template version
-   * const { data: result } = await client.tenants.sync('acme-corp')
+   * // Sync database to latest template version
+   * const { data: result } = await client.databases.sync('acme-corp')
    *
-   * // Delete a tenant
-   * await client.tenants.delete('acme-corp')
+   * // Delete a database
+   * await client.databases.delete('acme-corp')
    * ```
    */
-  readonly tenants: TenantsClient;
+  readonly databases: DatabasesClient;
 
   constructor(options: AtomicbaseClientOptions) {
     this.baseUrl = options.url.replace(/\/$/, "");
@@ -217,8 +217,8 @@ export class AtomicbaseClient {
     this.headers = options.headers ?? {};
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
 
-    // Initialize tenants client
-    this.tenants = new TenantsClient({
+    // Initialize databases client
+    this.databases = new DatabasesClient({
       baseUrl: this.baseUrl,
       apiKey: this.apiKey,
       headers: this.headers,
@@ -227,21 +227,21 @@ export class AtomicbaseClient {
   }
 
   /**
-   * Create a tenant-scoped client for database operations.
+   * Create a database-scoped client for operations.
    *
    * @example
    * ```ts
-   * const tenantClient = client.tenant('acme-corp')
-   * const { data } = await tenantClient.from('users').select()
+   * const databaseClient = client.database('acme-corp')
+   * const { data } = await databaseClient.from('users').select()
    * ```
    */
-  tenant(tenantId: string): TenantClient {
-    return new TenantClient({
+  database(databaseId: string): DatabaseClient {
+    return new DatabaseClient({
       url: this.baseUrl,
       apiKey: this.apiKey,
       fetch: this.fetchFn,
       headers: this.headers,
-      tenantId,
+      databaseId,
     });
   }
 }
@@ -256,8 +256,8 @@ export class AtomicbaseClient {
  *   apiKey: 'your-api-key',
  * })
  *
- * // Get a tenant client and query
- * const { data } = await client.tenant('my-tenant').from('users').select()
+ * // Get a database client and query
+ * const { data } = await client.database('my-tenant').from('users').select()
  * ```
  */
 export function createClient(options: AtomicbaseClientOptions): AtomicbaseClient {

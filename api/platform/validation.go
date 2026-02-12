@@ -15,7 +15,7 @@ type ValidationResult struct {
 
 // ValidateMigrationPlan validates a migration plan before execution.
 // Performs FK reference checks and optionally data constraint checks against a probe database.
-// Note: SQL syntax is validated by executing on the first tenant database - if it fails, the migration aborts.
+// Note: SQL syntax is validated by executing on the first database - if it fails, the migration aborts.
 func ValidateMigrationPlan(ctx context.Context, newSchema Schema, probeDB *sql.DB) (*ValidationResult, error) {
 	result := &ValidationResult{Valid: true}
 
@@ -103,7 +103,7 @@ func validateFKReferences(schema Schema) []ValidationError {
 }
 
 // validateDataConstraints checks data-dependent constraints against a real database.
-// This should be run against the first tenant database before migrating all tenants.
+// This should be run against the first database before migrating all databases.
 func validateDataConstraints(ctx context.Context, db *sql.DB, newSchema Schema) ([]ValidationError, error) {
 	var errors []ValidationError
 

@@ -57,12 +57,12 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /platform/templates/{name}/rollback", withBody(handleRollbackTemplate))
 	mux.HandleFunc("GET /platform/templates/{name}/history", handleGetTemplateHistory)
 
-	// Tenants
-	mux.HandleFunc("GET /platform/tenants", handleListTenants)
-	mux.HandleFunc("GET /platform/tenants/{name}", handleGetTenant)
-	mux.HandleFunc("POST /platform/tenants", withBody(handleCreateTenant))
-	mux.HandleFunc("DELETE /platform/tenants/{name}", handleDeleteTenant)
-	mux.HandleFunc("POST /platform/tenants/{name}/sync", handleSyncTenant)
+	// Databases
+	mux.HandleFunc("GET /platform/databases", handleListDatabases)
+	mux.HandleFunc("GET /platform/databases/{name}", handleGetDatabase)
+	mux.HandleFunc("POST /platform/databases", withBody(handleCreateDatabase))
+	mux.HandleFunc("DELETE /platform/databases/{name}", handleDeleteDatabase)
+	mux.HandleFunc("POST /platform/databases/{name}/sync", handleSyncDatabase)
 
 	// Migrations
 	mux.HandleFunc("GET /platform/migrations", handleListMigrations)
@@ -213,8 +213,8 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate migration
-	// Get first tenant for probe database (if any exist)
-	tenants, err := GetTenantsByTemplate(ctx, template.ID)
+	// Get first database for migration validation (if any exist)
+	databases, err := GetDatabasesByTemplate(ctx, template.ID)
 	if err != nil {
 		tools.RespErr(w, err)
 		return
@@ -255,8 +255,8 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// If no tenants, use a transaction to atomically create version, history, and migration record
-	if len(tenants) == 0 {
+	// If no databases, use a transaction to atomically create version, history, and migration record
+	if len(databases) == 0 {
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			tools.RespErr(w, err)
@@ -307,7 +307,7 @@ func handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// With tenants: use transaction for history and migration record, then start background job
+	// With databases: use transaction for history and migration record, then start background job
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		tools.RespErr(w, err)
@@ -454,37 +454,37 @@ func handleGetTemplateHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // =============================================================================
-// Tenant Handlers
+// Database Handlers
 // =============================================================================
 
-func handleListTenants(w http.ResponseWriter, r *http.Request) {
-	tenants, err := ListTenants(r.Context())
+func handleListDatabases(w http.ResponseWriter, r *http.Request) {
+	databases, err := ListDatabases(r.Context())
 	if err != nil {
 		tools.RespErr(w, err)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, tenants)
+	respondJSON(w, http.StatusOK, databases)
 }
 
-func handleGetTenant(w http.ResponseWriter, r *http.Request) {
+func handleGetDatabase(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		tools.RespErr(w, tools.InvalidRequestErr("tenant name is required"))
+		tools.RespErr(w, tools.InvalidRequestErr("database name is required"))
 		return
 	}
 
-	tenant, err := GetTenant(r.Context(), name)
+	database, err := GetDatabase(r.Context(), name)
 	if err != nil {
 		tools.RespErr(w, err)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, tenant)
+	respondJSON(w, http.StatusOK, database)
 }
 
-func handleCreateTenant(w http.ResponseWriter, r *http.Request) {
-	var req CreateTenantRequest
+func handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
+	var req CreateDatabaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
@@ -505,23 +505,23 @@ func handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tenant, err := CreateTenant(r.Context(), req.Name, req.Template)
+	database, err := CreateDatabase(r.Context(), req.Name, req.Template)
 	if err != nil {
 		tools.RespErr(w, err)
 		return
 	}
 
-	respondJSON(w, http.StatusCreated, tenant)
+	respondJSON(w, http.StatusCreated, database)
 }
 
-func handleDeleteTenant(w http.ResponseWriter, r *http.Request) {
+func handleDeleteDatabase(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		tools.RespErr(w, tools.InvalidRequestErr("tenant name is required"))
+		tools.RespErr(w, tools.InvalidRequestErr("database name is required"))
 		return
 	}
 
-	err := DeleteTenant(r.Context(), name)
+	err := DeleteDatabase(r.Context(), name)
 	if err != nil {
 		tools.RespErr(w, err)
 		return
@@ -530,14 +530,14 @@ func handleDeleteTenant(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleSyncTenant(w http.ResponseWriter, r *http.Request) {
+func handleSyncDatabase(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		tools.RespErr(w, tools.InvalidRequestErr("tenant name is required"))
+		tools.RespErr(w, tools.InvalidRequestErr("database name is required"))
 		return
 	}
 
-	result, err := SyncTenant(r.Context(), name)
+	result, err := SyncDatabase(r.Context(), name)
 	if err != nil {
 		tools.RespErr(w, err)
 		return
@@ -598,7 +598,7 @@ func handleRetryMigration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := RetryFailedTenants(r.Context(), id)
+	result, err := RetryFailedDatabases(r.Context(), id)
 	if err != nil {
 		tools.RespErr(w, err)
 		return

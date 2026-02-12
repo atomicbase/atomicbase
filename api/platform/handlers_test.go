@@ -14,22 +14,22 @@ func TestValidateResourceName(t *testing.T) {
 		wantValid bool
 	}{
 		// Valid names
-		{"lowercase", "my-tenant", "", true},
+		{"lowercase", "my-database", "", true},
 		{"with numbers", "tenant123", "", true},
 		{"dashes", "a-b-c", "", true},
 		{"single char", "a", "", true},
 		{"64 chars", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", true},
 
 		// Invalid: uppercase
-		{"uppercase start", "My-Tenant", tools.CodeInvalidName, false},
+		{"uppercase start", "My-Database", tools.CodeInvalidName, false},
 		{"uppercase middle", "myTenant", tools.CodeInvalidName, false},
 		{"all uppercase", "TENANT", tools.CodeInvalidName, false},
 
 		// Invalid: special characters
 		{"underscore", "tenant_name", tools.CodeInvalidName, false},
-		{"dot", "tenant.name", tools.CodeInvalidName, false},
-		{"space", "tenant name", tools.CodeInvalidName, false},
-		{"at sign", "tenant@name", tools.CodeInvalidName, false},
+		{"dot", "database.name", tools.CodeInvalidName, false},
+		{"space", "database name", tools.CodeInvalidName, false},
+		{"at sign", "database@name", tools.CodeInvalidName, false},
 
 		// Invalid: too long
 		{"65 chars", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tools.CodeInvalidName, false},
@@ -38,8 +38,8 @@ func TestValidateResourceName(t *testing.T) {
 		// Edge cases
 		{"empty string", "", tools.CodeInvalidName, false},
 		{"only dash", "-", "", true},
-		{"starts with dash", "-tenant", "", true},
-		{"ends with dash", "tenant-", "", true},
+		{"starts with dash", "-database", "", true},
+		{"ends with dash", "database-", "", true},
 		{"only numbers", "12345", "", true},
 	}
 

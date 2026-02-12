@@ -95,13 +95,13 @@ func withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 	}
 }
 
-// connDb returns a database connection for the specified tenant.
-// The Tenant header is required - the internal tenants.db cannot be queried directly.
+// connDb returns a database connection for the specified database.
+// The Database header is required - the internal primary database cannot be queried directly.
 // Returns the connection and a boolean indicating if it should be closed after use.
 func connDb(req *http.Request) (Database, bool, error) {
-	dbName := req.Header.Get("Tenant")
+	dbName := req.Header.Get("Database")
 	if dbName == "" {
-		return Database{}, false, tools.ErrMissingTenant
+		return Database{}, false, tools.ErrMissingDatabase
 	}
 
 	dao, err := ConnPrimary()

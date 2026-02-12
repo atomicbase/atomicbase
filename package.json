@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
+    "test:contract:sdk": "pnpm --filter @atomicbase/sdk test:contract",
     "build:sdk": "pnpm --filter @atomicbase/sdk build",
     "build:schema": "pnpm --filter @atomicbase/schema build",
     "build:cli": "pnpm --filter @atomicbase/cli build",
