@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/joe-ervin05/atomicbase/config"
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/config"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 // withBody wraps handlers that read request bodies to enforce size limits.

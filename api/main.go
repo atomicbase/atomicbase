@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joe-ervin05/atomicbase/config"
-	"github.com/joe-ervin05/atomicbase/data"
-	"github.com/joe-ervin05/atomicbase/platform"
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/config"
+	"github.com/atomicbase/atomicbase/data"
+	"github.com/atomicbase/atomicbase/platform"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 func logStartupInfo() {

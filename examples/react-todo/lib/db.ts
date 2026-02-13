@@ -1,4 +1,8 @@
-import { createClient, type AtomicbaseClient, type DatabaseClient } from "@atomicbase/sdk";
+import {
+  createClient,
+  type AtomicbaseClient,
+  type DatabaseClient,
+} from "@atomicbase/sdk";
 
 // Lazy initialization to avoid build-time errors
 let _client: AtomicbaseClient | null = null;
@@ -39,8 +43,13 @@ export async function ensurePrimaryDatabase(): Promise<void> {
       });
 
       if (createError) {
-        console.error("Failed to create primary database:", createError.message);
-        throw new Error(`Failed to create primary database: ${createError.message}`);
+        console.error(
+          "Failed to create primary database:",
+          createError.message,
+        );
+        throw new Error(
+          `Failed to create primary database: ${createError.message}`,
+        );
       }
 
       console.log("Created primary database");

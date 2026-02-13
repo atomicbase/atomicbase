@@ -1,4 +1,4 @@
-module github.com/joe-ervin05/atomicbase
+module github.com/atomicbase/atomicbase
 
 go 1.25
 

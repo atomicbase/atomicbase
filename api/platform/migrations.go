@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 // GenerateMigrationPlan creates a migration plan from schema diff and merges.
