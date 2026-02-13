@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 // Batch executes multiple operations atomically within a SQL transaction.

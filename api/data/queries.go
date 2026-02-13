@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/joe-ervin05/atomicbase/config"
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/config"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 // SelectJSON queries rows using JSON body format.

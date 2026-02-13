@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 // GetCachedTemplate retrieves the current schema and version for a template.

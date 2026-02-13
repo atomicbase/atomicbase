@@ -3,7 +3,7 @@ package data
 import (
 	"database/sql"
 
-	"github.com/joe-ervin05/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/tools"
 )
 
 func schemaFks(db *sql.DB) (map[string][]CacheFk, error) {
