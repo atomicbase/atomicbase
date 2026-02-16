@@ -33,13 +33,6 @@ func logStartupInfo() {
 		fmt.Println("[OK]   Authentication enabled")
 	}
 
-	if !config.Cfg.RateLimitEnabled {
-		fmt.Println("[WARN] Rate limiting disabled")
-		warnings++
-	} else {
-		fmt.Printf("[OK]   Rate limiting: %d req/min\n", config.Cfg.RateLimit)
-	}
-
 	if len(config.Cfg.CORSOrigins) == 0 {
 		fmt.Println("[INFO] CORS disabled (no origins configured)")
 	} else {
@@ -83,13 +76,12 @@ func main() {
 		log.Printf("Warning: failed to resume running jobs: %v", err)
 	}
 
-	// Apply middleware chain: panic recovery -> logging -> timeout -> cors -> rate limit -> auth -> handler
+	// Apply middleware chain: panic recovery -> logging -> timeout -> cors -> auth -> handler
 	handler := tools.PanicRecoveryMiddleware(
 		tools.LoggingMiddleware(
 			tools.TimeoutMiddleware(
 				tools.CORSMiddleware(
-					tools.RateLimitMiddleware(
-						tools.AuthMiddleware(app))))))
+					tools.AuthMiddleware(app)))))
 
 	server := &http.Server{
 		Addr:    config.Cfg.Port,

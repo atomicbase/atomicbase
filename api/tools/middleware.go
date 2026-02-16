@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/atomicbase/atomicbase/config"
@@ -99,25 +98,6 @@ func detectAPIType(path string) string {
 	return "other"
 }
 
-// rateLimiter tracks request counts per IP address.
-type rateLimiter struct {
-	mu       sync.Mutex
-	requests map[string]*clientLimit
-	rate     int           // requests per window
-	window   time.Duration // time window
-}
-
-type clientLimit struct {
-	count       int
-	windowStart time.Time
-}
-
-var limiter = &rateLimiter{
-	requests: make(map[string]*clientLimit),
-	rate:     config.Cfg.RateLimit,
-	window:   time.Minute,
-}
-
 // CORSMiddleware handles Cross-Origin Resource Sharing.
 // If ATOMICBASE_CORS_ORIGINS is not set, CORS is disabled (no cross-origin access).
 // Set to "*" to allow all origins, or comma-separated list of specific origins.
@@ -167,49 +147,6 @@ func TimeoutMiddleware(next http.Handler) http.Handler {
 		defer cancel()
 
 		r = r.WithContext(ctx)
-		next.ServeHTTP(w, r)
-	})
-}
-
-// RateLimitMiddleware limits requests per IP address.
-// Set ATOMICBASE_RATE_LIMIT_ENABLED=true to enable rate limiting.
-// Use ATOMICBASE_RATE_LIMIT to set requests per minute (default 100).
-func RateLimitMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !config.Cfg.RateLimitEnabled {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Get client IP (handle X-Forwarded-For for proxies)
-		ip := r.RemoteAddr
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			ip = strings.Split(forwarded, ",")[0]
-		}
-		ip = strings.TrimSpace(strings.Split(ip, ":")[0])
-
-		limiter.mu.Lock()
-		client, exists := limiter.requests[ip]
-		now := time.Now()
-
-		if !exists || now.Sub(client.windowStart) > limiter.window {
-			limiter.requests[ip] = &clientLimit{count: 1, windowStart: now}
-			limiter.mu.Unlock()
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		if client.count >= limiter.rate {
-			limiter.mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", "60")
-			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
-			return
-		}
-
-		client.count++
-		limiter.mu.Unlock()
 		next.ServeHTTP(w, r)
 	})
 }
