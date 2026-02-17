@@ -101,12 +101,12 @@ export function glob(column: string, pattern: string): FilterCondition {
 }
 
 /** IN condition: column IN (values) */
-export function inArray(column: string, values: unknown[]): FilterCondition {
+export function inList(column: string, values: unknown[]): FilterCondition {
   return { [column]: { in: values } };
 }
 
 /** NOT IN condition: column NOT IN (values) */
-export function notInArray(column: string, values: unknown[]): FilterCondition {
+export function notInList(column: string, values: unknown[]): FilterCondition {
   return { [column]: { not: { in: values } } };
 }
 
