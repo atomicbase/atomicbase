@@ -368,6 +368,35 @@ api/
     └── response.go      # Error response formatting
 ```
 
+### AI with Tenant Isolation
+
+Every model call is scoped to a tenant. Context includes knowledge bases, database rows, and metadata—all isolated per customer.
+
+No prompt injection across tenants. No data leakage. Just secure, contextual AI for your customers.
+
+```typescript
+// ai.ts
+const model = ai.model("support-agent");
+
+await model.generate({
+  tenantId,
+  input,
+  context: {
+    include: [
+      // Tenant-scoped knowledge base
+      ai.context.kb("help-center"),
+
+      // Query specific rows
+      ai.context.table("customers")
+        .where({ id: customerId }),
+
+      // Inject metadata
+      ai.context.vars({ plan: "pro" })
+    ]
+  }
+});
+```
+
 ### Middleware Chain
 
 Requests flow through middleware in this order:
