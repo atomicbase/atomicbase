@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	_ "embed"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,7 +15,49 @@ import (
 	"github.com/atomicbase/atomicbase/data"
 	"github.com/atomicbase/atomicbase/platform"
 	"github.com/atomicbase/atomicbase/tools"
+	_ "github.com/mattn/go-sqlite3"
 )
+
+//go:embed schema.sql
+var primarySchemaSQL string
+
+const primaryDBPragmas = `
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -40000;
+PRAGMA temp_store = MEMORY;
+PRAGMA busy_timeout = 10000;
+PRAGMA foreign_keys = ON;
+PRAGMA journal_size_limit = 200000000;
+`
+
+func initPrimaryDB() (*sql.DB, error) {
+	if err := os.MkdirAll(config.Cfg.DataDir, os.ModePerm); err != nil {
+		return nil, err
+	}
+
+	conn, err := sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := conn.Ping(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	if _, err := conn.Exec(primaryDBPragmas); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	if _, err := conn.Exec(primarySchemaSQL); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return conn, nil
+}
 
 func logStartupInfo() {
 	fmt.Println("=== Atomicbase ===")
@@ -60,8 +104,19 @@ func main() {
 		log.Fatalf("Failed to initialize activity logger: %v", err)
 	}
 
-	// Initialize platform database
-	if err := platform.InitDB(); err != nil {
+	primaryDB, err := initPrimaryDB()
+	if err != nil {
+		log.Fatalf("Failed to initialize primary database: %v", err)
+	}
+
+	if err := data.InitDB(primaryDB); err != nil {
+		_ = primaryDB.Close()
+		log.Fatalf("Failed to initialize data API: %v", err)
+	}
+
+	if err := platform.InitDB(primaryDB); err != nil {
+		_ = data.ClosePrimaryDB()
+		_ = primaryDB.Close()
 		log.Fatalf("Failed to initialize platform database: %v", err)
 	}
 
@@ -108,6 +163,9 @@ func main() {
 	}
 	if err := platform.CloseDB(); err != nil {
 		log.Printf("Error closing platform database: %v", err)
+	}
+	if err := primaryDB.Close(); err != nil {
+		log.Printf("Error closing primary database: %v", err)
 	}
 
 	// Close activity logger

@@ -468,23 +468,6 @@ func RetryFailedDatabases(ctx context.Context, jobID int64) (*RetryMigrationResp
 		}, nil
 	}
 
-	// Clear failed status so they become pending again
-	conn, err := getDB()
-	if err != nil {
-		return nil, err
-	}
-
-	dbCtx, cancel = withDBTimeout(ctx)
-	defer cancel()
-	for _, database := range failedTenants {
-		_, err = conn.ExecContext(dbCtx, fmt.Sprintf(`
-			DELETE FROM %s WHERE migration_id = ? AND database_id = ?
-		`, TableDatabaseMigrations), jobID, database.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to clear failed status: %w", err)
-		}
-	}
-
 	// Reset job status to running (keep current counts)
 	if err := UpdateMigrationStatus(ctx, jobID, MigrationStatusRunning, nil, migration.CompletedDBs, migration.FailedDBs); err != nil {
 		return nil, err

@@ -578,6 +578,17 @@ func prefixColumns(cols []string, prefix string) string {
 
 // formatDefault formats a default value for SQL.
 func formatDefault(val any) string {
+	if m, ok := val.(map[string]any); ok {
+		if raw, ok := m["sql"].(string); ok && strings.TrimSpace(raw) != "" {
+			return raw
+		}
+	}
+	if m, ok := val.(map[string]string); ok {
+		if raw, ok := m["sql"]; ok && strings.TrimSpace(raw) != "" {
+			return raw
+		}
+	}
+
 	switch v := val.(type) {
 	case string:
 		return "'" + strings.ReplaceAll(v, "'", "''") + "'"

@@ -582,6 +582,7 @@ func TestFormatDefault(t *testing.T) {
 		{"bool true", true, "1"},
 		{"bool false", false, "0"},
 		{"nil", nil, "NULL"},
+		{"sql expression map", map[string]any{"sql": "CURRENT_TIMESTAMP"}, "CURRENT_TIMESTAMP"},
 	}
 
 	for _, tt := range tests {

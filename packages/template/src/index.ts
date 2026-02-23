@@ -31,6 +31,10 @@ export type ForeignKeyAction =
 
 export type Collation = "BINARY" | "NOCASE" | "RTRIM";
 
+export interface SQLExpression {
+  sql: string;
+}
+
 export interface ForeignKeyOptions {
   onDelete?: ForeignKeyAction;
   onUpdate?: ForeignKeyAction;
@@ -49,7 +53,7 @@ export interface ColumnDefinition {
   type: ColumnType;
   notNull?: boolean;
   unique?: boolean;
-  default?: string | number | null;
+  default?: string | number | SQLExpression | null;
   collate?: Collation;
   check?: string;
   generated?: GeneratedColumn;
@@ -98,7 +102,7 @@ export class ColumnBuilder {
   private _primaryKey = false;
   private _notNull = false;
   private _unique = false;
-  private _default: string | number | null = null;
+  private _default: string | number | SQLExpression | null = null;
   private _collate: Collation | undefined = undefined;
   private _check: string | undefined = undefined;
   private _generated: GeneratedColumn | undefined = undefined;
@@ -138,7 +142,7 @@ export class ColumnBuilder {
    * Set default value.
    * @param value - Literal value or SQL expression (e.g., "CURRENT_TIMESTAMP")
    */
-  default(value: string | number): this {
+  default(value: string | number | SQLExpression): this {
     this._default = value;
     return this;
   }
@@ -260,6 +264,16 @@ export const c = {
    */
   blob: () => new ColumnBuilder("BLOB"),
 };
+
+/**
+ * Raw SQL expression for defaults.
+ *
+ * Example:
+ * c.text().default(sql("CURRENT_TIMESTAMP"))
+ */
+export function sql(expression: string): SQLExpression {
+  return { sql: expression };
+}
 
 // =============================================================================
 // Table Builder

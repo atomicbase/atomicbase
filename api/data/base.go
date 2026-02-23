@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 
 	"github.com/atomicbase/atomicbase/config"
@@ -26,141 +25,31 @@ var (
 	databaseLookupStmt *sql.Stmt // Cached prepared statement for database lookup
 )
 
-func init() {
-	// Skip initialization during tests - tests use in-memory databases
-	if isTestMode() {
-		return
-	}
-	if err := initPrimaryDB(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-// isTestMode checks if we're running in test mode
-func isTestMode() bool {
-	// Check for test binary suffix or -test flag
-	for _, arg := range os.Args {
-		if len(arg) >= 5 && arg[len(arg)-5:] == ".test" {
-			return true
-		}
-		if arg == "-test.v" || arg == "-test.run" {
-			return true
-		}
-		if len(arg) >= 6 && arg[:6] == "-test." {
-			return true
-		}
-	}
-	return false
-}
-
-const PRAGMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA cache_size = -40000;
-PRAGMA temp_store = MEMORY;
-PRAGMA busy_timeout = 10000;
-PRAGMA foreign_keys = ON;
-PRAGMA journal_size_limit = 200000000;
-`
-
-const TEMPLATES_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableTemplates +
-	`(
-	id INTEGER PRIMARY KEY,
-	name TEXT UNIQUE NOT NULL,
-	current_version INTEGER DEFAULT 1,
-	created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-` +
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_templates_name ON ` + ReservedTableTemplates + `(name);`
-
-const DATABASES_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableDatabases +
-	`(
-	id INTEGER PRIMARY KEY,
-	name TEXT UNIQUE,
-	token TEXT,
-	template_id INTEGER REFERENCES ` + ReservedTableTemplates + `(id),
-	template_version INTEGER DEFAULT 1,
-	created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-);` +
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_databases_name ON ` + ReservedTableDatabases + `(name);`
-
-const TEMPLATES_HISTORY_SQL = `CREATE TABLE IF NOT EXISTS ` + ReservedTableTemplatesHistory +
-	`(
-	id INTEGER PRIMARY KEY,
-	template_id INTEGER NOT NULL REFERENCES ` + ReservedTableTemplates + `(id),
-	version INTEGER NOT NULL,
-	schema BLOB NOT NULL,
-	checksum TEXT NOT NULL,
-	changes TEXT,
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	UNIQUE(template_id, version)
-);` +
-	`CREATE INDEX IF NOT EXISTS idx_templates_history_template ON ` + ReservedTableTemplatesHistory + `(template_id);`
-
-func initPrimaryDB() error {
-	if err := os.MkdirAll(config.Cfg.DataDir, os.ModePerm); err != nil {
-		return err
+// InitDB initializes Data API state using the shared primary database connection.
+func InitDB(conn *sql.DB) error {
+	if conn == nil {
+		return errors.New("nil primary database connection")
 	}
 
-	db, err := sql.Open("sqlite3", "file:"+config.Cfg.PrimaryDBPath)
-	if err != nil {
-		return err
+	if databaseLookupStmt != nil {
+		_ = databaseLookupStmt.Close()
+		databaseLookupStmt = nil
 	}
 
-	if err := db.Ping(); err != nil {
-		db.Close()
-		fmt.Println("failed primary db connection")
-		return err
-	}
+	primaryDB = conn
 
-	_, err = db.Exec(PRAGMA)
-
-	if err != nil {
-		db.Close()
-		return err
-	}
-
-	var buf bytes.Buffer
-	gob.NewEncoder(&buf).Encode(SchemaCache{})
-
-	// Create templates table first (referenced by databases)
-	_, err = db.Exec(TEMPLATES_SQL)
-	if err != nil {
-		db.Close()
-		return fmt.Errorf("failed to create templates table: %w", err)
-	}
-
-	// Create databases table with template_id reference
-	_, err = db.Exec(DATABASES_SQL, buf.Bytes())
-	if err != nil {
-		db.Close()
-		return fmt.Errorf("failed to create databases table: %w", err)
-	}
-
-	// Create templates_history table for version tracking
-	_, err = db.Exec(TEMPLATES_HISTORY_SQL)
-	if err != nil {
-		db.Close()
-		return fmt.Errorf("failed to create templates_history table: %w", err)
-	}
-
-	primaryDB = db
-
-	// Prepare cached statement for database lookup (runs on every database request)
-	databaseLookupStmt, err = db.Prepare(fmt.Sprintf(
+	var err error
+	databaseLookupStmt, err = conn.Prepare(fmt.Sprintf(
 		"SELECT id, COALESCE(template_id, 0), COALESCE(template_version, 1) FROM %s WHERE name = ?",
 		ReservedTableDatabases))
 	if err != nil {
 		primaryDB = nil
-		db.Close()
 		return fmt.Errorf("failed to prepare database lookup statement: %w", err)
 	}
 
 	// Load schema for primary database
 	dao := PrimaryDao{Database: Database{
-		Client:          db,
+		Client:          conn,
 		Schema:          SchemaCache{},
 		ID:              1,
 		TemplateID:      0, // Primary database doesn't use templates
@@ -169,13 +58,14 @@ func initPrimaryDB() error {
 	}}
 	if err := dao.Database.updateSchema(); err != nil {
 		primaryDB = nil
-		db.Close()
+		_ = databaseLookupStmt.Close()
+		databaseLookupStmt = nil
 		return err
 	}
 	primarySchema = dao.Schema
 
 	// Preload template schemas into cache
-	if err := PreloadSchemaCache(db); err != nil {
+	if err := PreloadSchemaCache(conn); err != nil {
 		// Non-fatal - cache will be populated on demand
 		log.Printf("Warning: failed to preload schema cache: %v", err)
 	}
@@ -183,15 +73,16 @@ func initPrimaryDB() error {
 	return nil
 }
 
-// ClosePrimaryDB closes the primary database connection. Call on shutdown.
+// ClosePrimaryDB cleans up Data API resources associated with the shared primary connection.
+// The caller that created the shared connection is responsible for closing it.
 func ClosePrimaryDB() error {
+	var closeErr error
 	if databaseLookupStmt != nil {
-		databaseLookupStmt.Close()
+		closeErr = databaseLookupStmt.Close()
+		databaseLookupStmt = nil
 	}
-	if primaryDB != nil {
-		return primaryDB.Close()
-	}
-	return nil
+	primaryDB = nil
+	return closeErr
 }
 
 // ConnPrimary returns a reference to the primary database.

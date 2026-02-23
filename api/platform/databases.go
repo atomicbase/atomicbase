@@ -351,8 +351,8 @@ func GetDatabasesByTemplate(ctx context.Context, templateID int32) ([]Database, 
 }
 
 // GetPendingDatabases returns databases that need migration for a given job.
-// Pending = template_version < target AND not in tenant_migrations table for this job.
-func GetPendingDatabases(ctx context.Context, migrationID int64, templateID int32, targetVersion int) ([]Database, error) {
+// Pending = template_version < target.
+func GetPendingDatabases(ctx context.Context, _ int64, templateID int32, targetVersion int) ([]Database, error) {
 	conn, err := getDB()
 	if err != nil {
 		return nil, err
@@ -363,12 +363,8 @@ func GetPendingDatabases(ctx context.Context, migrationID int64, templateID int3
 		FROM %s t
 		WHERE t.template_id = ?
 		  AND t.template_version < ?
-		  AND NOT EXISTS (
-			SELECT 1 FROM %s tm
-			WHERE tm.database_id = t.id AND tm.migration_id = ?
-		  )
 		ORDER BY t.name
-	`, TableDatabases, TableDatabaseMigrations), templateID, targetVersion, migrationID)
+	`, TableDatabases), templateID, targetVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -404,13 +400,20 @@ func GetFailedDatabases(ctx context.Context, migrationID int64) ([]Database, err
 		return nil, err
 	}
 
+	migration, err := GetMigration(ctx, migrationID)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
 		SELECT t.id, t.name, t.template_id, t.template_version, t.created_at, t.updated_at
 		FROM %s t
-		JOIN %s tm ON tm.database_id = t.id
-		WHERE tm.migration_id = ? AND tm.status = 'failed'
+		JOIN %s mf ON mf.database_id = t.id
+		WHERE t.template_id = ?
+		  AND mf.from_version = ?
+		  AND mf.to_version = ?
 		ORDER BY t.name
-	`, TableDatabases, TableDatabaseMigrations), migrationID)
+	`, TableDatabases, TableMigrationFailures), migration.TemplateID, migration.FromVersion, migration.ToVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -482,18 +485,28 @@ func RecordDatabaseMigration(ctx context.Context, migrationID int64, tenantID in
 		return err
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	migration, err := GetMigration(ctx, migrationID)
+	if err != nil {
+		return err
+	}
 
-	// Use INSERT OR REPLACE to handle retries
+	if status == DatabaseMigrationStatusSuccess {
+		_, err = conn.ExecContext(ctx, fmt.Sprintf(`
+			DELETE FROM %s WHERE database_id = ?
+		`, TableMigrationFailures), tenantID)
+		return err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (migration_id, database_id, status, error, attempts, updated_at)
-		VALUES (?, ?, ?, ?, 1, ?)
-		ON CONFLICT(migration_id, database_id) DO UPDATE SET
-			status = excluded.status,
+		INSERT INTO %s (database_id, from_version, to_version, error, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(database_id) DO UPDATE SET
+			from_version = excluded.from_version,
+			to_version = excluded.to_version,
 			error = excluded.error,
-			attempts = attempts + 1,
-			updated_at = excluded.updated_at
-	`, TableDatabaseMigrations), migrationID, tenantID, status, errMsg, now)
+			created_at = excluded.created_at
+	`, TableMigrationFailures), tenantID, migration.FromVersion, migration.ToVersion, errMsg, now)
 
 	return err
 }

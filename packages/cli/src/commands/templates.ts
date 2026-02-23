@@ -414,7 +414,7 @@ function convertFromApiFormat(tables: TemplateResponse["schema"]["tables"]): Gen
  */
 function generateSchemaCode(name: string, tables: GeneratorTable[]): string {
   const lines: string[] = [
-    `import { defineSchema, defineTable, c } from "@atomicbase/template";`,
+    `import { defineSchema, defineTable, c, sql } from "@atomicbase/template";`,
     ``,
     `export default defineSchema("${name}", {`,
   ];
@@ -472,10 +472,15 @@ function generateColumnCode(col: GeneratorColumn): string {
     code += `.collate("${col.collate}")`;
   }
   if (col.default !== undefined && col.default !== null) {
-    const val = typeof col.default === "string"
-      ? `"${col.default}"`
-      : col.default;
-    code += `.default(${val})`;
+    if (typeof col.default === "object" && col.default !== null && "sql" in col.default) {
+      const expr = String((col.default as { sql: unknown }).sql ?? "").replace(/"/g, '\\"');
+      code += `.default(sql("${expr}"))`;
+    } else {
+      const val = typeof col.default === "string"
+        ? `"${col.default}"`
+        : col.default;
+      code += `.default(${val})`;
+    }
   }
   if (col.check) {
     code += `.check("${col.check.replace(/"/g, '\\"')}")`;

@@ -96,21 +96,19 @@ func setupTenantTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("failed to create migrations table: %v", err)
 	}
 
-	// Create tenant_migrations table
+	// Create migration_failures table
 	_, err = testDB.Exec(`
-		CREATE TABLE IF NOT EXISTS ` + TableDatabaseMigrations + ` (
-			migration_id INTEGER NOT NULL,
-			database_id INTEGER NOT NULL,
-			status TEXT NOT NULL,
+		CREATE TABLE IF NOT EXISTS ` + TableMigrationFailures + ` (
+			database_id INTEGER PRIMARY KEY,
+			from_version INTEGER NOT NULL,
+			to_version INTEGER NOT NULL,
 			error TEXT,
-			attempts INTEGER NOT NULL DEFAULT 1,
-			updated_at TEXT NOT NULL,
-			PRIMARY KEY (migration_id, database_id)
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
 	if err != nil {
 		testDB.Close()
-		t.Fatalf("failed to create tenant_migrations table: %v", err)
+		t.Fatalf("failed to create migration_failures table: %v", err)
 	}
 
 	return testDB
@@ -384,7 +382,7 @@ func TestGetDatabasesByTemplate_Empty(t *testing.T) {
 
 // =============================================================================
 // GetPendingDatabases Tests
-// Criteria C: Complex query with NOT EXISTS subquery
+// Criteria C: Complex query with version filtering
 // =============================================================================
 
 func TestGetPendingDatabases_AllPending(t *testing.T) {
@@ -410,7 +408,7 @@ func TestGetPendingDatabases_AllPending(t *testing.T) {
 	}
 }
 
-func TestGetPendingDatabases_SomeAlreadyMigrated(t *testing.T) {
+func TestGetPendingDatabases_SomeAlreadyAtTarget(t *testing.T) {
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -419,31 +417,24 @@ func TestGetPendingDatabases_SomeAlreadyMigrated(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	tenant1 := insertTestTenant(t, testDB, "database-1", templateID, 1)
+	insertTestTenant(t, testDB, "database-1", templateID, 1)
 	insertTestTenant(t, testDB, "database-2", templateID, 1)
 	insertTestTenant(t, testDB, "database-3", templateID, 2) // Already at version 2
-
-	// Mark database-1 as already processed
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := testDB.Exec(`
-		INSERT INTO `+TableDatabaseMigrations+` (migration_id, database_id, status, updated_at)
-		VALUES (?, ?, 'success', ?)
-	`, migrationID, tenant1, now)
-	if err != nil {
-		t.Fatalf("failed to insert database migration: %v", err)
-	}
 
 	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Only database-2 should be pending (database-1 already processed, database-3 at current version)
-	if len(pending) != 1 {
-		t.Fatalf("expected 1 pending database, got %d", len(pending))
+	// database-1 and database-2 should be pending (database-3 already at current version)
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 pending databases, got %d", len(pending))
 	}
-	if pending[0].Name != "database-2" {
-		t.Errorf("expected database-2, got %s", pending[0].Name)
+	if pending[0].Name != "database-1" {
+		t.Errorf("expected database-1, got %s", pending[0].Name)
+	}
+	if pending[1].Name != "database-2" {
+		t.Errorf("expected database-2, got %s", pending[1].Name)
 	}
 }
 
@@ -472,7 +463,7 @@ func TestGetPendingDatabases_NoPending(t *testing.T) {
 
 // =============================================================================
 // GetFailedDatabases Tests
-// Criteria C: Join query for failed migrations
+// Criteria C: Join query for migration failures
 // =============================================================================
 
 func TestGetFailedDatabases_SomeFailed(t *testing.T) {
@@ -490,12 +481,12 @@ func TestGetFailedDatabases_SomeFailed(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// database-1: success
-	_, _ = testDB.Exec(`INSERT INTO `+TableDatabaseMigrations+` VALUES (?, ?, 'success', NULL, 1, ?)`, migrationID, tenant1, now)
 	// database-2: failed
-	_, _ = testDB.Exec(`INSERT INTO `+TableDatabaseMigrations+` VALUES (?, ?, 'failed', 'connection error', 1, ?)`, migrationID, tenant2, now)
+	_, _ = testDB.Exec(`INSERT INTO `+TableMigrationFailures+` (database_id, from_version, to_version, error, created_at) VALUES (?, 1, 2, 'connection error', ?)`, tenant2, now)
 	// database-3: failed
-	_, _ = testDB.Exec(`INSERT INTO `+TableDatabaseMigrations+` VALUES (?, ?, 'failed', 'timeout', 2, ?)`, migrationID, tenant3, now)
+	_, _ = testDB.Exec(`INSERT INTO `+TableMigrationFailures+` (database_id, from_version, to_version, error, created_at) VALUES (?, 1, 2, 'timeout', ?)`, tenant3, now)
+	// different version failure should not match this job
+	_, _ = testDB.Exec(`INSERT INTO `+TableMigrationFailures+` (database_id, from_version, to_version, error, created_at) VALUES (?, 2, 3, 'old failure', ?)`, tenant1, now)
 
 	failed, err := GetFailedDatabases(context.Background(), migrationID)
 	if err != nil {
@@ -578,7 +569,7 @@ func TestBatchUpdateDatabaseVersions_Empty(t *testing.T) {
 
 // =============================================================================
 // RecordDatabaseMigration Tests
-// Criteria B: Insert and retry scenarios
+// Criteria B: failure recording and success clearing
 // =============================================================================
 
 func TestRecordDatabaseMigration_Success(t *testing.T) {
@@ -596,16 +587,10 @@ func TestRecordDatabaseMigration_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var status string
-	var attempts int
-	testDB.QueryRow(`SELECT status, attempts FROM `+TableDatabaseMigrations+` WHERE migration_id = ? AND database_id = ?`,
-		migrationID, tenantID).Scan(&status, &attempts)
-
-	if status != "success" {
-		t.Errorf("status = %s, want success", status)
-	}
-	if attempts != 1 {
-		t.Errorf("attempts = %d, want 1", attempts)
+	var count int
+	testDB.QueryRow(`SELECT COUNT(*) FROM `+TableMigrationFailures+` WHERE database_id = ?`, tenantID).Scan(&count)
+	if count != 0 {
+		t.Errorf("expected no failure row for success, got %d", count)
 	}
 }
 
@@ -631,16 +616,10 @@ func TestRecordDatabaseMigration_Retry(t *testing.T) {
 		t.Fatalf("unexpected error on retry: %v", err)
 	}
 
-	var status string
-	var attempts int
-	testDB.QueryRow(`SELECT status, attempts FROM `+TableDatabaseMigrations+` WHERE migration_id = ? AND database_id = ?`,
-		migrationID, tenantID).Scan(&status, &attempts)
-
-	if status != "success" {
-		t.Errorf("status = %s, want success", status)
-	}
-	if attempts != 2 {
-		t.Errorf("attempts = %d, want 2", attempts)
+	var count int
+	testDB.QueryRow(`SELECT COUNT(*) FROM `+TableMigrationFailures+` WHERE database_id = ?`, tenantID).Scan(&count)
+	if count != 0 {
+		t.Errorf("expected failure row to be cleared after success, got %d", count)
 	}
 }
 
