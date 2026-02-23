@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS atomicbase_schema_templates (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_templates_name ON atomicbase_schema_templates(name);
 
 -- Tenant database metadata
 CREATE TABLE IF NOT EXISTS atomicbase_databases (
@@ -18,7 +17,6 @@ CREATE TABLE IF NOT EXISTS atomicbase_databases (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_atomicbase_databases_name ON atomicbase_databases(name);
 
 -- Version history for schema templates
 CREATE TABLE IF NOT EXISTS atomicbase_templates_history (
