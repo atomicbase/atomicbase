@@ -9,114 +9,30 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 
 	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atomicbase/atomicbase/primarystore"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
 
-// Primary database connection (reused across requests)
-var (
-	primaryDB          *sql.DB
-	primarySchema      SchemaCache
-	schemaMu           sync.RWMutex
-	databaseLookupStmt *sql.Stmt // Cached prepared statement for database lookup
-)
-
-// InitDB initializes Data API state using the shared primary database connection.
-func InitDB(conn *sql.DB) error {
-	if conn == nil {
-		return errors.New("nil primary database connection")
+// NewAPI builds a Data API module using the shared primary metadata store.
+func NewAPI(primaryStore *primarystore.Store) (*API, error) {
+	if primaryStore == nil || primaryStore.DB() == nil {
+		return nil, errors.New("nil primary store")
 	}
 
-	if databaseLookupStmt != nil {
-		_ = databaseLookupStmt.Close()
-		databaseLookupStmt = nil
-	}
-
-	primaryDB = conn
-
-	var err error
-	databaseLookupStmt, err = conn.Prepare(fmt.Sprintf(
-		"SELECT id, COALESCE(template_id, 0), COALESCE(template_version, 1) FROM %s WHERE name = ?",
-		ReservedTableDatabases))
-	if err != nil {
-		primaryDB = nil
-		return fmt.Errorf("failed to prepare database lookup statement: %w", err)
-	}
-
-	// Load schema for primary database
-	dao := PrimaryDao{Database: Database{
-		Client:          conn,
-		Schema:          SchemaCache{},
-		ID:              1,
-		TemplateID:      0, // Primary database doesn't use templates
-		SchemaVersion:   0,
-		DatabaseVersion: 0,
-	}}
-	if err := dao.Database.updateSchema(); err != nil {
-		primaryDB = nil
-		_ = databaseLookupStmt.Close()
-		databaseLookupStmt = nil
-		return err
-	}
-	primarySchema = dao.Schema
-
-	// Preload template schemas into cache
-	if err := PreloadSchemaCache(conn); err != nil {
-		// Non-fatal - cache will be populated on demand
+	// Preload template schemas into cache.
+	if err := PreloadSchemaCache(primaryStore.DB()); err != nil {
+		// Non-fatal - cache will be populated on demand.
 		log.Printf("Warning: failed to preload schema cache: %v", err)
 	}
 
-	return nil
+	return &API{store: primaryStore}, nil
 }
 
-// ClosePrimaryDB cleans up Data API resources associated with the shared primary connection.
-// The caller that created the shared connection is responsible for closing it.
-func ClosePrimaryDB() error {
-	var closeErr error
-	if databaseLookupStmt != nil {
-		closeErr = databaseLookupStmt.Close()
-		databaseLookupStmt = nil
-	}
-	primaryDB = nil
-	return closeErr
-}
-
-// ConnPrimary returns a reference to the primary database.
-// Do NOT close the returned connection - it's shared.
-func ConnPrimary() (PrimaryDao, error) {
-	if primaryDB == nil {
-		return PrimaryDao{}, errors.New("primary database not initialized")
-	}
-
-	schemaMu.RLock()
-	schema := primarySchema
-	schemaMu.RUnlock()
-
-	return PrimaryDao{
-		Database: Database{
-			Client:          primaryDB,
-			Schema:          schema,
-			ID:              1,
-			TemplateID:      0,
-			SchemaVersion:   0,
-			DatabaseVersion: 0,
-		},
-	}, nil
-}
-
-// updatePrimarySchema updates the cached schema for the primary database.
-func updatePrimarySchema(schema SchemaCache) {
-	schemaMu.Lock()
-	primarySchema = schema
-	schemaMu.Unlock()
-}
-
-// ConnTurso opens a connection to an external Turso database by name.
-func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
+// connTurso opens a connection to an external Turso database by name.
+func (api *API) connTurso(dbName string) (Database, error) {
 	org := config.Cfg.TursoOrganization
 	token := config.Cfg.TursoGroupAuthToken
 
@@ -128,22 +44,17 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 		return Database{}, errors.New("TURSO_GROUP_AUTH_TOKEN environment variable is not set but is required to access external databases")
 	}
 
-	row := databaseLookupStmt.QueryRow(dbName)
+	if api == nil || api.store == nil || api.store.DB() == nil {
+		return Database{}, errors.New("primary store not initialized")
+	}
 
-	var id sql.NullInt32
-	var templateID int32
-	var databaseVersion int
-
-	err := row.Scan(&id, &templateID, &databaseVersion)
+	meta, err := api.store.LookupDatabaseByName(dbName)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Database{}, tools.ErrDatabaseNotFound
-		}
 		return Database{}, err
 	}
 
-	// Get cached template (schema + current version)
-	schema, currentVersion, err := GetCachedTemplate(dao.Client, templateID)
+	// Get cached template (schema + current version).
+	schema, currentVersion, err := GetCachedTemplate(api.store.DB(), meta.TemplateID)
 	if err != nil {
 		return Database{}, fmt.Errorf("failed to load schema: %w", err)
 	}
@@ -162,10 +73,11 @@ func (dao PrimaryDao) ConnTurso(dbName string) (Database, error) {
 	return Database{
 		Client:          client,
 		Schema:          schema,
-		ID:              id.Int32,
-		TemplateID:      templateID,
+		ID:              meta.ID,
+		TemplateID:      meta.TemplateID,
 		SchemaVersion:   currentVersion,
-		DatabaseVersion: databaseVersion,
+		DatabaseVersion: meta.DatabaseVersion,
+		primaryStore:    api.store,
 	}, nil
 }
 

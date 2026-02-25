@@ -5,21 +5,24 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+
+	"github.com/atomicbase/atomicbase/primarystore"
 )
 
-// PrimaryDao wraps Database for operations on the primary/local database.
-type PrimaryDao struct {
-	Database
+// API is the Data API module with injected dependencies.
+type API struct {
+	store *primarystore.Store
 }
 
-// Database represents a connection to a SQLite/Turso database with cached schema.
+// Database represents an external tenant database connection with cached schema.
 type Database struct {
 	Client          *sql.DB     // SQL database connection
 	Schema          SchemaCache // Cached schema for validation
-	ID              int32       // Internal database ID (1 = primary)
-	TemplateID      int32       // Template ID (0 for primary database)
+	ID              int32       // Internal tenant database ID
+	TemplateID      int32       // Template ID used by this tenant
 	SchemaVersion   int         // Current template version from schema cache
 	DatabaseVersion int         // Database's applied template_version
+	primaryStore    *primarystore.Store
 }
 
 // SchemaCache holds cached table and foreign key information for query validation.

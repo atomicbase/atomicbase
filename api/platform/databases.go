@@ -22,9 +22,9 @@ var (
 	ErrDatabaseInSync   = tools.ErrDatabaseInSync
 )
 
-// ListDatabases returns all databases.
-func ListDatabases(ctx context.Context) ([]Database, error) {
-	conn, err := getDB()
+// listDatabases returns all databases.
+func (api *API) listDatabases(ctx context.Context) ([]Database, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +63,9 @@ func ListDatabases(ctx context.Context) ([]Database, error) {
 	return databases, nil
 }
 
-// GetDatabase returns a database by name.
-func GetDatabase(ctx context.Context, name string) (*Database, error) {
-	conn, err := getDB()
+// getDatabase returns a database by name.
+func (api *API) getDatabase(ctx context.Context, name string) (*Database, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -92,16 +92,16 @@ func GetDatabase(ctx context.Context, name string) (*Database, error) {
 	return &t, nil
 }
 
-// CreateDatabase creates a new database using the specified template.
+// createDatabase creates a new database using the specified template.
 // Creates a Turso database, generates a token, and initializes the schema.
-func CreateDatabase(ctx context.Context, name, templateName string) (*Database, error) {
+func (api *API) createDatabase(ctx context.Context, name, templateName string) (*Database, error) {
 	// Get template to verify it exists and get current version
-	template, err := GetTemplate(ctx, templateName)
+	template, err := api.getTemplate(ctx, templateName)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := getDB()
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func CreateDatabase(ctx context.Context, name, templateName string) (*Database, 
 	}
 
 	// Create Turso database
-	if err := tursoCreateDatabase(ctx, name); err != nil {
+	if err := tursocreateDatabase(ctx, name); err != nil {
 		return nil, fmt.Errorf("failed to create turso database: %w", err)
 	}
 
@@ -142,7 +142,7 @@ func CreateDatabase(ctx context.Context, name, templateName string) (*Database, 
 	}
 	if schemaErr != nil {
 		// Try to clean up
-		_ = tursoDeleteDatabase(ctx, name)
+		_ = tursodeleteDatabase(ctx, name)
 		return nil, fmt.Errorf("failed to initialize database schema: %w", schemaErr)
 	}
 
@@ -154,7 +154,7 @@ func CreateDatabase(ctx context.Context, name, templateName string) (*Database, 
 	`, TableDatabases), name, template.ID, template.CurrentVersion, now, now)
 	if err != nil {
 		// Try to clean up
-		_ = tursoDeleteDatabase(ctx, name)
+		_ = tursodeleteDatabase(ctx, name)
 		return nil, err
 	}
 
@@ -175,9 +175,9 @@ func CreateDatabase(ctx context.Context, name, templateName string) (*Database, 
 	}, nil
 }
 
-// DeleteDatabase deletes a database and its Turso database.
-func DeleteDatabase(ctx context.Context, name string) error {
-	conn, err := getDB()
+// deleteDatabase deletes a database and its Turso database.
+func (api *API) deleteDatabase(ctx context.Context, name string) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func DeleteDatabase(ctx context.Context, name string) error {
 	}
 
 	// Delete Turso database
-	if err := tursoDeleteDatabase(ctx, name); err != nil {
+	if err := tursodeleteDatabase(ctx, name); err != nil {
 		return fmt.Errorf("failed to delete turso database: %w", err)
 	}
 
@@ -210,18 +210,18 @@ func DeleteDatabase(ctx context.Context, name string) error {
 	return nil
 }
 
-// SyncDatabase synchronizes a database to the template's current version.
+// syncDatabase synchronizes a database to the template's current version.
 // Applies chained migrations if needed (e.g., v1->v2->v3).
 // This is synchronous - waits for completion.
-func SyncDatabase(ctx context.Context, name string) (*SyncDatabaseResponse, error) {
+func (api *API) syncDatabase(ctx context.Context, name string) (*SyncDatabaseResponse, error) {
 	// Get database
-	database, err := GetDatabase(ctx, name)
+	database, err := api.getDatabase(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get template to find current version
-	conn, err := getDB()
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func SyncDatabase(ctx context.Context, name string) (*SyncDatabaseResponse, erro
 	// Collect all migration SQL from database's version to current
 	var allSQL []string
 	for v := database.TemplateVersion; v < currentVersion; v++ {
-		migration, err := GetMigrationByVersions(ctx, database.TemplateID, v, v+1)
+		migration, err := api.getMigrationByVersions(ctx, database.TemplateID, v, v+1)
 		if err != nil {
 			return nil, fmt.Errorf("migration from v%d to v%d not found: %w", v, v+1, err)
 		}
@@ -273,9 +273,9 @@ func SyncDatabase(ctx context.Context, name string) (*SyncDatabaseResponse, erro
 	}, nil
 }
 
-// GetMigrationByVersions returns a migration for a specific version transition.
-func GetMigrationByVersions(ctx context.Context, templateID int32, fromVersion, toVersion int) (*Migration, error) {
-	conn, err := getDB()
+// getMigrationByVersions returns a migration for a specific version transition.
+func (api *API) getMigrationByVersions(ctx context.Context, templateID int32, fromVersion, toVersion int) (*Migration, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +309,9 @@ func GetMigrationByVersions(ctx context.Context, templateID int32, fromVersion, 
 	return &m, nil
 }
 
-// GetDatabasesByTemplate returns all databases using a specific template.
-func GetDatabasesByTemplate(ctx context.Context, templateID int32) ([]Database, error) {
-	conn, err := getDB()
+// getDatabasesByTemplate returns all databases using a specific template.
+func (api *API) getDatabasesByTemplate(ctx context.Context, templateID int32) ([]Database, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -350,10 +350,10 @@ func GetDatabasesByTemplate(ctx context.Context, templateID int32) ([]Database, 
 	return databases, nil
 }
 
-// GetPendingDatabases returns databases that need migration for a given job.
+// getPendingDatabases returns databases that need migration for a given job.
 // Pending = template_version < target.
-func GetPendingDatabases(ctx context.Context, _ int64, templateID int32, targetVersion int) ([]Database, error) {
-	conn, err := getDB()
+func (api *API) getPendingDatabases(ctx context.Context, _ int64, templateID int32, targetVersion int) ([]Database, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -393,14 +393,14 @@ func GetPendingDatabases(ctx context.Context, _ int64, templateID int32, targetV
 	return databases, nil
 }
 
-// GetFailedDatabases returns databases that failed migration for a given job.
-func GetFailedDatabases(ctx context.Context, migrationID int64) ([]Database, error) {
-	conn, err := getDB()
+// getFailedDatabases returns databases that failed migration for a given job.
+func (api *API) getFailedDatabases(ctx context.Context, migrationID int64) ([]Database, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
 
-	migration, err := GetMigration(ctx, migrationID)
+	migration, err := api.getMigration(ctx, migrationID)
 	if err != nil {
 		return nil, err
 	}
@@ -442,13 +442,13 @@ func GetFailedDatabases(ctx context.Context, migrationID int64) ([]Database, err
 	return databases, nil
 }
 
-// BatchUpdateDatabaseVersions updates template_version for multiple databases in one query.
-func BatchUpdateDatabaseVersions(ctx context.Context, tenantIDs []int32, version int) error {
+// batchupdateDatabaseVersions updates template_version for multiple databases in one query.
+func (api *API) batchUpdateDatabaseVersions(ctx context.Context, tenantIDs []int32, version int) error {
 	if len(tenantIDs) == 0 {
 		return nil
 	}
 
-	conn, err := getDB()
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -473,19 +473,19 @@ func BatchUpdateDatabaseVersions(ctx context.Context, tenantIDs []int32, version
 	return err
 }
 
-// UpdateDatabaseVersion updates template_version for a single database.
-func UpdateDatabaseVersion(ctx context.Context, databaseID int32, version int) error {
-	return BatchUpdateDatabaseVersions(ctx, []int32{databaseID}, version)
+// updateDatabaseVersion updates template_version for a single database.
+func (api *API) updateDatabaseVersion(ctx context.Context, databaseID int32, version int) error {
+	return api.batchUpdateDatabaseVersions(ctx, []int32{databaseID}, version)
 }
 
-// RecordDatabaseMigration records the outcome of a database migration.
-func RecordDatabaseMigration(ctx context.Context, migrationID int64, tenantID int32, status, errMsg string) error {
-	conn, err := getDB()
+// recordDatabaseMigration records the outcome of a database migration.
+func (api *API) recordDatabaseMigration(ctx context.Context, migrationID int64, tenantID int32, status, errMsg string) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
 
-	migration, err := GetMigration(ctx, migrationID)
+	migration, err := api.getMigration(ctx, migrationID)
 	if err != nil {
 		return err
 	}
@@ -540,8 +540,8 @@ func generateSchemaSQL(schema Schema) []string {
 // Turso API Integration
 // =============================================================================
 
-// tursoCreateDatabase creates a new database in Turso.
-func tursoCreateDatabase(ctx context.Context, name string) error {
+// tursocreateDatabase creates a new database in Turso.
+func tursocreateDatabase(ctx context.Context, name string) error {
 	org := config.Cfg.TursoOrganization
 	apiKey := config.Cfg.TursoAPIKey
 	if org == "" || apiKey == "" {
@@ -597,8 +597,8 @@ func tursoCreateDatabase(ctx context.Context, name string) error {
 	return nil
 }
 
-// tursoDeleteDatabase deletes a database from Turso.
-func tursoDeleteDatabase(ctx context.Context, name string) error {
+// tursodeleteDatabase deletes a database from Turso.
+func tursodeleteDatabase(ctx context.Context, name string) error {
 	org := config.Cfg.TursoOrganization
 	apiKey := config.Cfg.TursoAPIKey
 	if org == "" || apiKey == "" {

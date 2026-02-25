@@ -52,3 +52,4 @@ CREATE TABLE IF NOT EXISTS atomicbase_migration_failures (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_migration_failures_created_at ON atomicbase_migration_failures(created_at);
+

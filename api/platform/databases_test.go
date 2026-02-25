@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/atomicbase/atomicbase/primarystore"
 	"github.com/atomicbase/atomicbase/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -114,18 +115,19 @@ func setupTenantTestDB(t *testing.T) *sql.DB {
 	return testDB
 }
 
-// setTestDB temporarily sets the package-level db for testing.
+// setTestDB temporarily sets the package-level API bridge for testing.
 func setTestDB(t *testing.T, testDB *sql.DB) func() {
 	t.Helper()
-	dbMu.Lock()
-	oldDB := db
-	db = testDB
-	dbMu.Unlock()
+	ps, err := primarystore.New(testDB)
+	if err != nil {
+		t.Fatalf("failed to create primary store: %v", err)
+	}
+	oldAPI := currentTestAPI
+	currentTestAPI = &API{store: ps}
 
 	return func() {
-		dbMu.Lock()
-		db = oldDB
-		dbMu.Unlock()
+		_ = ps.Close()
+		currentTestAPI = oldAPI
 	}
 }
 
@@ -206,7 +208,7 @@ func TestListDatabases_Empty(t *testing.T) {
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
-	databases, err := ListDatabases(context.Background())
+	databases, err := currentTestAPI.listDatabases(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -227,7 +229,7 @@ func TestListDatabases_Multiple(t *testing.T) {
 	insertTestTenant(t, testDB, "database-b", templateID, 1)
 	insertTestTenant(t, testDB, "database-c", templateID, 1)
 
-	databases, err := ListDatabases(context.Background())
+	databases, err := currentTestAPI.listDatabases(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -256,7 +258,7 @@ func TestGetDatabase_Found(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	insertTestTenant(t, testDB, "my-database", templateID, 2)
 
-	database, err := GetDatabase(context.Background(), "my-database")
+	database, err := currentTestAPI.getDatabase(context.Background(), "my-database")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,7 +280,7 @@ func TestGetDatabase_NotFound(t *testing.T) {
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
-	_, err := GetDatabase(context.Background(), "nonexistent")
+	_, err := currentTestAPI.getDatabase(context.Background(), "nonexistent")
 	if err != ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got: %v", err)
 	}
@@ -298,7 +300,7 @@ func TestGetMigrationByVersions_Found(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	insertTestMigration(t, testDB, templateID, 1, 2)
 
-	migration, err := GetMigrationByVersions(context.Background(), templateID, 1, 2)
+	migration, err := currentTestAPI.getMigrationByVersions(context.Background(), templateID, 1, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -322,7 +324,7 @@ func TestGetMigrationByVersions_NotFound(t *testing.T) {
 
 	templateID := insertTestTemplate(t, testDB, "myapp", 1)
 
-	_, err := GetMigrationByVersions(context.Background(), templateID, 1, 2)
+	_, err := currentTestAPI.getMigrationByVersions(context.Background(), templateID, 1, 2)
 	if err == nil {
 		t.Error("expected error for missing migration")
 	}
@@ -346,7 +348,7 @@ func TestGetDatabasesByTemplate_Found(t *testing.T) {
 	insertTestTenant(t, testDB, "database-1b", template1, 1)
 	insertTestTenant(t, testDB, "database-2a", template2, 1)
 
-	databases, err := GetDatabasesByTemplate(context.Background(), template1)
+	databases, err := currentTestAPI.getDatabasesByTemplate(context.Background(), template1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -370,7 +372,7 @@ func TestGetDatabasesByTemplate_Empty(t *testing.T) {
 
 	templateID := insertTestTemplate(t, testDB, "unused", 1)
 
-	databases, err := GetDatabasesByTemplate(context.Background(), templateID)
+	databases, err := currentTestAPI.getDatabasesByTemplate(context.Background(), templateID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -398,7 +400,7 @@ func TestGetPendingDatabases_AllPending(t *testing.T) {
 	insertTestTenant(t, testDB, "database-2", templateID, 1)
 	insertTestTenant(t, testDB, "database-3", templateID, 1)
 
-	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
+	pending, err := currentTestAPI.getPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -421,7 +423,7 @@ func TestGetPendingDatabases_SomeAlreadyAtTarget(t *testing.T) {
 	insertTestTenant(t, testDB, "database-2", templateID, 1)
 	insertTestTenant(t, testDB, "database-3", templateID, 2) // Already at version 2
 
-	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
+	pending, err := currentTestAPI.getPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +453,7 @@ func TestGetPendingDatabases_NoPending(t *testing.T) {
 	insertTestTenant(t, testDB, "database-1", templateID, 2)
 	insertTestTenant(t, testDB, "database-2", templateID, 2)
 
-	pending, err := GetPendingDatabases(context.Background(), migrationID, templateID, 2)
+	pending, err := currentTestAPI.getPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -488,7 +490,7 @@ func TestGetFailedDatabases_SomeFailed(t *testing.T) {
 	// different version failure should not match this job
 	_, _ = testDB.Exec(`INSERT INTO `+TableMigrationFailures+` (database_id, from_version, to_version, error, created_at) VALUES (?, 2, 3, 'old failure', ?)`, tenant1, now)
 
-	failed, err := GetFailedDatabases(context.Background(), migrationID)
+	failed, err := currentTestAPI.getFailedDatabases(context.Background(), migrationID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -507,7 +509,7 @@ func TestGetFailedDatabases_NoneProcessed(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	failed, err := GetFailedDatabases(context.Background(), migrationID)
+	failed, err := currentTestAPI.getFailedDatabases(context.Background(), migrationID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -533,7 +535,7 @@ func TestBatchUpdateDatabaseVersions_Multiple(t *testing.T) {
 	id2 := insertTestTenant(t, testDB, "database-2", templateID, 1)
 	insertTestTenant(t, testDB, "database-3", templateID, 1) // Not updated
 
-	err := BatchUpdateDatabaseVersions(context.Background(), []int32{id1, id2}, 2)
+	err := currentTestAPI.batchUpdateDatabaseVersions(context.Background(), []int32{id1, id2}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -561,7 +563,7 @@ func TestBatchUpdateDatabaseVersions_Empty(t *testing.T) {
 	cleanup := setTestDB(t, testDB)
 	defer cleanup()
 
-	err := BatchUpdateDatabaseVersions(context.Background(), []int32{}, 2)
+	err := currentTestAPI.batchUpdateDatabaseVersions(context.Background(), []int32{}, 2)
 	if err != nil {
 		t.Errorf("empty batch should not error: %v", err)
 	}
@@ -582,7 +584,7 @@ func TestRecordDatabaseMigration_Success(t *testing.T) {
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 	tenantID := insertTestTenant(t, testDB, "database-1", templateID, 1)
 
-	err := RecordDatabaseMigration(context.Background(), migrationID, tenantID, "success", "")
+	err := currentTestAPI.recordDatabaseMigration(context.Background(), migrationID, tenantID, "success", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -605,13 +607,13 @@ func TestRecordDatabaseMigration_Retry(t *testing.T) {
 	tenantID := insertTestTenant(t, testDB, "database-1", templateID, 1)
 
 	// First attempt - failed
-	err := RecordDatabaseMigration(context.Background(), migrationID, tenantID, "failed", "connection error")
+	err := currentTestAPI.recordDatabaseMigration(context.Background(), migrationID, tenantID, "failed", "connection error")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Second attempt - success
-	err = RecordDatabaseMigration(context.Background(), migrationID, tenantID, "success", "")
+	err = currentTestAPI.recordDatabaseMigration(context.Background(), migrationID, tenantID, "success", "")
 	if err != nil {
 		t.Fatalf("unexpected error on retry: %v", err)
 	}

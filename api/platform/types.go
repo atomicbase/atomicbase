@@ -180,14 +180,6 @@ type MigrateResponse struct {
 	Status         string `json:"status,omitempty"`
 }
 
-// RollbackRequest is the request body for POST /platform/templates/{name}/rollback.
-type RollbackRequest struct {
-	Version int `json:"version"`
-}
-
-// RollbackResponse is the response for POST /platform/templates/{name}/rollback.
-type RollbackResponse = MigrateResponse
-
 // RetryMigrationResponse is retained for internal compatibility.
 // Migration endpoints are deprecated and not exposed.
 type RetryMigrationResponse struct {

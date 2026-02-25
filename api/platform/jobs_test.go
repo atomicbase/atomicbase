@@ -169,7 +169,7 @@ func TestLoadMigrationCache(t *testing.T) {
 		{ID: 2, TemplateVersion: 2},
 	}
 
-	cache, err := loadMigrationCache(context.Background(), templateID, databases, 3)
+	cache, err := currentTestAPI.loadMigrationCache(context.Background(), templateID, databases, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestLoadMigrationCache_MissingMigration(t *testing.T) {
 		{ID: 1, TemplateVersion: 1},
 	}
 
-	_, err := loadMigrationCache(context.Background(), templateID, databases, 3)
+	_, err := currentTestAPI.loadMigrationCache(context.Background(), templateID, databases, 3)
 	if err == nil {
 		t.Error("expected error for missing migration")
 	}
@@ -218,7 +218,7 @@ func TestRetryFailedDatabases_NoFailed(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	resp, err := RetryFailedDatabases(context.Background(), migrationID)
+	resp, err := currentTestAPI.retryFailedDatabases(context.Background(), migrationID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRetryFailedDatabases_MigrationLocked(t *testing.T) {
 	jm.TryLock(templateID)
 	defer jm.Unlock(templateID)
 
-	_, err := RetryFailedDatabases(context.Background(), migrationID)
+	_, err := currentTestAPI.retryFailedDatabases(context.Background(), migrationID)
 	if err != ErrMigrationLocked {
 		t.Errorf("expected ErrMigrationLocked, got: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestResumeRunningJobs_NoRunning(t *testing.T) {
 	defer cleanup()
 
 	// No running jobs should not error
-	err := ResumeRunningJobs(context.Background())
+	err := currentTestAPI.resumeRunningJobs(context.Background())
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

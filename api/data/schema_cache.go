@@ -8,18 +8,12 @@ import (
 	"github.com/atomicbase/atomicbase/tools"
 )
 
-// GetCachedTemplate retrieves the current schema and version for a template.
-// For tenant databases, this uses template_id to get the current version.
-// For the primary database (templateID=0), it returns the primary schema with version 0.
-func GetCachedTemplate(db *sql.DB, templateID int32) (SchemaCache, int, error) {
-	// Primary database has its own schema management
-	if templateID == 0 {
-		schemaMu.RLock()
-		schema := primarySchema
-		schemaMu.RUnlock()
-		return schema, 0, nil
-	}
+func init() {
+	tools.RegisterMemoryCacheType(SchemaCache{})
+}
 
+// GetCachedTemplate retrieves the current schema and version for a template.
+func GetCachedTemplate(db *sql.DB, templateID int32) (SchemaCache, int, error) {
 	// Check cache first
 	if cached, ok := tools.GetTemplate(templateID); ok {
 		return cached.Schema.(SchemaCache), cached.Version, nil

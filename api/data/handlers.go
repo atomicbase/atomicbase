@@ -23,26 +23,26 @@ type DbResponseHandler func(ctx context.Context, db *Database, req *http.Request
 
 // RegisterRoutes registers all Data API routes on the provided ServeMux.
 // All routes are prefixed with /data.
-func RegisterRoutes(app *http.ServeMux) {
+func (api *API) RegisterRoutes(app *http.ServeMux) {
 	// Health check (no auth required)
-	app.HandleFunc("GET /health", handleHealth())
+	app.HandleFunc("GET /health", api.handleHealth())
 	// OpenAPI documentation (no auth required)
 	// app.HandleFunc("GET /openapi.yaml", handleOpenAPISpec())
 	app.HandleFunc("GET /docs", handleSwaggerUI())
 
 	// Data API routes
-	app.HandleFunc("POST /data/query/{table}", handleQueryRows())
-	app.HandleFunc("POST /data/batch", handleBatch())
+	app.HandleFunc("POST /data/query/{table}", api.handleQueryRows())
+	app.HandleFunc("POST /data/batch", api.handleBatch())
 }
 
-// withDB wraps handlers that can use either the primary or an external database.
-func withDB(handler DbHandler) http.HandlerFunc {
+// withDB wraps handlers that operate on external tenant databases.
+func (api *API) withDB(handler DbHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
 		defer req.Body.Close()
 
-		dao, isExternal, err := connDb(req)
+		dao, isExternal, err := api.connDb(req)
 		if err != nil {
 			tools.RespErr(wr, err)
 			return
@@ -71,13 +71,13 @@ func withDB(handler DbHandler) http.HandlerFunc {
 }
 
 // withDBResponse wraps handlers that need access to the ResponseWriter for setting headers.
-func withDBResponse(handler DbResponseHandler) http.HandlerFunc {
+func (api *API) withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
 		defer req.Body.Close()
 
-		dao, isExternal, err := connDb(req)
+		dao, isExternal, err := api.connDb(req)
 		if err != nil {
 			tools.RespErr(wr, err)
 			return
@@ -105,21 +105,16 @@ func withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 	}
 }
 
-// connDb returns a database connection for the specified database.
-// The Database header is required - the internal primary database cannot be queried directly.
+// connDb returns an external tenant database connection for the Database header value.
+// The internal primary metadata database is never queryable through Data API routes.
 // Returns the connection and a boolean indicating if it should be closed after use.
-func connDb(req *http.Request) (Database, bool, error) {
+func (api *API) connDb(req *http.Request) (Database, bool, error) {
 	dbName := req.Header.Get("Database")
 	if dbName == "" {
 		return Database{}, false, tools.ErrMissingDatabase
 	}
 
-	dao, err := ConnPrimary()
-	if err != nil {
-		return Database{}, false, err
-	}
-
-	db, err := dao.ConnTurso(dbName)
+	db, err := api.connTurso(dbName)
 	if err != nil {
 		return Database{}, false, err
 	}
@@ -128,8 +123,8 @@ func connDb(req *http.Request) (Database, bool, error) {
 }
 
 // handleBatch handles POST /data/batch for atomic multi-operation requests.
-func handleBatch() http.HandlerFunc {
-	return withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
+func (api *API) handleBatch() http.HandlerFunc {
+	return api.withDB(func(ctx context.Context, dao *Database, req *http.Request) ([]byte, error) {
 		var batchReq BatchRequest
 		if err := json.NewDecoder(req.Body).Decode(&batchReq); err != nil {
 			return nil, err
@@ -143,8 +138,8 @@ func handleBatch() http.HandlerFunc {
 }
 
 // handleQueryRows handles POST /data/query/{table} for SELECT, INSERT, UPDATE, and DELETE operations.
-func handleQueryRows() http.HandlerFunc {
-	return withDBResponse(func(ctx context.Context, dao *Database, req *http.Request, w http.ResponseWriter) ([]byte, error) {
+func (api *API) handleQueryRows() http.HandlerFunc {
+	return api.withDBResponse(func(ctx context.Context, dao *Database, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		table := req.PathValue("table")
 
 		operation, onConflict, countExact := parsePreferHeaders(req)
@@ -215,19 +210,16 @@ func handleQueryRows() http.HandlerFunc {
 	})
 }
 
-func handleHealth() http.HandlerFunc {
+func (api *API) handleHealth() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check database connectivity using the connection pool
-		dao, err := ConnPrimary()
-		if err != nil {
+		if api == nil || api.store == nil || api.store.DB() == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"status":"unhealthy","error":"database connection failed"}`))
 			return
 		}
-		// Note: don't close dao.Client - it's managed by the connection pool
 
-		if err := dao.Client.PingContext(r.Context()); err != nil {
+		if err := api.store.DB().PingContext(r.Context()); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"status":"unhealthy","error":"database ping failed"}`))

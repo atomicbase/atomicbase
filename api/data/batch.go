@@ -8,8 +8,7 @@ import (
 	"github.com/atomicbase/atomicbase/tools"
 )
 
-// Batch executes multiple operations atomically within a SQL transaction.
-// Works for both primary and Turso databases via their respective connections.
+// Batch executes multiple operations atomically within a tenant database transaction.
 func (dao *Database) Batch(ctx context.Context, req BatchRequest) (BatchResponse, error) {
 	if len(req.Operations) == 0 {
 		return BatchResponse{Results: []any{}}, nil

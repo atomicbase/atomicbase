@@ -14,6 +14,7 @@ import (
 	"github.com/atomicbase/atomicbase/config"
 	"github.com/atomicbase/atomicbase/data"
 	"github.com/atomicbase/atomicbase/platform"
+	"github.com/atomicbase/atomicbase/primarystore"
 	"github.com/atomicbase/atomicbase/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -103,19 +104,31 @@ func main() {
 	if err := tools.InitActivityLogger(); err != nil {
 		log.Fatalf("Failed to initialize activity logger: %v", err)
 	}
+	if err := tools.LoadMemoryCache(); err != nil {
+		log.Printf("Warning: failed to load memory cache: %v", err)
+	}
 
 	primaryDB, err := initPrimaryDB()
 	if err != nil {
 		log.Fatalf("Failed to initialize primary database: %v", err)
 	}
 
-	if err := data.InitDB(primaryDB); err != nil {
+	primaryStore, err := primarystore.New(primaryDB)
+	if err != nil {
+		_ = primaryDB.Close()
+		log.Fatalf("Failed to initialize primary store: %v", err)
+	}
+
+	dataAPI, err := data.NewAPI(primaryStore)
+	if err != nil {
+		_ = primaryStore.Close()
 		_ = primaryDB.Close()
 		log.Fatalf("Failed to initialize data API: %v", err)
 	}
 
-	if err := platform.InitDB(primaryDB); err != nil {
-		_ = data.ClosePrimaryDB()
+	platformAPI, err := platform.NewAPI(primaryStore)
+	if err != nil {
+		_ = primaryStore.Close()
 		_ = primaryDB.Close()
 		log.Fatalf("Failed to initialize platform database: %v", err)
 	}
@@ -123,8 +136,8 @@ func main() {
 	app := http.NewServeMux()
 
 	// Register routes from each module
-	data.RegisterRoutes(app)
-	platform.RegisterRoutes(app)
+	dataAPI.RegisterRoutes(app)
+	platformAPI.RegisterRoutes(app)
 
 	// Apply middleware chain: panic recovery -> logging -> timeout -> cors -> auth -> handler
 	handler := tools.PanicRecoveryMiddleware(
@@ -156,13 +169,13 @@ func main() {
 	if err := server.Shutdown(context.Background()); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+	if err := tools.SaveMemoryCache(); err != nil {
+		log.Printf("Warning: failed to save memory cache: %v", err)
+	}
 
 	// Close database connections
-	if err := data.ClosePrimaryDB(); err != nil {
-		log.Printf("Error closing database: %v", err)
-	}
-	if err := platform.CloseDB(); err != nil {
-		log.Printf("Error closing platform database: %v", err)
+	if err := primaryStore.Close(); err != nil {
+		log.Printf("Error closing primary store: %v", err)
 	}
 	if err := primaryDB.Close(); err != nil {
 		log.Printf("Error closing primary database: %v", err)

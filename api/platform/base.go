@@ -5,8 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sync"
+
+	"github.com/atomicbase/atomicbase/primarystore"
 )
+
+// API is the Platform API module with injected dependencies.
+type API struct {
+	store *primarystore.Store
+}
 
 // Table names for internal platform tables.
 const (
@@ -17,49 +23,24 @@ const (
 	TableMigrationFailures = "atomicbase_migration_failures"
 )
 
-// Primary database connection for platform operations.
-var (
-	db   *sql.DB
-	dbMu sync.RWMutex
-)
-
-// InitDB initializes platform access to the shared primary database connection.
-func InitDB(conn *sql.DB) error {
-	dbMu.Lock()
-	defer dbMu.Unlock()
-
-	if conn == nil {
-		return errors.New("nil primary database connection")
+// NewAPI builds a Platform API module using the shared primary metadata store.
+func NewAPI(primaryStore *primarystore.Store) (*API, error) {
+	if primaryStore == nil || primaryStore.DB() == nil {
+		return nil, errors.New("nil primary store")
 	}
-
-	db = conn
-	return nil
+	return &API{store: primaryStore}, nil
 }
 
-// CloseDB detaches platform from the shared database connection.
-// The caller that created the shared connection is responsible for closing it.
-func CloseDB() error {
-	dbMu.Lock()
-	defer dbMu.Unlock()
-
-	db = nil
-	return nil
-}
-
-// getDB returns the database connection.
-func getDB() (*sql.DB, error) {
-	dbMu.RLock()
-	defer dbMu.RUnlock()
-
-	if db == nil {
+func (api *API) dbConn() (*sql.DB, error) {
+	if api == nil || api.store == nil || api.store.DB() == nil {
 		return nil, errors.New("platform database not initialized")
 	}
-	return db, nil
+	return api.store.DB(), nil
 }
 
 // queryJSON executes a query and returns results as JSON bytes.
-func queryJSON(ctx context.Context, query string, args ...any) ([]byte, error) {
-	conn, err := getDB()
+func (api *API) queryJSON(ctx context.Context, query string, args ...any) ([]byte, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}

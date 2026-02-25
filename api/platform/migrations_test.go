@@ -805,7 +805,7 @@ func TestCreateMigration(t *testing.T) {
 		t.Fatalf("failed to create template: %v", err)
 	}
 
-	migration, err := CreateMigration(context.Background(), 1, 1, 2, []string{"ALTER TABLE users ADD COLUMN email"})
+	migration, err := currentTestAPI.createMigration(context.Background(), 1, 1, 2, []string{"ALTER TABLE users ADD COLUMN email"})
 	if err != nil {
 		t.Fatalf("CreateMigration failed: %v", err)
 	}
@@ -838,13 +838,13 @@ func TestGetMigration(t *testing.T) {
 		t.Fatalf("failed to create template: %v", err)
 	}
 
-	created, err := CreateMigration(context.Background(), 1, 1, 2, []string{"SELECT 1"})
+	created, err := currentTestAPI.createMigration(context.Background(), 1, 1, 2, []string{"SELECT 1"})
 	if err != nil {
 		t.Fatalf("CreateMigration failed: %v", err)
 	}
 
 	// Get it back
-	migration, err := GetMigration(context.Background(), created.ID)
+	migration, err := currentTestAPI.getMigration(context.Background(), created.ID)
 	if err != nil {
 		t.Fatalf("GetMigration failed: %v", err)
 	}
@@ -862,7 +862,7 @@ func TestGetMigration_NotFound(t *testing.T) {
 	defer cleanupTestDB(t)
 	defer conn.Close()
 
-	_, err := GetMigration(context.Background(), 999)
+	_, err := currentTestAPI.getMigration(context.Background(), 999)
 	if err == nil {
 		t.Error("expected error for non-existent migration")
 	}
@@ -879,20 +879,20 @@ func TestUpdateMigrationStatus(t *testing.T) {
 		t.Fatalf("failed to create template: %v", err)
 	}
 
-	migration, err := CreateMigration(context.Background(), 1, 1, 2, []string{"SELECT 1"})
+	migration, err := currentTestAPI.createMigration(context.Background(), 1, 1, 2, []string{"SELECT 1"})
 	if err != nil {
 		t.Fatalf("CreateMigration failed: %v", err)
 	}
 
 	// Update status
 	state := MigrationStateSuccess
-	err = UpdateMigrationStatus(context.Background(), migration.ID, MigrationStatusComplete, &state, 10, 0)
+	err = currentTestAPI.updateMigrationStatus(context.Background(), migration.ID, MigrationStatusComplete, &state, 10, 0)
 	if err != nil {
 		t.Fatalf("UpdateMigrationStatus failed: %v", err)
 	}
 
 	// Verify
-	updated, err := GetMigration(context.Background(), migration.ID)
+	updated, err := currentTestAPI.getMigration(context.Background(), migration.ID)
 	if err != nil {
 		t.Fatalf("GetMigration failed: %v", err)
 	}
@@ -916,19 +916,19 @@ func TestStartMigration(t *testing.T) {
 		t.Fatalf("failed to create template: %v", err)
 	}
 
-	migration, err := CreateMigration(context.Background(), 1, 1, 2, []string{"SELECT 1"})
+	migration, err := currentTestAPI.createMigration(context.Background(), 1, 1, 2, []string{"SELECT 1"})
 	if err != nil {
 		t.Fatalf("CreateMigration failed: %v", err)
 	}
 
 	// Start it
-	err = StartMigration(context.Background(), migration.ID, 25)
+	err = currentTestAPI.startMigration(context.Background(), migration.ID, 25)
 	if err != nil {
 		t.Fatalf("StartMigration failed: %v", err)
 	}
 
 	// Verify
-	started, err := GetMigration(context.Background(), migration.ID)
+	started, err := currentTestAPI.getMigration(context.Background(), migration.ID)
 	if err != nil {
 		t.Fatalf("GetMigration failed: %v", err)
 	}

@@ -21,9 +21,6 @@ func (dao *Database) selectJSON(ctx context.Context, exec Executor, relation str
 	if err := tools.ValidateTableName(relation); err != nil {
 		return SelectResult{}, err
 	}
-	if dao.ID == 1 && relation == ReservedTableDatabases {
-		return SelectResult{}, tools.ErrReservedTable
-	}
 
 	table, err := dao.Schema.SearchTbls(relation)
 	if err != nil {
@@ -126,9 +123,6 @@ func (dao *Database) insertJSON(ctx context.Context, exec Executor, relation str
 	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.ID == 1 && relation == ReservedTableDatabases {
-		return nil, tools.ErrReservedTable
-	}
 
 	table, err := dao.Schema.SearchTbls(relation)
 	if err != nil {
@@ -209,9 +203,6 @@ func (dao *Database) insertIgnoreJSON(ctx context.Context, exec Executor, relati
 	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.ID == 1 && relation == ReservedTableDatabases {
-		return nil, tools.ErrReservedTable
-	}
 
 	table, err := dao.Schema.SearchTbls(relation)
 	if err != nil {
@@ -291,9 +282,6 @@ func (dao *Database) UpsertJSON(ctx context.Context, relation string, req Upsert
 func (dao *Database) upsertJSON(ctx context.Context, exec Executor, relation string, req UpsertRequest) ([]byte, error) {
 	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
-	}
-	if dao.ID == 1 && relation == ReservedTableDatabases {
-		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)
@@ -389,9 +377,6 @@ func (dao *Database) updateJSON(ctx context.Context, exec Executor, relation str
 	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
 	}
-	if dao.ID == 1 && relation == ReservedTableDatabases {
-		return nil, tools.ErrReservedTable
-	}
 
 	table, err := dao.Schema.SearchTbls(relation)
 	if err != nil {
@@ -453,9 +438,6 @@ func (dao *Database) DeleteJSON(ctx context.Context, relation string, req Delete
 func (dao *Database) deleteJSON(ctx context.Context, exec Executor, relation string, req DeleteRequest) ([]byte, error) {
 	if err := tools.ValidateTableName(relation); err != nil {
 		return nil, err
-	}
-	if dao.ID == 1 && relation == ReservedTableDatabases {
-		return nil, tools.ErrReservedTable
 	}
 
 	table, err := dao.Schema.SearchTbls(relation)

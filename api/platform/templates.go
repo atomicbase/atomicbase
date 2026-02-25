@@ -22,9 +22,9 @@ var (
 	ErrNoChanges        = tools.ErrNoChanges
 )
 
-// ListTemplates returns all templates.
-func ListTemplates(ctx context.Context) ([]Template, error) {
-	conn, err := getDB()
+// listTemplates returns all templates.
+func (api *API) listTemplates(ctx context.Context) ([]Template, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +62,9 @@ func ListTemplates(ctx context.Context) ([]Template, error) {
 	return templates, nil
 }
 
-// GetTemplate returns a template with its current schema.
-func GetTemplate(ctx context.Context, name string) (*TemplateWithSchema, error) {
-	conn, err := getDB()
+// getTemplate returns a template with its current schema.
+func (api *API) getTemplate(ctx context.Context, name string) (*TemplateWithSchema, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +97,9 @@ func GetTemplate(ctx context.Context, name string) (*TemplateWithSchema, error) 
 	return &t, nil
 }
 
-// CreateTemplate creates a new template with the given schema at version 1.
-func CreateTemplate(ctx context.Context, name string, schema Schema) (*TemplateWithSchema, error) {
-	conn, err := getDB()
+// createTemplate creates a new template with the given schema at version 1.
+func (api *API) createTemplate(ctx context.Context, name string, schema Schema) (*TemplateWithSchema, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -165,9 +165,9 @@ func CreateTemplate(ctx context.Context, name string, schema Schema) (*TemplateW
 	}, nil
 }
 
-// DeleteTemplate deletes a template if no databases are using it.
-func DeleteTemplate(ctx context.Context, name string) error {
-	conn, err := getDB()
+// deleteTemplate deletes a template if no databases are using it.
+func (api *API) deleteTemplate(ctx context.Context, name string) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -236,11 +236,11 @@ func DeleteTemplate(ctx context.Context, name string) error {
 	return nil
 }
 
-// DiffTemplate compares a new schema against the current template version.
+// diffTemplate compares a new schema against the current template version.
 // Returns raw changes without ambiguity detection (CLI handles that).
-func DiffTemplate(ctx context.Context, name string, newSchema Schema) (*DiffResult, error) {
+func (api *API) diffTemplate(ctx context.Context, name string, newSchema Schema) (*DiffResult, error) {
 	// Get current template schema
-	template, err := GetTemplate(ctx, name)
+	template, err := api.getTemplate(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -253,9 +253,9 @@ func DiffTemplate(ctx context.Context, name string, newSchema Schema) (*DiffResu
 	return &DiffResult{Changes: changes}, nil
 }
 
-// GetTemplateHistory returns the version history for a template.
-func GetTemplateHistory(ctx context.Context, name string) ([]TemplateVersion, error) {
-	conn, err := getDB()
+// getTemplateHistory returns the version history for a template.
+func (api *API) getTemplateHistory(ctx context.Context, name string) ([]TemplateVersion, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -312,9 +312,9 @@ func GetTemplateHistory(ctx context.Context, name string) ([]TemplateVersion, er
 	return versions, nil
 }
 
-// GetTemplateVersion returns a specific version of a template's schema.
-func GetTemplateVersion(ctx context.Context, templateID int32, version int) (*TemplateVersion, error) {
-	conn, err := getDB()
+// getTemplateVersion returns a specific version of a template's schema.
+func (api *API) getTemplateVersion(ctx context.Context, templateID int32, version int) (*TemplateVersion, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}

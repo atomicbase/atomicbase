@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/atomicbase/atomicbase/primarystore"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+var testPrimaryStore *primarystore.Store
 
 // =============================================================================
 // Test Setup
@@ -67,22 +70,33 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("failed to create schema: %v", err)
 	}
 
-	// Set package-level db for functions that use getDB()
-	dbMu.Lock()
-	db = conn
-	dbMu.Unlock()
+	testPrimaryStore, err = primarystore.New(conn)
+	if err != nil {
+		conn.Close()
+		t.Fatalf("failed to create primary store: %v", err)
+	}
+
+	api, err := NewAPI(testPrimaryStore)
+	if err != nil {
+		_ = testPrimaryStore.Close()
+		_ = conn.Close()
+		t.Fatalf("failed to initialize platform store: %v", err)
+	}
+	currentTestAPI = api
 
 	return conn
 }
 
 func cleanupTestDB(t *testing.T) {
 	t.Helper()
-	dbMu.Lock()
-	if db != nil {
-		db.Close()
-		db = nil
+	if testPrimaryStore != nil {
+		if testPrimaryStore.DB() != nil {
+			_ = testPrimaryStore.DB().Close()
+		}
+		_ = testPrimaryStore.Close()
+		testPrimaryStore = nil
 	}
-	dbMu.Unlock()
+	currentTestAPI = nil
 }
 
 // =============================================================================
@@ -520,7 +534,7 @@ func TestCreateTemplate(t *testing.T) {
 		}},
 	}}
 
-	template, err := CreateTemplate(context.Background(), "test_template", schema)
+	template, err := currentTestAPI.createTemplate(context.Background(), "test_template", schema)
 	if err != nil {
 		t.Fatalf("CreateTemplate failed: %v", err)
 	}
@@ -553,12 +567,12 @@ func TestCreateTemplate_Duplicate(t *testing.T) {
 
 	schema := Schema{Tables: []Table{}}
 
-	_, err := CreateTemplate(context.Background(), "duplicate", schema)
+	_, err := currentTestAPI.createTemplate(context.Background(), "duplicate", schema)
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
 	}
 
-	_, err = CreateTemplate(context.Background(), "duplicate", schema)
+	_, err = currentTestAPI.createTemplate(context.Background(), "duplicate", schema)
 	if err != ErrTemplateExists {
 		t.Errorf("expected ErrTemplateExists, got %v", err)
 	}
@@ -576,13 +590,13 @@ func TestGetTemplate(t *testing.T) {
 			"title": {Name: "title", Type: "TEXT"},
 		}},
 	}}
-	_, err := CreateTemplate(context.Background(), "get_test", schema)
+	_, err := currentTestAPI.createTemplate(context.Background(), "get_test", schema)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Get it back
-	template, err := GetTemplate(context.Background(), "get_test")
+	template, err := currentTestAPI.getTemplate(context.Background(), "get_test")
 	if err != nil {
 		t.Fatalf("GetTemplate failed: %v", err)
 	}
@@ -603,7 +617,7 @@ func TestGetTemplate_NotFound(t *testing.T) {
 	defer cleanupTestDB(t)
 	defer conn.Close()
 
-	_, err := GetTemplate(context.Background(), "nonexistent")
+	_, err := currentTestAPI.getTemplate(context.Background(), "nonexistent")
 	if err != ErrTemplateNotFound {
 		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}
@@ -617,13 +631,13 @@ func TestListTemplates(t *testing.T) {
 	// Create multiple templates
 	schema := Schema{Tables: []Table{}}
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		_, err := CreateTemplate(context.Background(), name, schema)
+		_, err := currentTestAPI.createTemplate(context.Background(), name, schema)
 		if err != nil {
 			t.Fatalf("setup failed for %s: %v", name, err)
 		}
 	}
 
-	templates, err := ListTemplates(context.Background())
+	templates, err := currentTestAPI.listTemplates(context.Background())
 	if err != nil {
 		t.Fatalf("ListTemplates failed: %v", err)
 	}
@@ -643,7 +657,7 @@ func TestListTemplates_Empty(t *testing.T) {
 	defer cleanupTestDB(t)
 	defer conn.Close()
 
-	templates, err := ListTemplates(context.Background())
+	templates, err := currentTestAPI.listTemplates(context.Background())
 	if err != nil {
 		t.Fatalf("ListTemplates failed: %v", err)
 	}
@@ -663,19 +677,19 @@ func TestDeleteTemplate(t *testing.T) {
 
 	// Create a template
 	schema := Schema{Tables: []Table{}}
-	created, err := CreateTemplate(context.Background(), "to_delete", schema)
+	created, err := currentTestAPI.createTemplate(context.Background(), "to_delete", schema)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Delete it
-	err = DeleteTemplate(context.Background(), "to_delete")
+	err = currentTestAPI.deleteTemplate(context.Background(), "to_delete")
 	if err != nil {
 		t.Fatalf("DeleteTemplate failed: %v", err)
 	}
 
 	// Verify it's gone
-	_, err = GetTemplate(context.Background(), "to_delete")
+	_, err = currentTestAPI.getTemplate(context.Background(), "to_delete")
 	if err != ErrTemplateNotFound {
 		t.Errorf("expected ErrTemplateNotFound after delete, got %v", err)
 	}
@@ -696,7 +710,7 @@ func TestDeleteTemplate_NotFound(t *testing.T) {
 	defer cleanupTestDB(t)
 	defer conn.Close()
 
-	err := DeleteTemplate(context.Background(), "nonexistent")
+	err := currentTestAPI.deleteTemplate(context.Background(), "nonexistent")
 	if err != ErrTemplateNotFound {
 		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}
@@ -709,7 +723,7 @@ func TestDeleteTemplate_InUse(t *testing.T) {
 
 	// Create a template
 	schema := Schema{Tables: []Table{}}
-	template, err := CreateTemplate(context.Background(), "in_use", schema)
+	template, err := currentTestAPI.createTemplate(context.Background(), "in_use", schema)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
@@ -722,7 +736,7 @@ func TestDeleteTemplate_InUse(t *testing.T) {
 	}
 
 	// Try to delete - should fail
-	err = DeleteTemplate(context.Background(), "in_use")
+	err = currentTestAPI.deleteTemplate(context.Background(), "in_use")
 	if err != ErrTemplateInUse {
 		t.Errorf("expected ErrTemplateInUse, got %v", err)
 	}
@@ -745,7 +759,7 @@ func TestDiffTemplate(t *testing.T) {
 			"name": {Name: "name", Type: "TEXT"},
 		}},
 	}}
-	_, err := CreateTemplate(context.Background(), "diff_test", oldSchema)
+	_, err := currentTestAPI.createTemplate(context.Background(), "diff_test", oldSchema)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
@@ -759,7 +773,7 @@ func TestDiffTemplate(t *testing.T) {
 		}},
 	}}
 
-	result, err := DiffTemplate(context.Background(), "diff_test", newSchema)
+	result, err := currentTestAPI.diffTemplate(context.Background(), "diff_test", newSchema)
 	if err != nil {
 		t.Fatalf("DiffTemplate failed: %v", err)
 	}
@@ -779,12 +793,12 @@ func TestDiffTemplate_NoChanges(t *testing.T) {
 			"id": {Name: "id", Type: "INTEGER"},
 		}},
 	}}
-	_, err := CreateTemplate(context.Background(), "no_change", schema)
+	_, err := currentTestAPI.createTemplate(context.Background(), "no_change", schema)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	_, err = DiffTemplate(context.Background(), "no_change", schema)
+	_, err = currentTestAPI.diffTemplate(context.Background(), "no_change", schema)
 	if err != ErrNoChanges {
 		t.Errorf("expected ErrNoChanges, got %v", err)
 	}
@@ -795,7 +809,7 @@ func TestDiffTemplate_NotFound(t *testing.T) {
 	defer cleanupTestDB(t)
 	defer conn.Close()
 
-	_, err := DiffTemplate(context.Background(), "nonexistent", Schema{})
+	_, err := currentTestAPI.diffTemplate(context.Background(), "nonexistent", Schema{})
 	if err != ErrTemplateNotFound {
 		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}
@@ -813,7 +827,7 @@ func TestGetTemplateHistory(t *testing.T) {
 
 	// Create template
 	schema := Schema{Tables: []Table{}}
-	template, err := CreateTemplate(context.Background(), "history_test", schema)
+	template, err := currentTestAPI.createTemplate(context.Background(), "history_test", schema)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
@@ -827,7 +841,7 @@ func TestGetTemplateHistory(t *testing.T) {
 		t.Fatalf("failed to insert history: %v", err)
 	}
 
-	history, err := GetTemplateHistory(context.Background(), "history_test")
+	history, err := currentTestAPI.getTemplateHistory(context.Background(), "history_test")
 	if err != nil {
 		t.Fatalf("GetTemplateHistory failed: %v", err)
 	}
@@ -847,7 +861,7 @@ func TestGetTemplateHistory_NotFound(t *testing.T) {
 	defer cleanupTestDB(t)
 	defer conn.Close()
 
-	_, err := GetTemplateHistory(context.Background(), "nonexistent")
+	_, err := currentTestAPI.getTemplateHistory(context.Background(), "nonexistent")
 	if err != ErrTemplateNotFound {
 		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}

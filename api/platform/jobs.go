@@ -113,16 +113,16 @@ type MigrationResult struct {
 	Error      string
 }
 
-// RunMigrationJob executes a migration job in the background.
+// runMigrationJob executes a migration job in the background.
 // This implements the migration flow from the design doc:
 // 1. Migrate first DB synchronously (abort if fails)
 // 2. Migrate remaining DBs in batches of 25 concurrently
 // 3. Update job status and database versions
-func RunMigrationJob(ctx context.Context, jobID int64) {
+func (api *API) runMigrationJob(ctx context.Context, jobID int64) {
 	jm := GetJobManager()
 
 	// Get migration details (use request context for initial fetch)
-	migration, err := GetMigration(ctx, jobID)
+	migration, err := api.getMigration(ctx, jobID)
 	if err != nil {
 		log.Printf("[job %d] failed to get migration: %v", jobID, err)
 		return
@@ -143,27 +143,27 @@ func RunMigrationJob(ctx context.Context, jobID int64) {
 		// The job runs independently of HTTP request but can be stopped via context.
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		runMigrationJobInternal(ctx, migration)
+		api.runMigrationJobInternal(ctx, migration)
 	}()
 }
 
 // runMigrationJobInternal contains the actual job execution logic.
-func runMigrationJobInternal(ctx context.Context, migration *Migration) {
+func (api *API) runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	jobID := migration.ID
 
 	// Get all pending databases first to know total count
 	dbCtx, cancel := withDBTimeout(ctx)
-	databases, err := GetPendingDatabases(dbCtx, jobID, migration.TemplateID, migration.ToVersion)
+	databases, err := api.getPendingDatabases(dbCtx, jobID, migration.TemplateID, migration.ToVersion)
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to get pending databases: %v", jobID, err)
-		markJobFailed(ctx, jobID, 0, 0)
+		api.markJobFailed(ctx, jobID, 0, 0)
 		return
 	}
 
 	// Mark job as running with total count
 	dbCtx, cancel = withDBTimeout(ctx)
-	err = StartMigration(dbCtx, jobID, len(databases))
+	err = api.startMigration(dbCtx, jobID, len(databases))
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to start migration: %v", jobID, err)
@@ -172,18 +172,18 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 
 	// No databases to migrate
 	if len(databases) == 0 {
-		markJobSuccess(ctx, jobID, 0, 0)
-		updateTemplateVersion(ctx, migration.TemplateID, migration.ToVersion)
+		api.markJobSuccess(ctx, jobID, 0, 0)
+		api.updateTemplateVersion(ctx, migration.TemplateID, migration.ToVersion)
 		return
 	}
 
 	// Pre-load all needed migrations into cache
 	dbCtx, cancel = withDBTimeout(ctx)
-	migrations, err := loadMigrationCache(dbCtx, migration.TemplateID, databases, migration.ToVersion)
+	migrations, err := api.loadMigrationCache(dbCtx, migration.TemplateID, databases, migration.ToVersion)
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to load migration cache: %v", jobID, err)
-		markJobFailed(ctx, jobID, 0, 0)
+		api.markJobFailed(ctx, jobID, 0, 0)
 		return
 	}
 
@@ -194,7 +194,7 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	result := migrateTenant(ctx, firstTenant, migrations, migration.ToVersion)
 
 	dbCtx, cancel = withDBTimeout(ctx)
-	err = RecordDatabaseMigration(dbCtx, jobID, firstTenant.ID, statusFromResult(result), result.Error)
+	err = api.recordDatabaseMigration(dbCtx, jobID, firstTenant.ID, statusFromResult(result), result.Error)
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to record first database migration: %v", jobID, err)
@@ -203,13 +203,13 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 	if !result.Success {
 		// First DB failed - abort entire migration
 		log.Printf("[job %d] first database migration failed: %s", jobID, result.Error)
-		markJobFailed(ctx, jobID, 0, 1)
+		api.markJobFailed(ctx, jobID, 0, 1)
 		return
 	}
 
 	// Update first database version
 	dbCtx, cancel = withDBTimeout(ctx)
-	err = BatchUpdateDatabaseVersions(dbCtx, []int32{firstTenant.ID}, migration.ToVersion)
+	err = api.batchUpdateDatabaseVersions(dbCtx, []int32{firstTenant.ID}, migration.ToVersion)
 	cancel()
 	if err != nil {
 		log.Printf("[job %d] failed to update first database version: %v", jobID, err)
@@ -248,7 +248,7 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 
 			// Record each database's result
 			dbCtx, cancel = withDBTimeout(ctx)
-			err = RecordDatabaseMigration(dbCtx, jobID, r.DatabaseID, statusFromResult(r), r.Error)
+			err = api.recordDatabaseMigration(dbCtx, jobID, r.DatabaseID, statusFromResult(r), r.Error)
 			cancel()
 			if err != nil {
 				log.Printf("[job %d] failed to record database %d migration: %v", jobID, r.DatabaseID, err)
@@ -258,7 +258,7 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 		// Batch update successful databases
 		if len(successIDs) > 0 {
 			dbCtx, cancel = withDBTimeout(ctx)
-			err = BatchUpdateDatabaseVersions(dbCtx, successIDs, migration.ToVersion)
+			err = api.batchUpdateDatabaseVersions(dbCtx, successIDs, migration.ToVersion)
 			cancel()
 			if err != nil {
 				log.Printf("[job %d] failed to batch update versions: %v", jobID, err)
@@ -268,21 +268,21 @@ func runMigrationJobInternal(ctx context.Context, migration *Migration) {
 
 	// Determine final state
 	if failedCount == 0 {
-		markJobSuccess(ctx, jobID, completedCount, failedCount)
+		api.markJobSuccess(ctx, jobID, completedCount, failedCount)
 	} else if completedCount > 0 {
-		markJobPartial(ctx, jobID, completedCount, failedCount)
+		api.markJobPartial(ctx, jobID, completedCount, failedCount)
 	} else {
-		markJobFailed(ctx, jobID, completedCount, failedCount)
+		api.markJobFailed(ctx, jobID, completedCount, failedCount)
 	}
 
 	// Update template version if any succeeded
 	if completedCount > 0 {
-		updateTemplateVersion(ctx, migration.TemplateID, migration.ToVersion)
+		api.updateTemplateVersion(ctx, migration.TemplateID, migration.ToVersion)
 	}
 }
 
 // loadMigrationCache pre-loads all needed migrations for the job.
-func loadMigrationCache(ctx context.Context, templateID int32, databases []Database, targetVersion int) (map[int][]string, error) {
+func (api *API) loadMigrationCache(ctx context.Context, templateID int32, databases []Database, targetVersion int) (map[int][]string, error) {
 	// Find minimum database version
 	minVersion := targetVersion
 	for _, t := range databases {
@@ -294,7 +294,7 @@ func loadMigrationCache(ctx context.Context, templateID int32, databases []Datab
 	// Load all needed migrations
 	cache := make(map[int][]string)
 	for v := minVersion; v < targetVersion; v++ {
-		migration, err := GetMigrationByVersions(ctx, templateID, v, v+1)
+		migration, err := api.getMigrationByVersions(ctx, templateID, v, v+1)
 		if err != nil {
 			return nil, fmt.Errorf("missing migration v%d->v%d: %w", v, v+1, err)
 		}
@@ -437,12 +437,12 @@ func statusFromResult(r MigrationResult) string {
 	return DatabaseMigrationStatusFailed
 }
 
-// RetryFailedDatabases retries all failed databases from a migration job.
+// retryFailedDatabases retries all failed databases from a migration job.
 // Returns the count of retried databases and optionally a new job ID.
-func RetryFailedDatabases(ctx context.Context, jobID int64) (*RetryMigrationResponse, error) {
+func (api *API) retryFailedDatabases(ctx context.Context, jobID int64) (*RetryMigrationResponse, error) {
 	// Get the original migration
 	dbCtx, cancel := withDBTimeout(ctx)
-	migration, err := GetMigration(dbCtx, jobID)
+	migration, err := api.getMigration(dbCtx, jobID)
 	cancel()
 	if err != nil {
 		return nil, err
@@ -456,7 +456,7 @@ func RetryFailedDatabases(ctx context.Context, jobID int64) (*RetryMigrationResp
 
 	// Get failed databases
 	dbCtx, cancel = withDBTimeout(ctx)
-	failedTenants, err := GetFailedDatabases(dbCtx, jobID)
+	failedTenants, err := api.getFailedDatabases(dbCtx, jobID)
 	cancel()
 	if err != nil {
 		return nil, err
@@ -469,22 +469,22 @@ func RetryFailedDatabases(ctx context.Context, jobID int64) (*RetryMigrationResp
 	}
 
 	// Reset job status to running (keep current counts)
-	if err := UpdateMigrationStatus(ctx, jobID, MigrationStatusRunning, nil, migration.CompletedDBs, migration.FailedDBs); err != nil {
+	if err := api.updateMigrationStatus(ctx, jobID, MigrationStatusRunning, nil, migration.CompletedDBs, migration.FailedDBs); err != nil {
 		return nil, err
 	}
 
 	// Start the job again
-	RunMigrationJob(ctx, jobID)
+	api.runMigrationJob(ctx, jobID)
 
 	return &RetryMigrationResponse{
 		RetriedCount: len(failedTenants),
 	}, nil
 }
 
-// ResumeRunningJobs resumes any jobs that were interrupted (e.g., by server restart).
+// resumeRunningJobs resumes any jobs that were interrupted (e.g., by server restart).
 // Should be called during server startup.
-func ResumeRunningJobs(ctx context.Context) error {
-	conn, err := getDB()
+func (api *API) resumeRunningJobs(ctx context.Context) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -517,7 +517,7 @@ func ResumeRunningJobs(ctx context.Context) error {
 	// Resume each job
 	for _, jobID := range jobIDs {
 		log.Printf("[startup] resuming interrupted job %d", jobID)
-		RunMigrationJob(ctx, jobID)
+		api.runMigrationJob(ctx, jobID)
 	}
 
 	if len(jobIDs) > 0 {
@@ -531,35 +531,35 @@ func ResumeRunningJobs(ctx context.Context) error {
 // Helper functions for job status updates
 // =============================================================================
 
-func markJobSuccess(ctx context.Context, jobID int64, completed, failed int) {
+func (api *API) markJobSuccess(ctx context.Context, jobID int64, completed, failed int) {
 	state := MigrationStateSuccess
 	dbCtx, cancel := withDBTimeout(ctx)
 	defer cancel()
-	if err := UpdateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
+	if err := api.updateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
 		log.Printf("[job %d] failed to mark success: %v", jobID, err)
 	}
 }
 
-func markJobPartial(ctx context.Context, jobID int64, completed, failed int) {
+func (api *API) markJobPartial(ctx context.Context, jobID int64, completed, failed int) {
 	state := MigrationStatePartial
 	dbCtx, cancel := withDBTimeout(ctx)
 	defer cancel()
-	if err := UpdateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
+	if err := api.updateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
 		log.Printf("[job %d] failed to mark partial: %v", jobID, err)
 	}
 }
 
-func markJobFailed(ctx context.Context, jobID int64, completed, failed int) {
+func (api *API) markJobFailed(ctx context.Context, jobID int64, completed, failed int) {
 	state := MigrationStateFailed
 	dbCtx, cancel := withDBTimeout(ctx)
 	defer cancel()
-	if err := UpdateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
+	if err := api.updateMigrationStatus(dbCtx, jobID, MigrationStatusComplete, &state, completed, failed); err != nil {
 		log.Printf("[job %d] failed to mark failed: %v", jobID, err)
 	}
 }
 
-func updateTemplateVersion(ctx context.Context, templateID int32, version int) {
-	conn, err := getDB()
+func (api *API) updateTemplateVersion(ctx context.Context, templateID int32, version int) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return
 	}

@@ -624,17 +624,17 @@ type Execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// CreateMigration creates a new migration record in the database.
-func CreateMigration(ctx context.Context, templateID int32, fromVersion, toVersion int, sqlStatements []string) (*Migration, error) {
-	conn, err := getDB()
+// createMigration creates a new migration record in the database.
+func (api *API) createMigration(ctx context.Context, templateID int32, fromVersion, toVersion int, sqlStatements []string) (*Migration, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
-	return CreateMigrationTx(ctx, conn, templateID, fromVersion, toVersion, sqlStatements)
+	return createMigrationTx(ctx, conn, templateID, fromVersion, toVersion, sqlStatements)
 }
 
-// CreateMigrationTx creates a new migration record using the provided executor (DB or Tx).
-func CreateMigrationTx(ctx context.Context, exec Execer, templateID int32, fromVersion, toVersion int, sqlStatements []string) (*Migration, error) {
+// createMigrationTx creates a new migration record using the provided executor (DB or Tx).
+func createMigrationTx(ctx context.Context, exec Execer, templateID int32, fromVersion, toVersion int, sqlStatements []string) (*Migration, error) {
 	now := time.Now().UTC()
 
 	sqlJSON, err := json.Marshal(sqlStatements)
@@ -666,9 +666,9 @@ func CreateMigrationTx(ctx context.Context, exec Execer, templateID int32, fromV
 	}, nil
 }
 
-// GetMigration retrieves a migration by ID.
-func GetMigration(ctx context.Context, id int64) (*Migration, error) {
-	conn, err := getDB()
+// getMigration retrieves a migration by ID.
+func (api *API) getMigration(ctx context.Context, id int64) (*Migration, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -702,9 +702,9 @@ func GetMigration(ctx context.Context, id int64) (*Migration, error) {
 	return &m, nil
 }
 
-// ListMigrations retrieves all migrations, optionally filtered by status.
-func ListMigrations(ctx context.Context, status string) ([]Migration, error) {
-	conn, err := getDB()
+// listMigrations retrieves all migrations, optionally filtered by status.
+func (api *API) listMigrations(ctx context.Context, status string) ([]Migration, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
@@ -757,9 +757,9 @@ func ListMigrations(ctx context.Context, status string) ([]Migration, error) {
 	return migrations, nil
 }
 
-// UpdateMigrationStatus updates the status and counters of a migration.
-func UpdateMigrationStatus(ctx context.Context, id int64, status string, state *string, completedDBs, failedDBs int) error {
-	conn, err := getDB()
+// updateMigrationStatus updates the status and counters of a migration.
+func (api *API) updateMigrationStatus(ctx context.Context, id int64, status string, state *string, completedDBs, failedDBs int) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -771,9 +771,9 @@ func UpdateMigrationStatus(ctx context.Context, id int64, status string, state *
 	return err
 }
 
-// StartMigration marks a migration as running and sets the start time.
-func StartMigration(ctx context.Context, id int64, totalDBs int) error {
-	conn, err := getDB()
+// startMigration marks a migration as running and sets the start time.
+func (api *API) startMigration(ctx context.Context, id int64, totalDBs int) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -785,9 +785,9 @@ func StartMigration(ctx context.Context, id int64, totalDBs int) error {
 	return err
 }
 
-// CreateTemplateVersion creates a new version entry in templates_history.
-func CreateTemplateVersion(ctx context.Context, templateID int32, version int, schema Schema) (string, error) {
-	conn, err := getDB()
+// createTemplateVersion creates a new version entry in templates_history.
+func (api *API) createTemplateVersion(ctx context.Context, templateID int32, version int, schema Schema) (string, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return "", err
 	}
@@ -813,9 +813,9 @@ func CreateTemplateVersion(ctx context.Context, templateID int32, version int, s
 	return checksum, nil
 }
 
-// UpdateTemplateCurrentVersion updates the template's current_version.
-func UpdateTemplateCurrentVersion(ctx context.Context, templateID int32, version int) error {
-	conn, err := getDB()
+// updateTemplateCurrentVersion updates the template's current_version.
+func (api *API) updateTemplateCurrentVersion(ctx context.Context, templateID int32, version int) error {
+	conn, err := api.dbConn()
 	if err != nil {
 		return err
 	}
@@ -829,9 +829,9 @@ func UpdateTemplateCurrentVersion(ctx context.Context, templateID int32, version
 	return err
 }
 
-// GetMigrationSQL retrieves the SQL statements for a specific version transition.
-func GetMigrationSQL(ctx context.Context, templateID int32, fromVersion, toVersion int) ([]string, error) {
-	conn, err := getDB()
+// getMigrationSQL retrieves the SQL statements for a specific version transition.
+func (api *API) getMigrationSQL(ctx context.Context, templateID int32, fromVersion, toVersion int) ([]string, error) {
+	conn, err := api.dbConn()
 	if err != nil {
 		return nil, err
 	}
