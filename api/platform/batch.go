@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/atomicbase/atomicbase/config"
+	"github.com/atombasedev/atombase/config"
 )
 
 // Turso HTTP Pipeline API types

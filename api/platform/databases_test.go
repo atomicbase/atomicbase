@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/atomicbase/atomicbase/primarystore"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/primarystore"
+	"github.com/atombasedev/atombase/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
 

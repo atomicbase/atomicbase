@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/atomicbase/atomicbase/config"
+	"github.com/atombasedev/atombase/config"
 	_ "github.com/mattn/go-sqlite3"
 )
 

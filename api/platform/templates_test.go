@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/atomicbase/atomicbase/primarystore"
+	"github.com/atombasedev/atombase/primarystore"
 	_ "github.com/mattn/go-sqlite3"
 )
 

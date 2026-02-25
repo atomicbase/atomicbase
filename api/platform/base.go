@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/atomicbase/atomicbase/primarystore"
+	"github.com/atombasedev/atombase/primarystore"
 )
 
 // API is the Platform API module with injected dependencies.

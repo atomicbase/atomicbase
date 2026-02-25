@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // withBody wraps handlers that read request bodies to enforce size limits.

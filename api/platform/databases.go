@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // Re-export errors from tools for backward compatibility.

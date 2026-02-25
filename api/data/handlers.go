@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // //go:embed openapi.yaml

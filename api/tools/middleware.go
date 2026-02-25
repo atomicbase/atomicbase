@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atomicbase/atomicbase/config"
+	"github.com/atombasedev/atombase/config"
 )
 
 // responseWriter wraps http.ResponseWriter to capture status code.

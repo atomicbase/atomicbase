@@ -11,11 +11,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/data"
-	"github.com/atomicbase/atomicbase/platform"
-	"github.com/atomicbase/atomicbase/primarystore"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/data"
+	"github.com/atombasedev/atombase/platform"
+	"github.com/atombasedev/atombase/primarystore"
+	"github.com/atombasedev/atombase/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
 

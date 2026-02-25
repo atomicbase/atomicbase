@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // DatabaseMeta is internal metadata for a provisioned external database.

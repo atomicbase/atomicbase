@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // BuildWhereFromJSON builds a WHERE clause from JSON filter array.

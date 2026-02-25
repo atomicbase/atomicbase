@@ -3,7 +3,7 @@ package data
 import (
 	"testing"
 
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // Test fixtures for schema cache

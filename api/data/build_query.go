@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // sanitizeJSONKey validates and escapes a string for use as a JSON object key in SQL.

@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/atomicbase/atomicbase/config"
-	"github.com/atomicbase/atomicbase/primarystore"
+	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/primarystore"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )

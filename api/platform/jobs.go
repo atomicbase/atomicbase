@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // Job processing constants.

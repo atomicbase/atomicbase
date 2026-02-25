@@ -3,7 +3,7 @@ package platform
 import (
 	"testing"
 
-	"github.com/atomicbase/atomicbase/tools"
+	"github.com/atombasedev/atombase/tools"
 )
 
 func TestValidateResourceName(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/atomicbase/atomicbase/config"
+	"github.com/atombasedev/atombase/config"
 )
 
 // CachedTemplate holds both schema and version together.

@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/atomicbase/atomicbase/primarystore"
+	"github.com/atombasedev/atombase/primarystore"
 )
 
 // API is the Data API module with injected dependencies.
