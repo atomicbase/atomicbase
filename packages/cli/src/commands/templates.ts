@@ -654,77 +654,8 @@ async function showHistory(name: string): Promise<void> {
     }
 
     console.log(`\n  Total: ${history.length} version(s)`);
-    console.log(`\n  To rollback: atomicbase templates rollback ${name} <version>`);
   } catch (err) {
     console.error("Failed to get history:", err instanceof ApiError ? err.format() : err);
-    process.exit(1);
-  }
-}
-
-/**
- * Rollback a template to a previous version.
- */
-async function rollbackTemplate(name: string, version: string, force: boolean): Promise<void> {
-  const config = await loadConfig();
-  const api = new ApiClient(config);
-
-  const targetVersion = parseInt(version, 10);
-  if (isNaN(targetVersion) || targetVersion < 1) {
-    console.error("Version must be a positive integer.");
-    process.exit(1);
-  }
-
-  // Verify template and version exist
-  let template;
-  let history;
-  try {
-    template = await api.getTemplate(name);
-    history = await api.getTemplateHistory(name);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      console.error(`Template "${name}" not found.`);
-      process.exit(1);
-    }
-    throw err;
-  }
-
-  if (template.currentVersion === targetVersion) {
-    console.log(`Template "${name}" is already at version ${targetVersion}.`);
-    return;
-  }
-
-  const versionExists = history.some(v => v.version === targetVersion);
-  if (!versionExists) {
-    console.error(`Version ${targetVersion} not found in history.`);
-    console.error("\nUse 'atomicbase templates history " + name + "' to see available versions.");
-    process.exit(1);
-  }
-
-  if (!force) {
-    const confirmed = await confirm(
-      `Rollback template "${name}" from v${template.currentVersion} to v${targetVersion}? This will migrate all tenants.`
-    );
-    if (!confirmed) {
-      console.log("Aborted.");
-      process.exit(0);
-    }
-  }
-
-  console.log(`Rolling back template "${name}" to version ${targetVersion}...`);
-
-  try {
-    const result = await api.rollbackTemplate(name, targetVersion);
-    console.log(
-      `Rollback applied: schema from v${targetVersion} is now published as new version v${result.currentVersion}`
-    );
-    console.log(`Template "${name}" updated to v${result.currentVersion}`);
-    console.log(`  Status: ${result.status}`);
-  } catch (err) {
-    if (err instanceof ApiError && err.code === "NO_CHANGES") {
-      console.log("No schema changes needed for this rollback.");
-      return;
-    }
-    console.error("Failed to rollback:", err instanceof ApiError ? err.format() : err);
     process.exit(1);
   }
 }
@@ -1088,12 +1019,3 @@ templatesCommand
   .command("history <name>")
   .description("View version history for a template")
   .action(showHistory);
-
-// templates rollback <name> <version>
-templatesCommand
-  .command("rollback <name> <version>")
-  .description("Rollback to a previous schema version")
-  .option("-f, --force", "Skip confirmation prompt")
-  .action((name: string, version: string, options: { force?: boolean }) => {
-    rollbackTemplate(name, version, options.force ?? false);
-  });

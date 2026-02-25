@@ -75,8 +75,6 @@ npx atomicbase templates delete <name> [-f]
 # View version history
 npx atomicbase templates history <name>
 
-# Rollback to a previous version
-npx atomicbase templates rollback <name> <version> [-f]
 ```
 
 ### Databases

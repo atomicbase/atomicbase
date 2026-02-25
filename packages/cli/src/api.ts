@@ -96,9 +96,6 @@ export interface TemplateVersion {
   createdAt: string;
 }
 
-// RollbackResponse is returned by the rollback endpoint (matches Go API)
-export type RollbackResponse = MigrateResponse;
-
 // Database represents a database record (matches Go API)
 export interface Database {
   id: number;
@@ -264,16 +261,6 @@ export class ApiClient {
    */
   async getTemplateHistory(name: string): Promise<TemplateVersion[]> {
     return this.request<TemplateVersion[]>("GET", `/platform/templates/${name}/history`);
-  }
-
-  /**
-   * Rollback a template to a previous version.
-   * Returns lazy migration summary information.
-   */
-  async rollbackTemplate(name: string, version: number): Promise<RollbackResponse> {
-    return this.request<RollbackResponse>("POST", `/platform/templates/${name}/rollback`, {
-      version,
-    });
   }
 
   // =========================================================================
