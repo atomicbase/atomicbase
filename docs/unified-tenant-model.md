@@ -8,7 +8,7 @@ Replace the current Template/Database model with a unified Definition/Database m
 
 ### Two-Layer Hierarchy
 
-```
+```bash
 Definition → Database
 ```
 
@@ -26,17 +26,20 @@ The `definition_type` determines how ownership and access work for databases cre
 | `user` | Many | User (no members) | Row-level access only |
 
 **Global** (`definition_type = 'global'`):
+
 - Single database: one definition → one database (auto-created on push)
 - Simpler access control: session context + row context (NO roles/RBAC)
 - Database has `owner_id = NULL`
 
 **Organization** (`definition_type = 'organization'`):
+
 - Multi-database: one definition → many databases
 - Full access control: session context + membership roles + row context
-- Supports membership with roles via `atomicbase_membership`
+- Supports membership with roles via `atombase_membership`
 - `owner_id` is the billing/account owner (separate from RBAC roles)
 
 **User** (`definition_type = 'user'`):
+
 - Multi-database: one definition → many databases (one per user)
 - Simpler access control: session context + row context (NO roles/RBAC)
 - Owner is the user, no membership table used
@@ -47,10 +50,11 @@ For organization databases, there are two distinct concepts:
 
 | Concept | Source | Purpose |
 |---------|--------|---------|
-| `owner_id` | `atomicbase_databases.owner_id` | Billing/account owner. Can transfer ownership. Cannot be removed. |
-| `owner` role | `atomicbase_membership.role` | RBAC permission level. Multiple users can have this role. |
+| `owner_id` | `atombase_databases.owner_id` | Billing/account owner. Can transfer ownership. Cannot be removed. |
+| `owner` role | `atombase_membership.role` | RBAC permission level. Multiple users can have this role. |
 
 The `owner_id` user typically also has a membership row with `role = 'owner'`, but they're separate:
+
 - `owner_id` answers: "Who is responsible for this database?"
 - `role = 'owner'` answers: "What can this user do?"
 
@@ -61,13 +65,13 @@ This separation allows:
 
 ### Shared Infrastructure
 - Schema engine identical for all types (tables, columns, indexes, FTS)
-- Version history tracked in `atomicbase_definitions_history`
+- Version history tracked in `atombase_definitions_history`
 - Access rules stored alongside schema in history
 
 ### Migration System
-- **Migrations**: `atomicbase_migrations` stores migration SQL (from_version → to_version)
+- **Migrations**: `atombase_migrations` stores migration SQL (from_version → to_version)
 - **Lazy migrations**: Databases track their `definition_version`, migrate on access
-- **Failure tracking**: `atomicbase_migration_failures` for debugging
+- **Failure tracking**: `atombase_migration_failures` for debugging
 
 ### Roles (Organization)
 
@@ -165,6 +169,7 @@ access: defineAccess({
 ```
 
 For UPDATE, you can check both `old` and `new` to enforce constraints on what changes are allowed:
+
 ```typescript
 update: r.where(({ auth, old, new }) =>
   eq(old.author_id, auth.id) && eq(new.author_id, old.author_id)
@@ -202,14 +207,19 @@ Each operation is a single roundtrip. The server validates session + authorizati
 
 ```typescript
 // User database — user implicit from session
-await client.user.database("notes").from("entries").select()
+await client.user.from("entries").select()
 
 // Organization database — specify which org
-await client.org("acme-corp").database("contacts").from("people").select()
+await client.org("acme-corp").from("people").select()
 
 // Global database — no ownership, just the definition name
 await client.global("marketplace").from("extensions").select()
 ```
+
+**Headers sent:**
+- User: `Database: user:notes` (definition name from user's database)
+- Org: `Database: org:acme-corp`
+- Global: `Database: global:marketplace`
 
 ### Membership Management
 
@@ -263,15 +273,14 @@ The hierarchical pattern `user → org → database` would require multiple roun
 // This would be 3 requests (bad)
 const user = await client.auth.getUser()
 const org = await user.getOrg("acme-corp")
-await org.database("contacts").from("people").select()
+await org.from("people").select()
 ```
 
 Instead, `client.org("acme-corp")` returns a lightweight handle, not a fetched object. The server validates everything in one request:
 
 ```
 POST /data/query/people
-X-Org: acme-corp
-X-Database: contacts
+Database: org:acme-corp
 Authorization: Bearer <session>
 ```
 
@@ -395,119 +404,111 @@ export default defineGlobal({
 
 ## Platform Tables
 
+See `api/unified_tenant_schema.sql` for the full schema. Key tables:
+
+**Identity & Auth:**
+- `atombase_definitions` — schema blueprints with `definition_type` (global/organization/user)
+- `atombase_databases` — pure storage, linked to definitions
+- `atombase_users` — user accounts with optional `database_id`
+- `atombase_organizations` — identity layer on databases
+- `atombase_membership` — org membership with role
+- `atombase_invitations` — pending org invites
+- `atombase_sessions` — session tokens
+
+**Schema & Versioning:**
+- `atombase_definitions_history` — schema snapshots per version
+- `atombase_migrations` — migration SQL between versions
+- `atombase_migration_failures` — debugging failed migrations
+
+**Policies (normalized for efficient caching):**
 ```sql
--- Definitions: schema blueprints with type determining database ownership and access
-CREATE TABLE atomicbase_definitions (
-    id INTEGER PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    definition_type TEXT NOT NULL CHECK(definition_type IN ('global', 'organization', 'user')),
-    roles_json TEXT,  -- NULL for global/user types
-    management_json TEXT,  -- NULL for global/user types
-    current_version INTEGER DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Databases (pure storage, no ownership concepts)
-CREATE TABLE atomicbase_databases (
-    id TEXT PRIMARY KEY NOT NULL,
-    definition_id INTEGER NOT NULL REFERENCES atomicbase_definitions(id),
-    definition_version INTEGER DEFAULT 1,
-    token TEXT,  -- Turso connection token
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Users (optionally own one database)
-CREATE TABLE atomicbase_users (
-    id TEXT PRIMARY KEY NOT NULL,
-    database_id TEXT UNIQUE REFERENCES atomicbase_databases(id),
-    email TEXT UNIQUE COLLATE NOCASE,
-    email_verified_at TEXT,
-    phone TEXT,
-    phone_verified_at TEXT,
-    password_hash TEXT,
-    last_sign_in_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Organizations (identity layer on top of databases)
-CREATE TABLE atomicbase_organizations (
-    id TEXT PRIMARY KEY NOT NULL,
-    database_id TEXT NOT NULL UNIQUE REFERENCES atomicbase_databases(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    owner_id TEXT NOT NULL REFERENCES atomicbase_users(id),
-    max_members INTEGER,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Membership (on organizations, not databases)
-CREATE TABLE atomicbase_membership (
-    organization_id TEXT NOT NULL REFERENCES atomicbase_organizations(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES atomicbase_users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY(organization_id, user_id)
-);
-
--- Invitations (on organizations)
-CREATE TABLE atomicbase_invitations (
-    id TEXT PRIMARY KEY NOT NULL,
-    organization_id TEXT NOT NULL REFERENCES atomicbase_organizations(id) ON DELETE CASCADE,
-    email TEXT NOT NULL COLLATE NOCASE,
-    role TEXT NOT NULL,
-    invited_by TEXT NOT NULL REFERENCES atomicbase_users(id),
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(organization_id, email)
-);
-
--- Sessions
-CREATE TABLE atomicbase_sessions (
-    id TEXT PRIMARY KEY NOT NULL,
-    secret_hash BLOB NOT NULL,
-    user_id TEXT NOT NULL REFERENCES atomicbase_users(id) ON DELETE CASCADE,
-    mfa_verified INTEGER NOT NULL DEFAULT 0,
-    last_verified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Schema + access snapshots per version
-CREATE TABLE atomicbase_definitions_history (
-    id INTEGER PRIMARY KEY,
-    definition_id INTEGER NOT NULL REFERENCES atomicbase_definitions(id) ON DELETE CASCADE,
+-- Access policies: one row per table/operation
+-- NULL or '' conditions_json = allow, non-empty = RLS conditions
+CREATE TABLE atombase_access_policies (
+    definition_id INTEGER NOT NULL REFERENCES atombase_definitions(id),
     version INTEGER NOT NULL,
-    schema_json TEXT NOT NULL,
-    access_json TEXT NOT NULL,
-    checksum TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(definition_id, version)
+    table_name TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK(operation IN ('select', 'insert', 'update', 'delete')),
+    conditions_json TEXT,
+    PRIMARY KEY(definition_id, version, table_name, operation)
 );
 
--- Migration SQL between versions
-CREATE TABLE atomicbase_migrations (
-    id INTEGER PRIMARY KEY,
-    definition_id INTEGER NOT NULL REFERENCES atomicbase_definitions(id) ON DELETE CASCADE,
-    from_version INTEGER NOT NULL,
-    to_version INTEGER NOT NULL,
-    sql TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(definition_id, from_version, to_version)
-);
-
--- Migration failures for debugging
-CREATE TABLE atomicbase_migration_failures (
-    database_id TEXT PRIMARY KEY REFERENCES atomicbase_databases(id) ON DELETE CASCADE,
-    from_version INTEGER NOT NULL,
-    to_version INTEGER NOT NULL,
-    error TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- Management policies: one row per role/action
+-- NULL or '' target_roles_json = allowed for any target, non-empty = specific target roles
+CREATE TABLE atombase_management_policies (
+    definition_id INTEGER NOT NULL REFERENCES atombase_definitions(id),
+    role TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('invite', 'assignRole', 'removeMember', 'updateOrg', 'deleteOrg', 'transferOwnership')),
+    target_roles_json TEXT,
+    PRIMARY KEY(definition_id, role, action)
 );
 ```
+
+**Policy logic:**
+1. No row exists → deny (operation/action not configured)
+2. Row exists, conditions empty → allow all
+3. Row exists, conditions present → apply RLS/check target roles
+
+## Auth Context Queries
+
+Three optimized queries based on `Database` header prefix. Each validates session and resolves database access in one query.
+
+**Global** (`Database: global:<definition_name>`)
+```sql
+SELECT s.user_id, d.id, d.definition_id, d.definition_version
+FROM atombase_sessions s
+JOIN atombase_definitions def ON def.name = ? AND def.definition_type = 'global'
+JOIN atombase_databases d ON d.definition_id = def.id
+WHERE s.id = ? AND s.expires_at > datetime('now')
+```
+
+**User** (`Database: user:<definition_name>`)
+```sql
+SELECT s.user_id, d.id, d.definition_id, d.definition_version
+FROM atombase_sessions s
+JOIN atombase_users u ON u.id = s.user_id
+JOIN atombase_databases d ON d.id = u.database_id
+WHERE s.id = ? AND s.expires_at > datetime('now')
+```
+
+**Org** (`Database: org:<organization_id>`)
+```sql
+SELECT s.user_id, m.role, d.id, d.definition_id, d.definition_version
+FROM atombase_sessions s
+JOIN atombase_membership m ON m.user_id = s.user_id AND m.organization_id = ?
+JOIN atombase_organizations o ON o.id = m.organization_id
+JOIN atombase_databases d ON d.id = o.database_id
+WHERE s.id = ? AND s.expires_at > datetime('now')
+```
+
+## Policy Caching
+
+**Cache keys:**
+- Access: `access:{definition_id}:{version}:{table}:{operation}`
+- Management: `mgmt:{definition_id}:{role}:{action}`
+
+**Cache values:**
+- Access: `conditions_json` string (empty = allow)
+- Management: `target_roles_json` string (empty = allowed for any target)
+
+**On select with joins:**
+
+When querying `posts` with joins to `comments` and `users`, check policies for all tables:
+
+```go
+tables := []string{"posts", "comments", "users"}
+for _, table := range tables {
+    key := fmt.Sprintf("access:%d:%d:%s:select", defID, version, table)
+    policy := cache.GetOrLoad(key, func() string {
+        // Load from atombase_access_policies
+    })
+    if policy != "" {
+        rewriter.AddTableConditions(table, policy)
+    }
+}
+```
+
+Each table gets its own RLS conditions injected. If any table has no policy row, the query fails.
 
 ## API Endpoints
 
@@ -550,14 +551,13 @@ CREATE TABLE atomicbase_migration_failures (
 
 ```
 Authorization: Bearer <session_token>   # User session
-X-Database: <database_id>               # Target database for data requests
-X-Organization: <organization_id>       # Target organization (for org databases)
+Database: <type>:<name>                 # Target database
 ```
 
-**Database resolution:**
-- Global: `X-Database` = definition name (auto-created, one per definition)
-- User: `X-Database` = user's database ID (from `atomicbase_users.database_id`)
-- Organization: `X-Organization` = organization ID (database resolved via `atomicbase_organizations.database_id`)
+**Database header format:**
+- `global:<definition_name>` — Global database (e.g., `global:marketplace`)
+- `user:<definition_name>` — User's personal database (e.g., `user:notes`)
+- `org:<organization_id>` — Organization database (e.g., `org:acme-corp`)
 
 ## Implementation Phases
 
@@ -578,14 +578,14 @@ X-Organization: <organization_id>       # Target organization (for org databases
 2. Create `api/platform/membership.go` - user-database membership with roles
 
 ### Phase 4: Schema Versioning
-1. Implement `atomicbase_definitions_history` population on push
-2. Implement `atomicbase_migrations` for migration SQL generation
+1. Implement `atombase_definitions_history` population on push
+2. Implement `atombase_migrations` for migration SQL generation
 3. Implement lazy migration on database access (check `definition_version`)
-4. Track failures in `atomicbase_migration_failures`
+4. Track failures in `atombase_migration_failures`
 
 ### Phase 5: Auth Context
 1. Update `api/tools/auth.go` with session-based auth context
-2. Membership role lookup from `atomicbase_membership`
+2. Membership role lookup from `atombase_membership`
 3. Inject access conditions into queries based on access rules
 
 ### Phase 6: Migration path
@@ -618,10 +618,10 @@ X-Organization: <organization_id>       # Target organization (for org databases
 
 ### Organization Flow
 1. Create a `.org.ts` file with schema, roles, management, and access
-2. Push via CLI - verify definition created with version in `atomicbase_definitions`
-3. Verify `atomicbase_definitions_history` has schema + access JSON
-4. Create database via API - verify entry in `atomicbase_databases` with `owner_id` set
-5. Add user membership with role via `atomicbase_membership`
+2. Push via CLI - verify definition created with version in `atombase_definitions`
+3. Verify `atombase_definitions_history` has schema + access JSON
+4. Create database via API - verify entry in `atombase_databases` with `owner_id` set
+5. Add user membership with role via `atombase_membership`
 6. Make data requests with different roles - verify RBAC enforcement
 7. Update schema, push again - verify new version in history
 8. Access database - verify lazy migration and `definition_version` update
@@ -643,4 +643,4 @@ X-Organization: <organization_id>       # Target organization (for org databases
 ### Migration Failures
 1. Introduce a breaking schema change
 2. Trigger lazy migration
-3. Verify failure logged in `atomicbase_migration_failures`
+3. Verify failure logged in `atombase_migration_failures`
