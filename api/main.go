@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/atombasedev/atombase/auth"
 	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/data"
 	"github.com/atombasedev/atombase/platform"
@@ -133,11 +134,27 @@ func main() {
 		log.Fatalf("Failed to initialize platform database: %v", err)
 	}
 
+	authAPI := auth.NewAPI(primaryDB)
+
 	app := http.NewServeMux()
+
+	// Health check
+	app.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		if err := primaryDB.PingContext(r.Context()); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"unhealthy","error":"database ping failed"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
 
 	// Register routes from each module
 	dataAPI.RegisterRoutes(app)
 	platformAPI.RegisterRoutes(app)
+	authAPI.RegisterRoutes(app)
 
 	// Apply middleware chain: panic recovery -> logging -> timeout -> cors -> auth -> handler
 	handler := tools.PanicRecoveryMiddleware(
