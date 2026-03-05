@@ -67,6 +67,7 @@ func (api *API) connTurso(dbName string) (Database, error) {
 	return Database{
 		Client:          client,
 		Schema:          schema,
+		Name:            dbName,
 		ID:              meta.ID,
 		TemplateID:      meta.TemplateID,
 		SchemaVersion:   currentVersion,

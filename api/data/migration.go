@@ -8,6 +8,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/atombasedev/atombase/tools"
 )
 
 var (
@@ -57,6 +59,10 @@ func MigrateIfNeeded(ctx context.Context, dao *Database) error {
 		if err == nil {
 			if err := dao.primaryStore.UpdateDatabaseVersion(ctx, dao.ID, dao.SchemaVersion); err != nil {
 				log.Printf("migration version update failed for database_id=%d: %v", dao.ID, err)
+			}
+			// Update cache with new version
+			if dao.Name != "" {
+				tools.UpdateDatabaseVersion(dao.Name, dao.SchemaVersion)
 			}
 			dao.DatabaseVersion = dao.SchemaVersion
 			return nil

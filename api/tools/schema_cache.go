@@ -74,3 +74,63 @@ func InvalidateTemplate(templateID int32) {
 	key := fmt.Sprintf("template:%d", templateID)
 	cache.Delete(context.Background(), key)
 }
+
+// CachedDatabase holds database metadata for cache lookups.
+type CachedDatabase struct {
+	ID              int32 `json:"id"`
+	TemplateID      int32 `json:"template_id"`
+	DatabaseVersion int   `json:"version"`
+}
+
+// SetDatabase stores database metadata in cache.
+func SetDatabase(name string, meta CachedDatabase) {
+	if cache == nil {
+		return
+	}
+	key := fmt.Sprintf("db:%s", name)
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return
+	}
+	cache.Set(context.Background(), key, data)
+}
+
+// GetDatabase retrieves cached database metadata.
+// Returns the cached metadata and true if found, empty struct and false otherwise.
+func GetDatabase(name string) (CachedDatabase, bool) {
+	if cache == nil {
+		return CachedDatabase{}, false
+	}
+	key := fmt.Sprintf("db:%s", name)
+	data, err := cache.Get(context.Background(), key)
+	if err != nil || data == nil {
+		return CachedDatabase{}, false
+	}
+	var meta CachedDatabase
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return CachedDatabase{}, false
+	}
+	return meta, true
+}
+
+// InvalidateDatabase removes database metadata from cache.
+func InvalidateDatabase(name string) {
+	if cache == nil {
+		return
+	}
+	key := fmt.Sprintf("db:%s", name)
+	cache.Delete(context.Background(), key)
+}
+
+// UpdateDatabaseVersion updates just the version in cached database metadata.
+func UpdateDatabaseVersion(name string, newVersion int) {
+	if cache == nil {
+		return
+	}
+	meta, ok := GetDatabase(name)
+	if !ok {
+		return
+	}
+	meta.DatabaseVersion = newVersion
+	SetDatabase(name, meta)
+}

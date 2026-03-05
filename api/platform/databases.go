@@ -207,6 +207,9 @@ func (api *API) deleteDatabase(ctx context.Context, name string) error {
 		return err
 	}
 
+	// Invalidate cache
+	tools.InvalidateDatabase(name)
+
 	return nil
 }
 
@@ -266,6 +269,9 @@ func (api *API) syncDatabase(ctx context.Context, name string) (*SyncDatabaseRes
 	if err != nil {
 		return nil, err
 	}
+
+	// Update cache with new version
+	tools.UpdateDatabaseVersion(name, currentVersion)
 
 	return &SyncDatabaseResponse{
 		FromVersion: fromVersion,

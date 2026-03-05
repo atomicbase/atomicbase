@@ -18,6 +18,7 @@ type API struct {
 type Database struct {
 	Client          *sql.DB     // SQL database connection
 	Schema          SchemaCache // Cached schema for validation
+	Name            string      // Database name (for cache updates)
 	ID              int32       // Internal tenant database ID
 	TemplateID      int32       // Template ID used by this tenant
 	SchemaVersion   int         // Current template version from schema cache

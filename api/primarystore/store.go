@@ -71,7 +71,17 @@ func (s *Store) DB() *sql.DB {
 }
 
 // LookupDatabaseByName fetches internal metadata for a named external database.
+// Results are cached to avoid hitting the primary database on every request.
 func (s *Store) LookupDatabaseByName(name string) (DatabaseMeta, error) {
+	// Check cache first
+	if cached, ok := tools.GetDatabase(name); ok {
+		return DatabaseMeta{
+			ID:              cached.ID,
+			TemplateID:      cached.TemplateID,
+			DatabaseVersion: cached.DatabaseVersion,
+		}, nil
+	}
+
 	if s == nil || s.dbLookupBy == nil {
 		return DatabaseMeta{}, errors.New("primary store not initialized")
 	}
@@ -90,11 +100,20 @@ func (s *Store) LookupDatabaseByName(name string) (DatabaseMeta, error) {
 		return DatabaseMeta{}, err
 	}
 
-	return DatabaseMeta{
+	meta := DatabaseMeta{
 		ID:              id.Int32,
 		TemplateID:      templateID,
 		DatabaseVersion: databaseVersion,
-	}, nil
+	}
+
+	// Cache the result
+	tools.SetDatabase(name, tools.CachedDatabase{
+		ID:              meta.ID,
+		TemplateID:      meta.TemplateID,
+		DatabaseVersion: meta.DatabaseVersion,
+	})
+
+	return meta, nil
 }
 
 // GetMigrationsBetween fetches contiguous migrations from [fromVersion, toVersion].
