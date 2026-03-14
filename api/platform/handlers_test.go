@@ -1,6 +1,10 @@
 package platform
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/atombasedev/atombase/tools"
@@ -62,5 +66,92 @@ func TestValidateResourceName(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandleCreateTemplate_ValidationErrors(t *testing.T) {
+	api := &API{}
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantCode   string
+		wantMsg    string
+	}{
+		{
+			name:       "invalid json",
+			body:       `{"name":`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   tools.CodeInvalidJSON,
+			wantMsg:    tools.ErrInvalidJSON.Error(),
+		},
+		{
+			name:       "missing name",
+			body:       `{"schema":{"tables":[{"name":"users","pk":["id"],"columns":{"id":{"name":"id","type":"INTEGER"}}}]}}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   tools.CodeInvalidRequest,
+			wantMsg:    "name is required",
+		},
+		{
+			name:       "invalid name",
+			body:       `{"name":"BadName","schema":{"tables":[{"name":"users","pk":["id"],"columns":{"id":{"name":"id","type":"INTEGER"}}}]}}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   tools.CodeInvalidRequest,
+			wantMsg:    "name contains invalid characters",
+		},
+		{
+			name:       "empty schema",
+			body:       `{"name":"valid-name","schema":{"tables":[]}}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   tools.CodeInvalidRequest,
+			wantMsg:    "schema must have at least one table",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/platform/templates", strings.NewReader(tt.body))
+			rec := httptest.NewRecorder()
+
+			api.handleCreateTemplate(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
+			}
+
+			var apiErr tools.APIError
+			if err := json.Unmarshal(rec.Body.Bytes(), &apiErr); err != nil {
+				t.Fatalf("failed to decode error response: %v", err)
+			}
+
+			if apiErr.Code != tt.wantCode {
+				t.Fatalf("expected code %q, got %q", tt.wantCode, apiErr.Code)
+			}
+			if apiErr.Message != tt.wantMsg {
+				t.Fatalf("expected message %q, got %q", tt.wantMsg, apiErr.Message)
+			}
+		})
+	}
+}
+
+func TestHandleDiffTemplate_InvalidJSON(t *testing.T) {
+	api := &API{}
+	req := httptest.NewRequest(http.MethodPost, "/platform/templates/my-template/diff", strings.NewReader(`{"schema":`))
+	req.SetPathValue("name", "my-template")
+	rec := httptest.NewRecorder()
+
+	api.handleDiffTemplate(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	var apiErr tools.APIError
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if apiErr.Code != tools.CodeInvalidJSON {
+		t.Fatalf("expected code %q, got %q", tools.CodeInvalidJSON, apiErr.Code)
 	}
 }
