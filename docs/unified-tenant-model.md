@@ -35,7 +35,7 @@ The `definition_type` determines how ownership and access work for databases cre
 
 - Multi-database: one definition → many databases
 - Full access control: session context + membership roles + row context
-- Supports membership with roles via `atombase_membership`
+- Supports membership with roles via tenant-local `atombase_membership`
 - `owner_id` is the billing/account owner (separate from RBAC roles)
 
 **User** (`definition_type = 'user'`):
@@ -51,7 +51,7 @@ For organization databases, there are two distinct concepts:
 | Concept | Source | Purpose |
 |---------|--------|---------|
 | `owner_id` | `atombase_databases.owner_id` | Billing/account owner. Can transfer ownership. Cannot be removed. |
-| `owner` role | `atombase_membership.role` | RBAC permission level. Multiple users can have this role. |
+| `owner` role | `tenant.atombase_membership.role` | RBAC permission level. Multiple users can have this role. |
 
 The `owner_id` user typically also has a membership row with `role = 'owner'`, but they're separate:
 
@@ -61,7 +61,7 @@ The `owner_id` user typically also has a membership row with `role = 'owner'`, b
 This separation allows:
 - Transferring billing ownership without changing RBAC
 - Multiple users with owner-level permissions
-- A fallback if all membership rows are accidentally deleted
+- A fallback if tenant membership rows are accidentally deleted
 
 ### Shared Infrastructure
 - Schema engine identical for all types (tables, columns, indexes, FTS)
@@ -177,6 +177,59 @@ update: r.where(({ auth, old, new }) =>
 ```
 
 ## SDK Patterns
+
+### Client Setup
+
+**Browser client** — stores session in memory:
+
+```typescript
+import { createClient } from "@atombase/sdk";
+
+const client = createClient({
+  url: "https://api.atombase.com",
+});
+```
+
+**SSR client** — uses cookies for session persistence across requests:
+
+```typescript
+import { createClient } from "@atombase/sdk";
+import { cookies } from "next/headers";  // or your framework's cookie API
+
+const client = createClient({
+  url: process.env.ATOMBASE_URL,
+  cookies: {
+    get: (name) => cookies().get(name)?.value,
+    set: (name, value, options) => cookies().set(name, value, options),
+    delete: (name) => cookies().delete(name),
+  }
+});
+```
+
+**Cookie handler interface:**
+
+```typescript
+interface CookieHandler {
+  get(name: string): string | undefined;
+  set(name: string, value: string, options?: CookieOptions): void;
+  delete(name: string): void;
+}
+
+interface CookieOptions {
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "strict" | "lax" | "none";
+  maxAge?: number;  // seconds
+  path?: string;
+}
+```
+
+When `cookies` is provided, the SDK automatically:
+- Sets cookie on `signIn()` (on your app's domain, not atombase's)
+- Reads cookie for all authenticated requests
+- Deletes cookie on `signOut()`
+
+### Data Access Patterns
 
 The SDK distinguishes between **data fetching** and **operation handles**:
 
@@ -411,9 +464,11 @@ See `api/unified_tenant_schema.sql` for the full schema. Key tables:
 - `atombase_databases` — pure storage, linked to definitions
 - `atombase_users` — user accounts with optional `database_id`
 - `atombase_organizations` — identity layer on databases
-- `atombase_membership` — org membership with role
 - `atombase_invitations` — pending org invites
 - `atombase_sessions` — session tokens
+
+**Tenant-local auth state (organization databases):**
+- `atombase_membership` — org membership with role (stored in each org tenant database)
 
 **Schema & Versioning:**
 - `atombase_definitions_history` — schema snapshots per version
@@ -449,37 +504,136 @@ CREATE TABLE atombase_management_policies (
 2. Row exists, conditions empty → allow all
 3. Row exists, conditions present → apply RLS/check target roles
 
-## Auth Context Queries
+## Policy Compilation
 
-Three optimized queries based on `Database` header prefix. Each validates session and resolves database access in one query.
+Access policy conditions compile entirely to runtime enforcement. No triggers or CHECK constraints are generated from access policies.
+
+### Condition Format
+
+Conditions support AND/OR/NOT nesting:
+
+```json
+// Simple: author can edit their own posts
+{"field": "old.author_id", "op": "eq", "value": "auth.id"}
+
+// OR: author can edit OR admin can edit anything
+{
+  "or": [
+    {"field": "old.author_id", "op": "eq", "value": "auth.id"},
+    {"field": "auth.role", "op": "eq", "value": "admin"}
+  ]
+}
+
+// NOT: can delete if not published
+{"not": {"field": "old.status", "op": "eq", "value": "published"}}
+
+// Nested AND/OR/NOT supported
+```
+
+**Operators:** `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `is` (NULL), `is_not` (NOT NULL)
+
+### Evaluation Rules
+
+Conditions are evaluated with three-valued logic:
+- **pass** — `new.*`/`auth.*` condition satisfied in Go
+- **fail** — condition cannot be satisfied
+- **maybe** — has `old.*` conditions, defer to SQL
+
+**For OR:** If any `new.*`/`auth.*` branch passes → OR satisfied, no WHERE needed. Otherwise, surviving `old.*` branches become OR'd WHERE clause.
+
+**For AND:** If any branch fails → AND fails. Otherwise, combine `old.*` branches into AND'd WHERE clause.
+
+**Example:**
+```json
+{"or": [
+  {"field": "old.author_id", "op": "eq", "value": "auth.id"},
+  {"field": "new.status", "op": "eq", "value": "draft"}
+]}
+```
+
+Request `{status: "draft"}` → `new.*` passes → no WHERE needed
+Request `{status: "published"}` → `new.*` fails → WHERE: `author_id = ?`
+
+### Compile-Time Validation
+
+Reject at definition push if:
+- `old.*` condition in INSERT policy (no existing row)
+- `new.*` condition in SELECT/DELETE policy (no new values)
+- `auth.role` condition in global/user definition (no roles)
+
+### Batch Semantics
+
+Batch inserts are atomic — if any row fails validation, reject the entire batch. Matches Postgres RLS behavior.
+
+### System Bypass
+
+System operations (background jobs, migrations, admin) skip policy enforcement entirely.
+
+### Data Payloads
+
+- INSERT/UPDATE values are always literals (parameterized)
+- No SQL expressions in data payloads
+- Use schema defaults or client-side values for computed fields
+
+See `implementing-tenant-model.md` for full implementation details.
+
+## Session Validation
+
+Sessions use a two-step validation with optimized write frequency:
+
+1. **Validate session** — lookup by ID, verify secret hash with constant-time comparison
+2. **Check expiry** — hard expiry (`expires_at`) and soft expiry (inactivity via `last_verified_at`)
+3. **Update activity** — only write `last_verified_at` every ~1 hour, not per request
+
+```go
+const (
+    inactivityTimeout     = 10 * 24 * time.Hour  // 10 days
+    activityCheckInterval = 1 * time.Hour        // 1 hour
+)
+```
+
+See `implementing-tenant-model.md` for full implementation.
+
+## Database Resolution Queries
+
+After session validation, resolve target database access based on `Database` header. Primary DB resolution only determines routing (`database_id`, `definition_id`, `definition_version`) and user identity (`auth.id`). Organization role resolution happens in the tenant database during query planning/execution.
 
 **Global** (`Database: global:<definition_name>`)
 ```sql
-SELECT s.user_id, d.id, d.definition_id, d.definition_version
-FROM atombase_sessions s
-JOIN atombase_definitions def ON def.name = ? AND def.definition_type = 'global'
+SELECT d.id, d.definition_id, d.definition_version
+FROM atombase_definitions def
 JOIN atombase_databases d ON d.definition_id = def.id
-WHERE s.id = ? AND s.expires_at > datetime('now')
+WHERE def.name = ? AND def.definition_type = 'global'
 ```
 
 **User** (`Database: user:<definition_name>`)
 ```sql
-SELECT s.user_id, d.id, d.definition_id, d.definition_version
-FROM atombase_sessions s
-JOIN atombase_users u ON u.id = s.user_id
+SELECT d.id, d.definition_id, d.definition_version
+FROM atombase_users u
 JOIN atombase_databases d ON d.id = u.database_id
-WHERE s.id = ? AND s.expires_at > datetime('now')
+JOIN atombase_definitions def ON def.id = d.definition_id
+WHERE u.id = ? AND def.name = ? AND def.definition_type = 'user'
 ```
 
 **Org** (`Database: org:<organization_id>`)
 ```sql
-SELECT s.user_id, m.role, d.id, d.definition_id, d.definition_version
-FROM atombase_sessions s
-JOIN atombase_membership m ON m.user_id = s.user_id AND m.organization_id = ?
-JOIN atombase_organizations o ON o.id = m.organization_id
+SELECT d.id, d.definition_id, d.definition_version
+FROM atombase_organizations o
 JOIN atombase_databases d ON d.id = o.database_id
-WHERE s.id = ? AND s.expires_at > datetime('now')
+WHERE o.id = ?
 ```
+
+**Tenant-side role lookup (organization databases)**
+```sql
+SELECT role
+FROM atombase_membership
+WHERE user_id = ?
+```
+
+The runtime planner combines:
+1. `auth.id` from session validation (primary)
+2. Cached access policy from primary (`definition_id`, `version`)
+3. Tenant-local org role from `atombase_membership`
 
 ## Policy Caching
 
@@ -487,28 +641,31 @@ WHERE s.id = ? AND s.expires_at > datetime('now')
 - Access: `access:{definition_id}:{version}:{table}:{operation}`
 - Management: `mgmt:{definition_id}:{role}:{action}`
 
-**Cache values:**
-- Access: `conditions_json` string (empty = allow)
-- Management: `target_roles_json` string (empty = allowed for any target)
+**Cache lifecycle:**
+- **Startup** — Rebuild entire cache from `atombase_access_policies`
+- **Definition push** — Invalidate all cache entries for that definition
+- **Version in key** — New versions naturally use new cache entries
 
-**On select with joins:**
+**Batch loading for joins:**
 
-When querying `posts` with joins to `comments` and `users`, check policies for all tables:
+When querying with joins, batch load all table policies in one query:
 
-```go
-tables := []string{"posts", "comments", "users"}
-for _, table := range tables {
-    key := fmt.Sprintf("access:%d:%d:%s:select", defID, version, table)
-    policy := cache.GetOrLoad(key, func() string {
-        // Load from atombase_access_policies
-    })
-    if policy != "" {
-        rewriter.AddTableConditions(table, policy)
-    }
-}
+```sql
+SELECT table_name, conditions_json
+FROM atombase_access_policies
+WHERE definition_id = ? AND version = ? AND operation = ?
+AND table_name IN ('posts', 'comments', 'users')
 ```
 
 Each table gets its own RLS conditions injected. If any table has no policy row, the query fails.
+
+## Role Validation
+
+Roles are validated at write time, not query time:
+
+- **Membership insert/update** — Check role exists in definition `roles_json` before writing tenant membership
+- **Invalid role** — Reject with 400 error before writing to database
+- **Query time** — No validation needed (data already clean)
 
 ## API Endpoints
 
@@ -575,7 +732,7 @@ Database: <type>:<name>                 # Target database
 
 ### Phase 3: Go API - Database Management
 1. Create `api/platform/databases.go` - database CRUD
-2. Create `api/platform/membership.go` - user-database membership with roles
+2. Create `api/platform/membership.go` - manage org membership rows in tenant databases
 
 ### Phase 4: Schema Versioning
 1. Implement `atombase_definitions_history` population on push
@@ -585,8 +742,8 @@ Database: <type>:<name>                 # Target database
 
 ### Phase 5: Auth Context
 1. Update `api/tools/auth.go` with session-based auth context
-2. Membership role lookup from `atombase_membership`
-3. Inject access conditions into queries based on access rules
+2. Resolve org role from tenant `atombase_membership` using `auth.id`
+3. Inject access conditions into queries from cached primary policies + tenant role context
 
 ### Phase 6: Migration path
 1. CLI commands to migrate existing templates to definitions
@@ -610,7 +767,7 @@ Database: <type>:<name>                 # Target database
 - `packages/definitions/` - New package replacing template + access
 - `api/platform/definitions.go` - Unified definition CRUD
 - `api/platform/databases.go` - Database management
-- `api/platform/membership.go` - User-database membership
+- `api/platform/membership.go` - Tenant-local organization membership management
 - `api/platform/users.go` - User management
 - `api/platform/sessions.go` - Session management
 
@@ -621,7 +778,7 @@ Database: <type>:<name>                 # Target database
 2. Push via CLI - verify definition created with version in `atombase_definitions`
 3. Verify `atombase_definitions_history` has schema + access JSON
 4. Create database via API - verify entry in `atombase_databases` with `owner_id` set
-5. Add user membership with role via `atombase_membership`
+5. Add user membership with role in the organization tenant `atombase_membership`
 6. Make data requests with different roles - verify RBAC enforcement
 7. Update schema, push again - verify new version in history
 8. Access database - verify lazy migration and `definition_version` update

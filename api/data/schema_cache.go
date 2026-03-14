@@ -61,9 +61,7 @@ func loadCurrentSchemaFromDB(db *sql.DB, templateID int32) (SchemaCache, int, er
 	}
 
 	// Deserialize schema from JSON (format: {"tables": [...]})
-	var schema struct {
-		Tables []Table `json:"tables"`
-	}
+	var schema Schema
 	if err := tools.DecodeSchema(tablesData, &schema); err != nil {
 		return SchemaCache{}, 0, err
 	}
@@ -113,4 +111,3 @@ func TablesToSchemaCache(tables []Table) SchemaCache {
 
 	return cache
 }
-
