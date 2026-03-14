@@ -126,7 +126,7 @@ func GenerateMigrationPlan(oldSchema, newSchema Schema, changes []SchemaDiff, me
 		}
 	}
 
-	// Modify columns (most require mirror table)
+	// Modify columns (FK, CHECK, COLLATE, generated require mirror table)
 	for _, c := range modifyColumns {
 		oldTable := oldTables[c.Table]
 		newTable := newTables[c.Table]
@@ -137,7 +137,7 @@ func GenerateMigrationPlan(oldSchema, newSchema Schema, changes []SchemaDiff, me
 			mirrorSQL := generateMirrorTableSQL(oldTable, newTable)
 			statements = append(statements, mirrorSQL...)
 		}
-		// Type-only changes are metadata-only, no SQL needed
+		// Type-only changes don't need SQL - columns are typeless, types come from schema template
 	}
 
 	// PK type changes (always need mirror table)
@@ -294,7 +294,7 @@ func requiresMirrorTable(old, new Col) bool {
 }
 
 // generateCreateTableSQL generates CREATE TABLE statement.
-// Uses typeless columns except for PK (per design doc).
+// Non-PK columns are typeless; types are looked up from schema template at query time.
 func generateCreateTableSQL(t Table) string {
 	var cols []string
 	var fks []string
@@ -338,7 +338,7 @@ func generateColumnDef(col Col, pk []string) string {
 	var parts []string
 	parts = append(parts, "["+col.Name+"]")
 
-	// Only add type for PK columns (INTEGER PRIMARY KEY for rowid alias)
+	// Check if this column is part of the primary key
 	isPK := len(pk) == 1 && pk[0] == col.Name
 	isCompositePK := false
 	for _, p := range pk {
@@ -358,10 +358,10 @@ func generateColumnDef(col Col, pk []string) string {
 			parts = append(parts, colType, "PRIMARY KEY")
 		}
 	} else if isCompositePK && strings.ToUpper(col.Type) == "INTEGER" {
-		// Composite PK integer columns get type
+		// Composite PK integer columns need type for proper indexing
 		parts = append(parts, "INTEGER")
 	}
-	// Regular columns: no type (per design doc - typeless columns)
+	// Non-PK columns are typeless - types are looked up from schema template at query time
 
 	if col.NotNull && !isPK {
 		parts = append(parts, "NOT NULL")
@@ -420,7 +420,7 @@ func generateAddColumnSQL(table string, col Col) string {
 	var parts []string
 	parts = append(parts, "["+col.Name+"]")
 
-	// For ADD COLUMN, we don't add type (typeless columns)
+	// Non-PK columns are typeless - types are looked up from schema template at query time
 
 	if col.NotNull {
 		// NOT NULL requires a default value for existing rows

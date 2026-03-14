@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,6 +116,13 @@ func setupTenantTestDB(t *testing.T) *sql.DB {
 	return testDB
 }
 
+func initTestEncryption(t *testing.T) {
+	t.Helper()
+	if err := tools.InitEncryption(strings.Repeat("01", 32)); err != nil {
+		t.Fatalf("failed to initialize encryption: %v", err)
+	}
+}
+
 // setTestDB temporarily sets the package-level API bridge for testing.
 func setTestDB(t *testing.T, testDB *sql.DB) func() {
 	t.Helper()
@@ -163,14 +171,26 @@ func insertTestTemplate(t *testing.T, testDB *sql.DB, name string, version int) 
 }
 
 // insertTestTenant inserts a database for testing.
-func insertTestTenant(t *testing.T, testDB *sql.DB, name string, templateID int32, version int) int32 {
+func insertTestTenant(t *testing.T, testDB *sql.DB, name string, templateID int32, version int, token ...string) int32 {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	var storedToken []byte
+	if len(token) > 0 && token[0] != "" {
+		storedToken = []byte(token[0])
+		if tools.EncryptionEnabled() {
+			var err error
+			storedToken, err = tools.Encrypt([]byte(token[0]))
+			if err != nil {
+				t.Fatalf("failed to encrypt token: %v", err)
+			}
+		}
+	}
+
 	result, err := testDB.Exec(`
-		INSERT INTO `+TableDatabases+` (name, template_id, template_version, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, name, templateID, version, now, now)
+		INSERT INTO `+TableDatabases+` (name, template_id, template_version, auth_token_encrypted, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, name, templateID, version, storedToken, now, now)
 	if err != nil {
 		t.Fatalf("failed to insert database: %v", err)
 	}
@@ -388,6 +408,8 @@ func TestGetDatabasesByTemplate_Empty(t *testing.T) {
 // =============================================================================
 
 func TestGetPendingDatabases_AllPending(t *testing.T) {
+	initTestEncryption(t)
+
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -396,9 +418,9 @@ func TestGetPendingDatabases_AllPending(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	insertTestTenant(t, testDB, "database-1", templateID, 1)
-	insertTestTenant(t, testDB, "database-2", templateID, 1)
-	insertTestTenant(t, testDB, "database-3", templateID, 1)
+	insertTestTenant(t, testDB, "database-1", templateID, 1, "token-1")
+	insertTestTenant(t, testDB, "database-2", templateID, 1, "token-2")
+	insertTestTenant(t, testDB, "database-3", templateID, 1, "token-3")
 
 	pending, err := currentTestAPI.getPendingDatabases(context.Background(), migrationID, templateID, 2)
 	if err != nil {
@@ -407,6 +429,9 @@ func TestGetPendingDatabases_AllPending(t *testing.T) {
 
 	if len(pending) != 3 {
 		t.Errorf("expected 3 pending databases, got %d", len(pending))
+	}
+	if pending[0].Token != "token-1" {
+		t.Errorf("token = %q, want token-1", pending[0].Token)
 	}
 }
 
@@ -469,6 +494,8 @@ func TestGetPendingDatabases_NoPending(t *testing.T) {
 // =============================================================================
 
 func TestGetFailedDatabases_SomeFailed(t *testing.T) {
+	initTestEncryption(t)
+
 	testDB := setupTenantTestDB(t)
 	defer testDB.Close()
 	cleanup := setTestDB(t, testDB)
@@ -477,9 +504,9 @@ func TestGetFailedDatabases_SomeFailed(t *testing.T) {
 	templateID := insertTestTemplate(t, testDB, "myapp", 2)
 	migrationID := insertTestMigration(t, testDB, templateID, 1, 2)
 
-	tenant1 := insertTestTenant(t, testDB, "database-1", templateID, 1)
-	tenant2 := insertTestTenant(t, testDB, "database-2", templateID, 1)
-	tenant3 := insertTestTenant(t, testDB, "database-3", templateID, 1)
+	tenant1 := insertTestTenant(t, testDB, "database-1", templateID, 1, "token-1")
+	tenant2 := insertTestTenant(t, testDB, "database-2", templateID, 1, "token-2")
+	tenant3 := insertTestTenant(t, testDB, "database-3", templateID, 1, "token-3")
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -497,6 +524,9 @@ func TestGetFailedDatabases_SomeFailed(t *testing.T) {
 
 	if len(failed) != 2 {
 		t.Fatalf("expected 2 failed databases, got %d", len(failed))
+	}
+	if failed[0].Token == "" || failed[1].Token == "" {
+		t.Fatalf("expected failed databases to include auth tokens")
 	}
 }
 

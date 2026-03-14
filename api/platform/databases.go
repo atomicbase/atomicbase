@@ -121,11 +121,19 @@ func (api *API) getDatabaseToken(ctx context.Context, name string) (string, erro
 		return "", fmt.Errorf("database has no auth token configured")
 	}
 
-	if !tools.EncryptionEnabled() {
-		return "", fmt.Errorf("encryption not initialized")
+	return decodeStoredDatabaseToken(encryptedToken)
+}
+
+func decodeStoredDatabaseToken(storedToken []byte) (string, error) {
+	if len(storedToken) == 0 {
+		return "", fmt.Errorf("database has no auth token configured")
 	}
 
-	decrypted, err := tools.Decrypt(encryptedToken)
+	if !tools.EncryptionEnabled() {
+		return string(storedToken), nil
+	}
+
+	decrypted, err := tools.Decrypt(storedToken)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt token: %w", err)
 	}
@@ -171,10 +179,10 @@ func (api *API) createDatabase(ctx context.Context, name, templateName string) (
 		return nil, fmt.Errorf("failed to create database token: %w", err)
 	}
 
-	// Encrypt the token
-	var encryptedToken []byte
+	// Store the token, encrypted at rest when configured.
+	storedToken := []byte(token)
 	if tools.EncryptionEnabled() {
-		encryptedToken, err = tools.Encrypt([]byte(token))
+		storedToken, err = tools.Encrypt([]byte(token))
 		if err != nil {
 			_ = tursodeleteDatabase(ctx, name)
 			return nil, fmt.Errorf("failed to encrypt database token: %w", err)
@@ -209,7 +217,7 @@ func (api *API) createDatabase(ctx context.Context, name, templateName string) (
 	result, err := conn.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (name, template_id, template_version, auth_token_encrypted, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, TableDatabases), name, template.ID, template.CurrentVersion, encryptedToken, now, now)
+	`, TableDatabases), name, template.ID, template.CurrentVersion, storedToken, now, now)
 	if err != nil {
 		// Try to clean up
 		_ = tursodeleteDatabase(ctx, name)
@@ -429,7 +437,7 @@ func (api *API) getPendingDatabases(ctx context.Context, _ int64, templateID int
 	}
 
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
-		SELECT t.id, t.name, t.template_id, t.template_version, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.template_id, t.template_version, t.auth_token_encrypted, t.created_at, t.updated_at
 		FROM %s t
 		WHERE t.template_id = ?
 		  AND t.template_version < ?
@@ -443,9 +451,16 @@ func (api *API) getPendingDatabases(ctx context.Context, _ int64, templateID int
 	var databases []Database
 	for rows.Next() {
 		var t Database
+		var storedToken []byte
 		var createdAt, updatedAt string
-		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &storedToken, &createdAt, &updatedAt); err != nil {
 			return nil, err
+		}
+		if len(storedToken) > 0 {
+			t.Token, err = decodeStoredDatabaseToken(storedToken)
+			if err != nil {
+				return nil, err
+			}
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
@@ -476,7 +491,7 @@ func (api *API) getFailedDatabases(ctx context.Context, migrationID int64) ([]Da
 	}
 
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`
-		SELECT t.id, t.name, t.template_id, t.template_version, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.template_id, t.template_version, t.auth_token_encrypted, t.created_at, t.updated_at
 		FROM %s t
 		JOIN %s mf ON mf.database_id = t.id
 		WHERE t.template_id = ?
@@ -492,9 +507,16 @@ func (api *API) getFailedDatabases(ctx context.Context, migrationID int64) ([]Da
 	var databases []Database
 	for rows.Next() {
 		var t Database
+		var storedToken []byte
 		var createdAt, updatedAt string
-		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TemplateVersion, &storedToken, &createdAt, &updatedAt); err != nil {
 			return nil, err
+		}
+		if len(storedToken) > 0 {
+			t.Token, err = decodeStoredDatabaseToken(storedToken)
+			if err != nil {
+				return nil, err
+			}
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)

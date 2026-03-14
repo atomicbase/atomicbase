@@ -66,6 +66,7 @@ func (api *API) connTurso(dbName string) (Database, error) {
 	return Database{
 		Client:          client,
 		Schema:          schema,
+		Token:           meta.AuthToken,
 		Name:            dbName,
 		ID:              meta.ID,
 		TemplateID:      meta.TemplateID,
@@ -89,6 +90,10 @@ func (dao *Database) QueryMap(ctx context.Context, query string, args ...any) ([
 		return nil, err
 	}
 
+	// Build column type lookup from schema template (for tenant databases with typeless columns).
+	// Falls back to DatabaseTypeName() for primary database or unknown columns.
+	schemaTypes := dao.Schema.BuildColumnTypeMap()
+
 	count := len(columnTypes)
 	finalRows := []interface{}{}
 
@@ -97,9 +102,13 @@ func (dao *Database) QueryMap(ctx context.Context, query string, args ...any) ([
 		scanArgs := make([]interface{}, count)
 
 		for i, v := range columnTypes {
+			// Try schema type first (for typeless tenant columns), fall back to database type
+			colType := schemaTypes[v.Name()]
+			if colType == "" {
+				colType = v.DatabaseTypeName()
+			}
 
-			// doesnt use scanType to support more sqlite drivers
-			switch v.DatabaseTypeName() {
+			switch colType {
 			case "TEXT":
 				scanArgs[i] = new(sql.NullString)
 			case "INTEGER":
@@ -167,4 +176,3 @@ func (dao *Database) QueryJSON(ctx context.Context, query string, args ...any) (
 
 	return json.Marshal(&m)
 }
-

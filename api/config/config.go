@@ -132,7 +132,7 @@ func Load() Config {
 		CacheKeyPrefix:     os.Getenv("CACHE_KEY_PREFIX"),
 
 		// Startup behavior
-		InitSchema: strings.ToLower(os.Getenv("INIT_SCHEMA")) == "true",
+		InitSchema: strings.ToLower(os.Getenv("INIT_SCHEMA")) != "false",
 	}
 }
 

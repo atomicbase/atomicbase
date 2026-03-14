@@ -17,6 +17,7 @@ type API struct {
 // Database represents an external tenant database connection with cached schema.
 type Database struct {
 	Client          *sql.DB     // SQL database connection
+	Token           string      // authentication token
 	Schema          SchemaCache // Cached schema for validation
 	Name            string      // Database name (for cache updates)
 	ID              int32       // Internal tenant database ID

@@ -147,6 +147,7 @@ type TemplateVersion struct {
 type Database struct {
 	ID              int32     `json:"id"`
 	Name            string    `json:"name"`
+	Token           string    `json:"token"`
 	TemplateID      int32     `json:"templateId"`
 	TemplateVersion int       `json:"templateVersion"`
 	CreatedAt       time.Time `json:"createdAt"`

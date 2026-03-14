@@ -248,7 +248,7 @@ func TestGenerateCreateTableSQL_BasicTable(t *testing.T) {
 	if !strings.Contains(sql, "[id] INTEGER PRIMARY KEY") {
 		t.Errorf("missing INTEGER PRIMARY KEY for single PK: %s", sql)
 	}
-	// name should be typeless (per design doc)
+	// Non-PK columns should be typeless (types come from schema template at query time)
 	if strings.Contains(sql, "[name] TEXT") {
 		t.Errorf("non-PK column should be typeless: %s", sql)
 	}
@@ -369,6 +369,7 @@ func TestGenerateAddColumnSQL_Simple(t *testing.T) {
 	col := Col{Name: "email", Type: "TEXT"}
 	sql := generateAddColumnSQL("users", col)
 
+	// Non-PK columns should be typeless (types come from schema template at query time)
 	if sql != "ALTER TABLE [users] ADD COLUMN [email]" {
 		t.Errorf("sql = %s, want ALTER TABLE [users] ADD COLUMN [email]", sql)
 	}

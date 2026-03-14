@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS atombase_access_policies (
     conditions_json TEXT,
     PRIMARY KEY(definition_id, version, table_name, operation)
 );
+CREATE INDEX IF NOT EXISTS idx_access_policies_lookup
+ON atombase_access_policies(definition_id, version, operation);
 
 -- Management policies (normalized: one row per role/action)
 -- NULL or '' target_roles_json = allowed for any target, non-empty = specific target roles

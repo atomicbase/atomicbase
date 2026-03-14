@@ -103,14 +103,18 @@ func (s *Store) LookupDatabaseByName(name string) (DatabaseMeta, error) {
 		return DatabaseMeta{}, err
 	}
 
-	// Decrypt auth token
+	// Decode auth token
 	var authToken string
-	if len(authTokenEncrypted) > 0 && tools.EncryptionEnabled() {
-		decrypted, err := tools.Decrypt(authTokenEncrypted)
-		if err != nil {
-			return DatabaseMeta{}, fmt.Errorf("failed to decrypt auth token: %w", err)
+	if len(authTokenEncrypted) > 0 {
+		if tools.EncryptionEnabled() {
+			decrypted, err := tools.Decrypt(authTokenEncrypted)
+			if err != nil {
+				return DatabaseMeta{}, fmt.Errorf("failed to decrypt auth token: %w", err)
+			}
+			authToken = string(decrypted)
+		} else {
+			authToken = string(authTokenEncrypted)
 		}
-		authToken = string(decrypted)
 	}
 
 	meta := DatabaseMeta{
