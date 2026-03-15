@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -54,12 +55,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		duration := time.Since(start)
 
-		// Get client IP
-		clientIP := r.RemoteAddr
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			clientIP = strings.Split(forwarded, ",")[0]
-		}
-		clientIP = strings.TrimSpace(clientIP)
+		clientIP := clientIPFromRequest(r)
 
 		// Log the request to stdout
 		Logger.Info("request",
@@ -85,6 +81,75 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			"", // error field
 		)
 	})
+}
+
+func clientIPFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	remoteIP := remoteIPFromAddr(r.RemoteAddr)
+	if remoteIP == "" {
+		return ""
+	}
+	if !isTrustedProxy(remoteIP) {
+		return remoteIP
+	}
+	forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if forwarded == "" {
+		return remoteIP
+	}
+	parts := strings.Split(forwarded, ",")
+	for _, part := range parts {
+		candidate := strings.TrimSpace(part)
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
+	}
+	return remoteIP
+}
+
+func remoteIPFromAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		if ip := net.ParseIP(strings.TrimSpace(host)); ip != nil {
+			return ip.String()
+		}
+	}
+	if ip := net.ParseIP(addr); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+func isTrustedProxy(ip string) bool {
+	parsedIP := net.ParseIP(strings.TrimSpace(ip))
+	if parsedIP == nil {
+		return false
+	}
+	for _, cidr := range config.Cfg.TrustedProxyCIDRs {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		if !strings.Contains(cidr, "/") {
+			cidr += "/32"
+			if parsedIP.To4() == nil {
+				cidr = strings.TrimSpace(strings.TrimSuffix(cidr, "/32")) + "/128"
+			}
+		}
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(parsedIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // detectAPIType determines whether a request is for the data or platform API.

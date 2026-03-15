@@ -156,6 +156,62 @@ func TestTimeoutMiddleware_SetsDeadline(t *testing.T) {
 	}
 }
 
+func TestClientIPFromRequest(t *testing.T) {
+	originalTrusted := config.Cfg.TrustedProxyCIDRs
+	defer func() {
+		config.Cfg.TrustedProxyCIDRs = originalTrusted
+	}()
+
+	tests := []struct {
+		name         string
+		remoteAddr   string
+		forwardedFor string
+		trustedCIDRs []string
+		wantClientIP string
+	}{
+		{
+			name:         "untrusted remote ignores forwarded header",
+			remoteAddr:   "198.51.100.10:443",
+			forwardedFor: "203.0.113.4",
+			wantClientIP: "198.51.100.10",
+		},
+		{
+			name:         "trusted proxy uses first forwarded ip",
+			remoteAddr:   "10.0.0.5:443",
+			forwardedFor: "203.0.113.4, 10.0.0.5",
+			trustedCIDRs: []string{"10.0.0.0/8"},
+			wantClientIP: "203.0.113.4",
+		},
+		{
+			name:         "trusted proxy falls back when forwarded invalid",
+			remoteAddr:   "10.0.0.5:443",
+			forwardedFor: "unknown, bad",
+			trustedCIDRs: []string{"10.0.0.5"},
+			wantClientIP: "10.0.0.5",
+		},
+		{
+			name:         "bare remote ip supported",
+			remoteAddr:   "127.0.0.1",
+			wantClientIP: "127.0.0.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.Cfg.TrustedProxyCIDRs = tt.trustedCIDRs
+			req := httptest.NewRequest(http.MethodGet, "/data/query/users", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.forwardedFor != "" {
+				req.Header.Set("X-Forwarded-For", tt.forwardedFor)
+			}
+
+			if got := clientIPFromRequest(req); got != tt.wantClientIP {
+				t.Fatalf("expected client IP %q, got %q", tt.wantClientIP, got)
+			}
+		})
+	}
+}
+
 func TestAuthMiddleware(t *testing.T) {
 	originalKey := config.Cfg.APIKey
 	config.Cfg.APIKey = "secret-key"

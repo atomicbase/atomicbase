@@ -20,6 +20,7 @@ type Config struct {
 	MaxRequestBody          int64    // Maximum request body size in bytes
 	APIKey                  string   // API key for authentication (empty disables auth)
 	CORSOrigins             []string // Allowed CORS origins (empty allows none, "*" allows all)
+	TrustedProxyCIDRs       []string // Proxy CIDRs allowed to supply forwarded client IP headers
 	RequestTimeout          int      // Request timeout in seconds (0 uses default of 30s)
 	MaxQueryDepth           int      // Maximum nesting depth for queries (default 5)
 	MaxQueryLimit           int      // Maximum rows per query (default 1000, 0 = unlimited)
@@ -88,6 +89,14 @@ func Load() Config {
 		}
 	}
 
+	var trustedProxyCIDRs []string
+	if val := os.Getenv("ATOMICBASE_TRUSTED_PROXY_CIDRS"); val != "" {
+		trustedProxyCIDRs = strings.Split(val, ",")
+		for i := range trustedProxyCIDRs {
+			trustedProxyCIDRs[i] = strings.TrimSpace(trustedProxyCIDRs[i])
+		}
+	}
+
 	maxQueryDepth := 5
 	if val := os.Getenv("ATOMICBASE_MAX_QUERY_DEPTH"); val != "" {
 		if d, err := strconv.Atoi(val); err == nil && d > 0 {
@@ -119,6 +128,7 @@ func Load() Config {
 		MaxRequestBody:          1 << 20, // 1MB
 		APIKey:                  os.Getenv("ATOMICBASE_API_KEY"),
 		CORSOrigins:             corsOrigins,
+		TrustedProxyCIDRs:       trustedProxyCIDRs,
 		RequestTimeout:          requestTimeout,
 		MaxQueryDepth:           maxQueryDepth,
 		MaxQueryLimit:           maxQueryLimit,

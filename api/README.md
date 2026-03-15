@@ -55,6 +55,7 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 | `ATOMICBASE_API_KEY` | empty | Service API key for platform access |
 | `ATOMICBASE_CORS_ORIGINS` | empty | Allowed CORS origins |
 | `ATOMICBASE_MAX_ORGANIZATIONS_PER_USER` | `3` | Max orgs a session user can own (`0` disables the cap) |
+| `ATOMICBASE_TRUSTED_PROXY_CIDRS` | empty | Comma-separated proxy IPs/CIDRs allowed to supply `X-Forwarded-For` |
 
 ### Query Limits
 
