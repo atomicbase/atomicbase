@@ -1,4 +1,4 @@
-import { defineSchema, defineTable, c, sql } from "/Users/joeervin/Desktop/atomicbase/packages/template/dist/index.js";
+import { defineSchema, defineTable, c, sql } from "/Users/joeervin/Desktop/atomicbase/packages/definitions/dist/index.js";
 
 export default defineSchema("full-test-template-2382012-1772701210", {
   users: defineTable({

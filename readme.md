@@ -65,7 +65,7 @@ By default the server runs at `http://localhost:8080`.
 ### 3) Install SDK and template package
 
 ```bash
-npm install @atomicbase/sdk @atomicbase/template
+npm install @atomicbase/sdk @atomicbase/definitions
 ```
 
 ### 4) Initialize project config
@@ -77,7 +77,7 @@ npx atomicbase init
 ### 5) Define and push a schema template
 
 ```typescript
-import { defineSchema, defineTable, c } from "@atomicbase/template";
+import { defineSchema, defineTable, c } from "@atomicbase/definitions";
 
 export default defineSchema("my-app", {
   users: defineTable({

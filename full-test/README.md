@@ -2,7 +2,7 @@
 
 Deterministic simulation testing for the Atomicbase Data API.
 
-This runner provisions a fresh, complex schema template using `@atomicbase/template`, pushes it via the Atomicbase CLI, creates a dedicated test database, and then runs a seeded stateful simulation against that database.
+This runner provisions a fresh, complex schema template using `@atomicbase/definitions`, pushes it via the Atomicbase CLI, creates a dedicated test database, and then runs a seeded stateful simulation against that database.
 
 ## Why this exists
 
@@ -15,7 +15,7 @@ This runner provisions a fresh, complex schema template using `@atomicbase/templ
 Before simulation starts, `full-test` creates a temporary workspace and uses the workspace packages directly:
 
 - invokes `packages/cli` through `pnpm --filter @atomicbase/cli exec atomicbase ...`
-- generates schema files that import `@atomicbase/template`
+- generates schema files that import `@atomicbase/definitions`
 
 Then it runs:
 

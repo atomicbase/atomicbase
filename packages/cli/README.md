@@ -119,7 +119,7 @@ Define schemas in the `schemas/` directory:
 
 ```typescript
 // schemas/my-app.schema.ts
-import { defineSchema, defineTable, c } from "@atomicbase/template";
+import { defineSchema, defineTable, c } from "@atomicbase/definitions";
 
 export default defineSchema("my-app", {
   users: defineTable({

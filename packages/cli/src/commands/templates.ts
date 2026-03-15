@@ -5,7 +5,7 @@ import { resolve, dirname } from "node:path";
 import { loadConfig } from "../config.js";
 import { loadSchema, loadAllSchemas } from "../schema/parser.js";
 import { ApiClient, ApiError, type SchemaDiff, type Merge, type TemplateResponse } from "../api.js";
-import type { SchemaDefinition, ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/template";
+import type { SchemaDefinition, ColumnDefinition, ForeignKeyAction, Collation } from "@atomicbase/definitions";
 
 // =============================================================================
 // Shared Utilities
@@ -373,7 +373,8 @@ interface GeneratorColumn extends Omit<ColumnDefinition, "references" | "onDelet
  */
 function convertFromApiFormat(tables: TemplateResponse["schema"]["tables"]): GeneratorTable[] {
   return tables.map((table) => {
-    const columns: GeneratorColumn[] = Object.entries(table.columns).map(([name, col]) => {
+    const columns: GeneratorColumn[] = (Object.entries(table.columns) as [string, ColumnDefinition][])
+      .map(([name, col]) => {
       const colDef: GeneratorColumn = {
         name,
         type: col.type,
@@ -399,7 +400,7 @@ function convertFromApiFormat(tables: TemplateResponse["schema"]["tables"]): Gen
     return {
       name: table.name,
       columns,
-      indexes: (table.indexes ?? []).map((idx) => ({
+      indexes: (table.indexes ?? []).map((idx: { name: string; columns: string[]; unique?: boolean }) => ({
         name: idx.name,
         columns: idx.columns,
         unique: idx.unique,
@@ -414,7 +415,7 @@ function convertFromApiFormat(tables: TemplateResponse["schema"]["tables"]): Gen
  */
 function generateSchemaCode(name: string, tables: GeneratorTable[]): string {
   const lines: string[] = [
-    `import { defineSchema, defineTable, c, sql } from "@atomicbase/template";`,
+    `import { defineSchema, defineTable, c, sql } from "@atomicbase/definitions";`,
     ``,
     `export default defineSchema("${name}", {`,
   ];

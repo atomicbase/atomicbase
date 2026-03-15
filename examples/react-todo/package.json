@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@atomicbase/cli": "workspace:*",
-    "@atomicbase/template": "workspace:*",
+    "@atomicbase/definitions": "workspace:*",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -11,7 +11,7 @@ export default defineConfig({
 });
 `;
 
-const EXAMPLE_SCHEMA = `import { defineSchema, defineTable, c } from "@atomicbase/template";
+const EXAMPLE_SCHEMA = `import { defineSchema, defineTable, c } from "@atomicbase/definitions";
 
 export default defineSchema("my-app", {
   users: defineTable({

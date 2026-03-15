@@ -2,11 +2,11 @@
 // Schema Definition SDK
 // =============================================================================
 //
-// TypeScript-first schema definitions for Atomicbase templates.
+// TypeScript-first schema definitions for Atomicbase definitions.
 //
 // Example:
 // ```typescript
-// import { defineSchema, defineTable, c } from "@atomicbase/template";
+// import { defineSchema, defineTable, c } from "@atomicbase/definitions";
 //
 // export default defineSchema("user-app", {
 //   users: defineTable({

@@ -1,4 +1,4 @@
-import { defineSchema, defineTable, c, sql } from "@atomicbase/template";
+import { defineSchema, defineTable, c, sql } from "@atomicbase/definitions";
 
 export default defineSchema("tenant", {
   todos: defineTable({

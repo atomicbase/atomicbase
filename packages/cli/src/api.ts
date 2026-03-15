@@ -1,4 +1,4 @@
-import type { SchemaDefinition, TableDefinition, ColumnDefinition, IndexDefinition } from "@atomicbase/template";
+import type { SchemaDefinition, TableDefinition, ColumnDefinition, IndexDefinition } from "@atomicbase/definitions";
 import type { AtomicbaseConfig } from "./config.js";
 
 // Re-export types from schema package (these match Go API types directly)

@@ -14,7 +14,7 @@ There are a few core differences between the database definition types.
 
 ## Schema definitions
 
-Schema definitions are already well defined in the platform package and packages/template.
+Schema definitions are already well defined in the platform package and packages/definitions.
 
 ## Access definitions
 

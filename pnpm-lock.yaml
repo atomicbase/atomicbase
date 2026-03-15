@@ -59,9 +59,9 @@ importers:
       '@atomicbase/cli':
         specifier: workspace:*
         version: link:../../packages/cli
-      '@atomicbase/template':
+      '@atomicbase/definitions':
         specifier: workspace:*
-        version: link:../../packages/template
+        version: link:../../packages/definitions
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.1.18
@@ -92,7 +92,7 @@ importers:
 
   packages/cli:
     dependencies:
-      '@atomicbase/template':
+      '@atomicbase/definitions':
         specifier: workspace:*
         version: link:../template
       commander:
@@ -121,7 +121,7 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
-  packages/template:
+  packages/definitions:
     devDependencies:
       typescript:
         specifier: ^5.3.3
