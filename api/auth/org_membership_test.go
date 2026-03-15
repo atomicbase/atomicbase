@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -20,6 +21,86 @@ type testOrganizationStore struct {
 
 func (s testOrganizationStore) DB() *sql.DB {
 	return s.db
+}
+
+func (s testOrganizationStore) CreateOrganization(ctx context.Context, req CreateOrganizationParams) (*Organization, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	metadata := "{}"
+	if len(req.Metadata) > 0 {
+		metadata = string(req.Metadata)
+	}
+	tenantPath := filepath.Join(filepath.Dir(s.databaseID), req.ID+".db")
+	tenantDB, err := sql.Open("sqlite3", tenantPath)
+	if err != nil {
+		return nil, err
+	}
+	defer tenantDB.Close()
+	if _, err := tenantDB.Exec(`
+		CREATE TABLE atombase_membership (
+			user_id TEXT PRIMARY KEY,
+			role TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		return nil, err
+	}
+	if _, err := tenantDB.Exec(`
+		CREATE TABLE atombase_invites (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			role TEXT NOT NULL,
+			invited_by TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(email)
+		)
+	`); err != nil {
+		return nil, err
+	}
+	if _, err := tenantDB.Exec(`INSERT INTO atombase_membership (user_id, role, status, created_at) VALUES (?, 'owner', 'active', ?)`, req.OwnerID, now); err != nil {
+		return nil, err
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO atombase_databases (id, definition_id, definition_version) VALUES (?, 1, 1)`, tenantPath); err != nil {
+		return nil, err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO atombase_organizations (id, database_id, name, owner_id, max_members, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, req.ID, tenantPath, req.Name, req.OwnerID, req.MaxMembers, metadata, now, now); err != nil {
+		return nil, err
+	}
+	org := &Organization{
+		ID:        req.ID,
+		Name:      req.Name,
+		OwnerID:   req.OwnerID,
+		Metadata:  []byte(metadata),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if req.MaxMembers != nil {
+		value := *req.MaxMembers
+		org.MaxMembers = &value
+	}
+	return org, nil
+}
+
+func (s testOrganizationStore) CreateUserDatabase(ctx context.Context, req CreateUserDatabaseParams) (*UserDatabase, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	databaseID := filepath.Join(filepath.Dir(s.databaseID), req.UserID+"-user.db")
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO atombase_databases (id, definition_id, definition_version) VALUES (?, 1, 1)`, databaseID); err != nil {
+		return nil, err
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE atombase_users SET database_id = ?, updated_at = ? WHERE id = ?`, databaseID, now, req.UserID); err != nil {
+		return nil, err
+	}
+	return &UserDatabase{
+		ID:                databaseID,
+		DefinitionID:      1,
+		DefinitionName:    req.Definition,
+		DefinitionType:    "user",
+		DefinitionVersion: 1,
+	}, nil
 }
 
 func (s testOrganizationStore) LookupOrganizationTenant(ctx context.Context, organizationID string) (string, string, error) {
@@ -114,11 +195,26 @@ func setupOrganizationMembershipAPI(t *testing.T) (*API, *sql.DB, string) {
 	`); err != nil {
 		t.Fatalf("create tenant membership schema: %v", err)
 	}
+	if _, err := tenantDB.Exec(`
+		CREATE TABLE atombase_invites (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			role TEXT NOT NULL,
+			invited_by TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(email)
+		)
+	`); err != nil {
+		t.Fatalf("create tenant invite schema: %v", err)
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := db.Exec(`INSERT INTO atombase_users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+	if _, err := db.Exec(`INSERT INTO atombase_users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)`,
 		"user-owner", "owner@example.com", now, now,
 		"user-admin", "admin@example.com", now, now,
+		"user-member", "member@example.com", now, now,
+		"user-invitee", "invitee@example.com", now, now,
 	); err != nil {
 		t.Fatalf("seed users: %v", err)
 	}
@@ -247,6 +343,207 @@ func TestOrganizationMembership_HidesOrganizationExistenceFromOutsiders(t *testi
 	_, errMissing := api.listOrganizationMembers(context.Background(), outsider, "missing-org")
 	if !errors.Is(errMissing, tools.ErrUnauthorized) {
 		t.Fatalf("expected unauthorized for missing org outsider access, got %v", errMissing)
+	}
+}
+
+func TestCreateOrganization_CreatesBackedOrganizationForSessionUser(t *testing.T) {
+	api, _, _ := setupOrganizationMembershipAPI(t)
+
+	maxMembers := 25
+	org, err := api.createOrganization(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-owner", UserID: "user-owner"},
+		UserID:  "user-owner",
+	}, createOrganizationRequest{
+		ID:         "org-2",
+		Name:       "Beta",
+		Definition: "workspace",
+		MaxMembers: &maxMembers,
+		Metadata:   []byte(`{"tier":"pro"}`),
+	})
+	if err != nil {
+		t.Fatalf("create organization: %v", err)
+	}
+	if org.ID != "org-2" || org.OwnerID != "user-owner" {
+		t.Fatalf("unexpected organization: %#v", org)
+	}
+
+	got, err := api.getOrganization(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-owner", UserID: "user-owner"},
+		UserID:  "user-owner",
+	}, "org-2")
+	if err != nil {
+		t.Fatalf("get created organization: %v", err)
+	}
+	if got.Name != "Beta" {
+		t.Fatalf("expected Beta, got %s", got.Name)
+	}
+}
+
+func TestCreateOrganization_EnforcesPerUserQuotaFromConfig(t *testing.T) {
+	api, _, _ := setupOrganizationMembershipAPI(t)
+
+	previousLimit := config.Cfg.MaxOrganizationsPerUser
+	config.Cfg.MaxOrganizationsPerUser = 1
+	t.Cleanup(func() {
+		config.Cfg.MaxOrganizationsPerUser = previousLimit
+	})
+
+	_, err := api.createOrganization(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-owner", UserID: "user-owner"},
+		UserID:  "user-owner",
+	}, createOrganizationRequest{
+		ID:         "org-2",
+		Name:       "Blocked",
+		Definition: "workspace",
+	})
+	if err == nil {
+		t.Fatal("expected org quota enforcement error")
+	}
+}
+
+func TestListAndGetOrganizations_RespectMembershipVisibility(t *testing.T) {
+	api, _, _ := setupOrganizationMembershipAPI(t)
+
+	orgs, err := api.listOrganizations(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-member", UserID: "user-member"},
+		UserID:  "user-member",
+	})
+	if err != nil {
+		t.Fatalf("list organizations: %v", err)
+	}
+	if len(orgs) != 1 || orgs[0].ID != "org-1" {
+		t.Fatalf("expected org-1 visibility for member, got %#v", orgs)
+	}
+
+	if _, err := api.getOrganization(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-outsider", UserID: "user-outsider"},
+		UserID:  "user-outsider",
+	}, "org-1"); !errors.Is(err, tools.ErrUnauthorized) {
+		t.Fatalf("expected unauthorized for outsider get org, got %v", err)
+	}
+}
+
+func TestOrganizationInvites_FollowManagementAndAcceptanceFlow(t *testing.T) {
+	api, tenantDB, _ := setupOrganizationMembershipAPI(t)
+	sent := outboundEmail{}
+	oldSendEmail := sendEmailFn
+	sendEmailFn = func(_ context.Context, msg outboundEmail) error {
+		sent = msg
+		return nil
+	}
+	t.Cleanup(func() { sendEmailFn = oldSendEmail })
+
+	invite, err := api.createOrganizationInvite(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-admin", UserID: "user-admin"},
+		UserID:  "user-admin",
+	}, "org-1", createOrganizationInviteRequest{
+		Email: "invitee@example.com",
+		Role:  "member",
+	})
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	if invite.Role != "member" {
+		t.Fatalf("expected member invite role, got %s", invite.Role)
+	}
+	if sent.To != "invitee@example.com" {
+		t.Fatalf("expected invite email recipient, got %#v", sent)
+	}
+	if sent.Subject == "" {
+		t.Fatalf("expected invite email subject to be populated")
+	}
+
+	if _, err := api.createOrganizationInvite(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-admin", UserID: "user-admin"},
+		UserID:  "user-admin",
+	}, "org-1", createOrganizationInviteRequest{
+		Email: "invitee@example.com",
+		Role:  "owner",
+	}); !errors.Is(err, tools.ErrUnauthorized) {
+		t.Fatalf("expected admin owner invite to fail, got %v", err)
+	}
+
+	invites, err := api.listOrganizationInvites(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-member", UserID: "user-member"},
+		UserID:  "user-member",
+	}, "org-1")
+	if err != nil {
+		t.Fatalf("list invites: %v", err)
+	}
+	if len(invites) != 1 || invites[0].ID != invite.ID {
+		t.Fatalf("expected one invite, got %#v", invites)
+	}
+
+	member, err := api.acceptOrganizationInvite(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-invitee", UserID: "user-invitee"},
+		UserID:  "user-invitee",
+	}, "org-1", invite.ID)
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+	if member.UserID != "user-invitee" || member.Role != "member" {
+		t.Fatalf("unexpected accepted member: %#v", member)
+	}
+
+	var inviteCount int
+	if err := tenantDB.QueryRow(`SELECT COUNT(*) FROM atombase_invites WHERE id = ?`, invite.ID).Scan(&inviteCount); err != nil {
+		t.Fatalf("count invites: %v", err)
+	}
+	if inviteCount != 0 {
+		t.Fatalf("expected invite to be deleted after acceptance, got %d", inviteCount)
+	}
+}
+
+func TestOrganizationInvites_RollsBackWhenEmailDeliveryFails(t *testing.T) {
+	api, tenantDB, _ := setupOrganizationMembershipAPI(t)
+	oldSendEmail := sendEmailFn
+	sendEmailFn = func(_ context.Context, msg outboundEmail) error {
+		return errors.New("smtp unavailable")
+	}
+	t.Cleanup(func() { sendEmailFn = oldSendEmail })
+
+	_, err := api.createOrganizationInvite(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-owner", UserID: "user-owner"},
+		UserID:  "user-owner",
+	}, "org-1", createOrganizationInviteRequest{
+		Email: "rollback@example.com",
+		Role:  "member",
+	})
+	if err == nil {
+		t.Fatal("expected invite creation to fail when email delivery fails")
+	}
+
+	var count int
+	if err := tenantDB.QueryRow(`SELECT COUNT(*) FROM atombase_invites WHERE email = 'rollback@example.com'`).Scan(&count); err != nil {
+		t.Fatalf("count rollback invites: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected failed email delivery to remove invite row, got %d", count)
+	}
+}
+
+func TestOrganizationInvites_RevokeRequiresInvitePermission(t *testing.T) {
+	api, tenantDB, _ := setupOrganizationMembershipAPI(t)
+	now := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
+	if _, err := tenantDB.Exec(`
+		INSERT INTO atombase_invites (id, email, role, invited_by, expires_at, created_at)
+		VALUES ('invite-1', 'viewer@example.com', 'viewer', 'user-owner', ?, ?)
+	`, now, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed invite: %v", err)
+	}
+
+	if err := api.deleteOrganizationInvite(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-member", UserID: "user-member"},
+		UserID:  "user-member",
+	}, "org-1", "invite-1"); !errors.Is(err, tools.ErrUnauthorized) {
+		t.Fatalf("expected member revoke to fail, got %v", err)
+	}
+
+	if err := api.deleteOrganizationInvite(context.Background(), &orgActor{
+		Session: &Session{Id: "sess-admin", UserID: "user-admin"},
+		UserID:  "user-admin",
+	}, "org-1", "invite-1"); err != nil {
+		t.Fatalf("admin revoke invite: %v", err)
 	}
 }
 

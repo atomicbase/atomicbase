@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -286,6 +287,44 @@ func TestCreateDatabase_AttachesUserAndOrgMetadata(t *testing.T) {
 	}
 	if !foundOwnerSeed {
 		t.Fatal("expected org database initialization to seed owner membership")
+	}
+}
+
+func TestCreateDatabase_UserDefinitionRejectsDuplicateProvisioningBeforeSideEffects(t *testing.T) {
+	api, db := setupPlatformAPI(t)
+	defer db.Close()
+
+	_, _ = db.Exec(`INSERT INTO atombase_users (id, database_id) VALUES ('user-1', 'existing-db')`)
+	_, err := api.createDefinition(context.Background(), CreateDefinitionRequest{
+		Name: "notes",
+		Type: "user",
+		Schema: Schema{Tables: []Table{{Name: "notes", Pk: []string{"id"}, Columns: map[string]Col{
+			"id": {Name: "id", Type: "INTEGER"},
+		}}}},
+		Access: map[string]OperationPolicy{"notes": {Select: &Condition{Field: "auth.id", Op: "eq", Value: "auth.id"}}},
+	})
+	if err != nil {
+		t.Fatalf("createDefinition(user) failed: %v", err)
+	}
+
+	oldCreate := tursoCreateDatabaseFn
+	defer func() { tursoCreateDatabaseFn = oldCreate }()
+	called := false
+	tursoCreateDatabaseFn = func(ctx context.Context, name string) error {
+		called = true
+		return nil
+	}
+
+	_, err = api.createDatabase(context.Background(), CreateDatabaseRequest{
+		ID:         "notes-db",
+		Definition: "notes",
+		UserID:     "user-1",
+	})
+	if !errors.Is(err, tools.ErrDatabaseExists) {
+		t.Fatalf("expected ErrDatabaseExists, got %v", err)
+	}
+	if called {
+		t.Fatal("expected duplicate user database provisioning to fail before turso creation")
 	}
 }
 

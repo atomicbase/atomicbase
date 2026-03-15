@@ -11,6 +11,7 @@ const (
 	createUsersTable = `
 		CREATE TABLE atombase_users (
 			id TEXT PRIMARY KEY NOT NULL,
+			database_id TEXT UNIQUE,
 			email TEXT UNIQUE COLLATE NOCASE,
 			email_verified_at TEXT,
 			last_sign_in_at TEXT,
@@ -54,6 +55,10 @@ func setupAuthTestDB(t *testing.T) *sql.DB {
 			t.Fatalf("create schema: %v", err)
 		}
 	}
+
+	// Keep the in-memory primary database on a single connection so auth tests
+	// always observe the same schema and seeded rows.
+	db.SetMaxOpenConns(1)
 
 	t.Cleanup(func() {
 		_ = db.Close()

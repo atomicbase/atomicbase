@@ -26,6 +26,8 @@ type ManagementMap map[string]ManagementPolicy
 
 type OrganizationResolver interface {
 	DB() *sql.DB
+	CreateOrganization(ctx context.Context, req CreateOrganizationParams) (*Organization, error)
+	CreateUserDatabase(ctx context.Context, req CreateUserDatabaseParams) (*UserDatabase, error)
 	LookupOrganizationTenant(ctx context.Context, organizationID string) (string, string, error)
 	LookupOrganizationAuthz(ctx context.Context, organizationID string) (string, string, ManagementMap, error)
 	DeleteOrganization(ctx context.Context, organizationID string) error
@@ -54,7 +56,15 @@ func (api *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/magic-link/complete", api.handleMagicLinkComplete)
 	mux.HandleFunc("POST /auth/signout", api.handleSignout)
 	mux.HandleFunc("GET /auth/me", api.handleMe)
+	mux.HandleFunc("POST /auth/me/database", api.withBody(api.handleCreateUserDatabase))
+	mux.HandleFunc("GET /auth/orgs", api.handleListOrganizations)
+	mux.HandleFunc("POST /auth/orgs", api.withBody(api.handleCreateOrganization))
+	mux.HandleFunc("GET /auth/orgs/{orgID}", api.handleGetOrganization)
 	mux.HandleFunc("GET /auth/orgs/{orgID}/members", api.handleListOrganizationMembers)
+	mux.HandleFunc("GET /auth/orgs/{orgID}/invites", api.handleListOrganizationInvites)
+	mux.HandleFunc("POST /auth/orgs/{orgID}/invites", api.withBody(api.handleCreateOrganizationInvite))
+	mux.HandleFunc("DELETE /auth/orgs/{orgID}/invites/{inviteID}", api.handleDeleteOrganizationInvite)
+	mux.HandleFunc("POST /auth/orgs/{orgID}/invites/{inviteID}/accept", api.handleAcceptOrganizationInvite)
 	mux.HandleFunc("POST /auth/orgs/{orgID}/members", api.withBody(api.handleCreateOrganizationMember))
 	mux.HandleFunc("PATCH /auth/orgs/{orgID}/members/{userID}", api.withBody(api.handleUpdateOrganizationMember))
 	mux.HandleFunc("DELETE /auth/orgs/{orgID}/members/{userID}", api.handleDeleteOrganizationMember)

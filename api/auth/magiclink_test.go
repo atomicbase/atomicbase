@@ -140,3 +140,57 @@ func TestBeginMagicLogin_InvalidEmail(t *testing.T) {
 		t.Fatalf("expected no rows inserted for invalid email, found %d", count)
 	}
 }
+
+func TestBeginMagicLogin_SendsEmail(t *testing.T) {
+	db := setupAuthTestDB(t)
+	sent := outboundEmail{}
+	oldSendEmail := sendEmailFn
+	sendEmailFn = func(_ context.Context, msg outboundEmail) error {
+		sent = msg
+		return nil
+	}
+	t.Cleanup(func() { sendEmailFn = oldSendEmail })
+
+	if err := BeginMagicLogin("User@example.com", db, context.Background()); err != nil {
+		t.Fatalf("begin magic login: %v", err)
+	}
+
+	if sent.To != "user@example.com" {
+		t.Fatalf("expected normalized recipient, got %#v", sent)
+	}
+	if sent.Subject == "" {
+		t.Fatalf("expected subject to be set")
+	}
+	if sent.Text == "" {
+		t.Fatalf("expected email body to be set")
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM email_magic_links WHERE email = ?`, "user@example.com").Scan(&count); err != nil {
+		t.Fatalf("count magic links: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one saved magic link, found %d", count)
+	}
+}
+
+func TestBeginMagicLogin_RollsBackWhenEmailFails(t *testing.T) {
+	db := setupAuthTestDB(t)
+	oldSendEmail := sendEmailFn
+	sendEmailFn = func(_ context.Context, msg outboundEmail) error {
+		return errors.New("smtp unavailable")
+	}
+	t.Cleanup(func() { sendEmailFn = oldSendEmail })
+
+	if err := BeginMagicLogin("user@example.com", db, context.Background()); err == nil {
+		t.Fatal("expected begin magic login to fail when email delivery fails")
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM email_magic_links WHERE email = ?`, "user@example.com").Scan(&count); err != nil {
+		t.Fatalf("count magic links: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected failed email delivery to delete stored magic link, found %d", count)
+	}
+}

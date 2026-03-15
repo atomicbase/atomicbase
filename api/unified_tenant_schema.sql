@@ -59,19 +59,6 @@ CREATE TABLE IF NOT EXISTS atombase_membership (
 );
 CREATE INDEX IF NOT EXISTS idx_membership_user ON atombase_membership(user_id);
 
--- Invitations (on organizations)
-CREATE TABLE IF NOT EXISTS atombase_invitations (
-    id TEXT PRIMARY KEY NOT NULL,
-    organization_id TEXT NOT NULL REFERENCES atombase_organizations(id) ON DELETE CASCADE,
-    email TEXT NOT NULL COLLATE NOCASE,
-    role TEXT NOT NULL,
-    invited_by TEXT NOT NULL REFERENCES atombase_users(id),
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(organization_id, email)
-);
-CREATE INDEX IF NOT EXISTS idx_invitations_email ON atombase_invitations(email);
-
 -- Sessions
 CREATE TABLE IF NOT EXISTS atombase_sessions (
     id TEXT PRIMARY KEY NOT NULL,

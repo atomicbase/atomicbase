@@ -141,6 +141,12 @@ func (api *API) createDatabase(ctx context.Context, req CreateDatabaseRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if req.UserID != "" && def.Type != definitions.DefinitionTypeUser {
+		return nil, tools.InvalidRequestErr("userId is only allowed for user definitions")
+	}
+	if req.OrganizationID != "" && def.Type != definitions.DefinitionTypeOrganization {
+		return nil, tools.InvalidRequestErr("organizationId is only allowed for organization definitions")
+	}
 
 	var exists int
 	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM atombase_databases WHERE id = ?`, req.ID).Scan(&exists); err != nil {
@@ -148,6 +154,25 @@ func (api *API) createDatabase(ctx context.Context, req CreateDatabaseRequest) (
 	}
 	if exists > 0 {
 		return nil, ErrDatabaseExists
+	}
+	if def.Type == definitions.DefinitionTypeUser {
+		if req.UserID == "" {
+			return nil, tools.InvalidRequestErr("userId is required for user definitions")
+		}
+		var existingDatabaseID sql.NullString
+		if err := conn.QueryRowContext(ctx, `
+			SELECT database_id
+			FROM atombase_users
+			WHERE id = ?
+		`, req.UserID).Scan(&existingDatabaseID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, tools.InvalidRequestErr("user not found")
+			}
+			return nil, err
+		}
+		if existingDatabaseID.Valid && existingDatabaseID.String != "" {
+			return nil, tools.ErrDatabaseExists
+		}
 	}
 
 	if err := tursoCreateDatabaseFn(ctx, req.ID); err != nil {
@@ -196,6 +221,20 @@ func (api *API) createDatabase(ctx context.Context, req CreateDatabaseRequest) (
 		if req.UserID == "" {
 			return nil, tools.InvalidRequestErr("userId is required for user definitions")
 		}
+		var existingDatabaseID sql.NullString
+		if err := tx.QueryRowContext(ctx, `
+			SELECT database_id
+			FROM atombase_users
+			WHERE id = ?
+		`, req.UserID).Scan(&existingDatabaseID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, tools.InvalidRequestErr("user not found")
+			}
+			return nil, err
+		}
+		if existingDatabaseID.Valid && existingDatabaseID.String != "" {
+			return nil, tools.ErrDatabaseExists
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE atombase_users SET database_id = ?, updated_at = ? WHERE id = ?
 		`, req.ID, now, req.UserID); err != nil {
@@ -219,6 +258,15 @@ func (api *API) createDatabase(ctx context.Context, req CreateDatabaseRequest) (
 				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY(user_id)
 			);`,
+			`CREATE TABLE IF NOT EXISTS atombase_invites (
+				id TEXT PRIMARY KEY,
+				email TEXT NOT NULL,
+				role TEXT NOT NULL,
+				invited_by TEXT NOT NULL,
+				expires_at TEXT NOT NULL,
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(email)
+			);`,
 			fmt.Sprintf(
 				"INSERT OR IGNORE INTO atombase_membership (user_id, role, status) VALUES ('%s', 'owner', 'active');",
 				strings.ReplaceAll(req.OwnerID, "'", "''"),
@@ -233,6 +281,10 @@ func (api *API) createDatabase(ctx context.Context, req CreateDatabaseRequest) (
 		return nil, err
 	}
 	return api.getDatabase(ctx, req.ID)
+}
+
+func (api *API) CreateDatabase(ctx context.Context, req CreateDatabaseRequest) (*DatabaseRecord, error) {
+	return api.createDatabase(ctx, req)
 }
 
 func (api *API) deleteDatabase(ctx context.Context, id string) error {

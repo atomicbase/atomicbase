@@ -471,7 +471,7 @@ See `api/unified_tenant_schema.sql` for the full schema. Key tables:
 - `atombase_databases` — pure storage, linked to definitions
 - `atombase_users` — user accounts with optional `database_id`
 - `atombase_organizations` — identity layer on databases
-- `atombase_invitations` — pending org invites
+- tenant-local invitation tables in the organization database — pending org invites
 - `atombase_sessions` — session tokens
 
 **Tenant-local auth state (organization databases):**

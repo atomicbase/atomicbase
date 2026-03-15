@@ -44,7 +44,10 @@ func BeginMagicLogin(email string, db *sql.DB, ctx context.Context) error {
 		return err
 	}
 
-	fmt.Printf("Login URL: %s\n", buildMagicLinkURL(token))
+	if err := sendEmailFn(ctx, buildMagicLinkEmail(email, token)); err != nil {
+		_, _ = db.ExecContext(ctx, `DELETE FROM email_magic_links WHERE id = ?`, id)
+		return err
+	}
 
 	return nil
 

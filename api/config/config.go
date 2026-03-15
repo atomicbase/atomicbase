@@ -11,18 +11,20 @@ import (
 
 // Config holds all application configuration values.
 type Config struct {
-	ApiURL         string
-	Port           string   // HTTP server port (e.g., ":8080")
-	PrimaryDBName  string   // Turso database name for external primary DB (empty = use local SQLite)
-	PrimaryDBPath  string   // Path to local SQLite database file (fallback when PrimaryDBName is empty)
-	DataDir        string   // Directory for storing database files
-	MaxRequestBody int64    // Maximum request body size in bytes
-	APIKey         string   // API key for authentication (empty disables auth)
-	CORSOrigins    []string // Allowed CORS origins (empty allows none, "*" allows all)
-	RequestTimeout int      // Request timeout in seconds (0 uses default of 30s)
-	MaxQueryDepth  int      // Maximum nesting depth for queries (default 5)
-	MaxQueryLimit  int      // Maximum rows per query (default 1000, 0 = unlimited)
-	DefaultLimit   int      // Default limit when not specified (default 100, 0 = unlimited)
+	ApiURL                  string
+	AppURL                  string   // Base app URL for user-facing links (optional)
+	Port                    string   // HTTP server port (e.g., ":8080")
+	PrimaryDBName           string   // Turso database name for external primary DB (empty = use local SQLite)
+	PrimaryDBPath           string   // Path to local SQLite database file (fallback when PrimaryDBName is empty)
+	DataDir                 string   // Directory for storing database files
+	MaxRequestBody          int64    // Maximum request body size in bytes
+	APIKey                  string   // API key for authentication (empty disables auth)
+	CORSOrigins             []string // Allowed CORS origins (empty allows none, "*" allows all)
+	RequestTimeout          int      // Request timeout in seconds (0 uses default of 30s)
+	MaxQueryDepth           int      // Maximum nesting depth for queries (default 5)
+	MaxQueryLimit           int      // Maximum rows per query (default 1000, 0 = unlimited)
+	DefaultLimit            int      // Default limit when not specified (default 100, 0 = unlimited)
+	MaxOrganizationsPerUser int      // Maximum organizations a non-service user can own (0 = unlimited)
 
 	// Turso configuration (for external databases)
 	TursoOrganization  string // Turso organization name
@@ -30,6 +32,13 @@ type Config struct {
 	TursoGroup         string // Turso group name (default: "default")
 	PrimaryDBToken     string // Auth token for the primary Turso database (when using external primary)
 	TokenEncryptionKey string // 32-byte hex key for encrypting database tokens at rest
+
+	// Email delivery
+	SMTPHost     string // SMTP host for transactional email
+	SMTPPort     int    // SMTP port
+	SMTPUsername string // SMTP username
+	SMTPPassword string // SMTP password
+	SMTPFrom     string // From address for outgoing email
 
 	// Activity logging
 	ActivityLogEnabled   bool   // Whether activity logging is enabled
@@ -101,18 +110,20 @@ func Load() Config {
 	}
 
 	return Config{
-		ApiURL:         getEnv("API_URL", "http://localhost:8080"),
-		Port:           getEnv("PORT", ":8080"),
-		PrimaryDBName:  os.Getenv("PRIMARY_DB_NAME"),
-		PrimaryDBPath:  getEnv("DB_PATH", "atomicdata/primary.db"),
-		DataDir:        getEnv("DATA_DIR", "atomicdata"),
-		MaxRequestBody: 1 << 20, // 1MB
-		APIKey:         os.Getenv("ATOMICBASE_API_KEY"),
-		CORSOrigins:    corsOrigins,
-		RequestTimeout: requestTimeout,
-		MaxQueryDepth:  maxQueryDepth,
-		MaxQueryLimit:  maxQueryLimit,
-		DefaultLimit:   defaultLimit,
+		ApiURL:                  getEnv("API_URL", "http://localhost:8080"),
+		AppURL:                  strings.TrimSpace(os.Getenv("APP_URL")),
+		Port:                    getEnv("PORT", ":8080"),
+		PrimaryDBName:           os.Getenv("PRIMARY_DB_NAME"),
+		PrimaryDBPath:           getEnv("DB_PATH", "atomicdata/primary.db"),
+		DataDir:                 getEnv("DATA_DIR", "atomicdata"),
+		MaxRequestBody:          1 << 20, // 1MB
+		APIKey:                  os.Getenv("ATOMICBASE_API_KEY"),
+		CORSOrigins:             corsOrigins,
+		RequestTimeout:          requestTimeout,
+		MaxQueryDepth:           maxQueryDepth,
+		MaxQueryLimit:           maxQueryLimit,
+		DefaultLimit:            defaultLimit,
+		MaxOrganizationsPerUser: parseIntEnv("ATOMICBASE_MAX_ORGANIZATIONS_PER_USER", 3),
 
 		// Turso configuration
 		TursoOrganization:  os.Getenv("TURSO_ORGANIZATION"),
@@ -120,6 +131,12 @@ func Load() Config {
 		TursoGroup:         getEnv("TURSO_GROUP", "default"),
 		PrimaryDBToken:     os.Getenv("PRIMARY_DB_TOKEN"),
 		TokenEncryptionKey: os.Getenv("TOKEN_ENCRYPTION_KEY"),
+
+		SMTPHost:     strings.TrimSpace(os.Getenv("SMTP_HOST")),
+		SMTPPort:     parseIntEnv("SMTP_PORT", 587),
+		SMTPUsername: strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:     strings.TrimSpace(os.Getenv("SMTP_FROM")),
 
 		ActivityLogEnabled:   strings.ToLower(os.Getenv("ATOMICBASE_ACTIVITY_LOG_ENABLED")) == "true",
 		ActivityLogPath:      getEnv("ATOMICBASE_ACTIVITY_LOG_PATH", "atomicdata/logs.db"),

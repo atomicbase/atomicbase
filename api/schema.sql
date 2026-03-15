@@ -51,19 +51,6 @@ CREATE TABLE IF NOT EXISTS atombase_organizations (
 );
 CREATE INDEX IF NOT EXISTS idx_organizations_owner ON atombase_organizations(owner_id);
 
--- Invitations (organization management stays in primary; membership is tenant-local)
-CREATE TABLE IF NOT EXISTS atombase_invitations (
-    id TEXT PRIMARY KEY NOT NULL,
-    organization_id TEXT NOT NULL REFERENCES atombase_organizations(id) ON DELETE CASCADE,
-    email TEXT NOT NULL COLLATE NOCASE,
-    role TEXT NOT NULL,
-    invited_by TEXT NOT NULL REFERENCES atombase_users(id),
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(organization_id, email)
-);
-CREATE INDEX IF NOT EXISTS idx_invitations_email ON atombase_invitations(email);
-
 -- Sessions
 CREATE TABLE IF NOT EXISTS atombase_sessions (
     id TEXT PRIMARY KEY NOT NULL,

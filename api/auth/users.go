@@ -9,6 +9,7 @@ import (
 
 type User struct {
 	ID              string     `json:"id"`
+	DatabaseID      *string    `json:"databaseId,omitempty"`
 	Email           string     `json:"email"`
 	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -80,14 +81,15 @@ func FindOrCreateUser(email string, db *sql.DB, ctx context.Context) (*User, boo
 
 func GetUserByID(userID string, db *sql.DB, ctx context.Context) (*User, error) {
 	var user User
+	var databaseID sql.NullString
 	var emailVerifiedAt sql.NullString
 	var createdAt string
 
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, email_verified_at, created_at
+		`SELECT id, database_id, email, email_verified_at, created_at
 		 FROM atombase_users WHERE id = ?`,
 		userID,
-	).Scan(&user.ID, &user.Email, &emailVerifiedAt, &createdAt)
+	).Scan(&user.ID, &databaseID, &user.Email, &emailVerifiedAt, &createdAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInvalidSession
@@ -97,6 +99,10 @@ func GetUserByID(userID string, db *sql.DB, ctx context.Context) (*User, error) 
 	}
 
 	user.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	if databaseID.Valid {
+		value := databaseID.String
+		user.DatabaseID = &value
+	}
 	if emailVerifiedAt.Valid {
 		if t, err := time.Parse(time.RFC3339, emailVerifiedAt.String); err == nil {
 			user.EmailVerifiedAt = &t

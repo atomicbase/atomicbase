@@ -47,12 +47,14 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 | --- | --- | --- |
 | `PORT` | `:8080` | HTTP server port |
 | `API_URL` | `http://localhost:8080` | Base API URL |
+| `APP_URL` | empty | Optional app URL included in outbound emails |
 | `DB_PATH` | `atomicdata/primary.db` | Local primary database path |
 | `DATA_DIR` | `atomicdata` | Local data directory |
 | `INIT_SCHEMA` | `true` | Initialize the primary schema on startup |
 | `ATOMICBASE_REQUEST_TIMEOUT` | `30` | Request timeout in seconds |
 | `ATOMICBASE_API_KEY` | empty | Service API key for platform access |
 | `ATOMICBASE_CORS_ORIGINS` | empty | Allowed CORS origins |
+| `ATOMICBASE_MAX_ORGANIZATIONS_PER_USER` | `3` | Max orgs a session user can own (`0` disables the cap) |
 
 ### Query Limits
 
@@ -85,6 +87,16 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 | `ATOMICBASE_ACTIVITY_LOG_PATH` | `atomicdata/logs.db` | Activity log DB path |
 | `ATOMICBASE_ACTIVITY_LOG_RETENTION` | `30` | Activity log retention in days |
 
+### Email
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SMTP_HOST` | empty | SMTP host for auth and invitation email |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USERNAME` | empty | SMTP username |
+| `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_FROM` | empty | From address for outgoing email |
+
 ## Authentication
 
 ### Platform API
@@ -113,6 +125,12 @@ Auth routes accept:
 - `Authorization: Bearer service.<ATOMICBASE_API_KEY>` for service-scoped organization actions
 
 For session-backed callers, organization existence is only confirmed to members of that organization. Non-members get the same authorization failure for both missing and real organizations. Service auth can manage organizations directly.
+
+Organization invite creation sends an email to the invited address. If SMTP is not configured, the backend logs the email payload to stdout so local development can still exercise the flow.
+
+User database provisioning is session-backed through `POST /auth/me/database`. That route creates the caller's one allowed user database from a user definition and updates `/auth/me` to include `databaseId`.
+
+Session-backed `POST /auth/orgs` is also capped by `ATOMICBASE_MAX_ORGANIZATIONS_PER_USER`. Service auth bypasses that quota.
 
 ## Database Targeting
 
@@ -376,9 +394,11 @@ Definition type determines provisioning semantics:
 
 - `global`: shared database per definition
 - `user`: one database per user
-- `organization`: one database per organization
+- `organization`: one database per organization, managed through the auth API
 
 Organization databases get tenant-local `atombase_membership` storage created during provisioning.
+
+The platform database endpoint no longer provisions organization databases directly. Use `POST /auth/orgs` instead.
 
 ## Auth API
 
@@ -388,6 +408,9 @@ Organization databases get tenant-local `atombase_membership` storage created du
 - `GET /auth/magic-link/complete`
 - `POST /auth/signout`
 - `GET /auth/me`
+- `GET /auth/orgs`
+- `POST /auth/orgs`
+- `GET /auth/orgs/{orgID}`
 - `GET /auth/orgs/{orgID}/members`
 - `POST /auth/orgs/{orgID}/members`
 - `PATCH /auth/orgs/{orgID}/members/{userID}`
@@ -395,6 +418,31 @@ Organization databases get tenant-local `atombase_membership` storage created du
 - `PATCH /auth/orgs/{orgID}`
 - `DELETE /auth/orgs/{orgID}`
 - `POST /auth/orgs/{orgID}/transfer-ownership`
+
+### Create Organization
+
+Organization creation always provisions a backing organization database from the supplied organization definition.
+
+```bash
+curl -X POST http://localhost:8080/auth/orgs \
+  -H "Authorization: Bearer session.secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "org_123",
+    "name": "Acme",
+    "definition": "workspace",
+    "maxMembers": 250,
+    "metadata": {"region": "na"}
+  }'
+```
+
+Service callers may also provide `ownerId`. Session callers always create organizations owned by themselves.
+
+### List / Get Organizations
+
+`GET /auth/orgs` returns all organizations for service auth, and only organizations where the session user is an active member for session auth.
+
+`GET /auth/orgs/{orgID}` only confirms organization existence for service callers and active members.
 
 ### Membership Management
 

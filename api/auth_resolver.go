@@ -10,15 +10,82 @@ import (
 
 	"github.com/atombasedev/atombase/auth"
 	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/platform"
 	"github.com/atombasedev/atombase/primarystore"
 )
 
 type authResolver struct {
-	store *primarystore.Store
+	store    *primarystore.Store
+	platform *platform.API
 }
 
 func (r authResolver) DB() *sql.DB {
 	return r.store.DB()
+}
+
+func (r authResolver) CreateOrganization(ctx context.Context, req auth.CreateOrganizationParams) (*auth.Organization, error) {
+	if r.platform == nil {
+		return nil, fmt.Errorf("platform api not initialized")
+	}
+	if _, err := r.platform.CreateDatabase(ctx, platform.CreateDatabaseRequest{
+		ID:               req.ID,
+		Definition:       req.Definition,
+		OrganizationID:   req.ID,
+		OrganizationName: req.Name,
+		OwnerID:          req.OwnerID,
+		MaxMembers:       req.MaxMembers,
+	}); err != nil {
+		return nil, err
+	}
+	metadata := "{}"
+	if len(req.Metadata) > 0 {
+		metadata = string(req.Metadata)
+	}
+	now := ""
+	if err := r.store.DB().QueryRowContext(ctx, `
+		UPDATE atombase_organizations
+		SET metadata = ?
+		WHERE id = ?
+		RETURNING created_at
+	`, metadata, req.ID).Scan(&now); err != nil {
+		return nil, err
+	}
+
+	org := &auth.Organization{
+		ID:        req.ID,
+		Name:      req.Name,
+		OwnerID:   req.OwnerID,
+		Metadata:  []byte(metadata),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if req.MaxMembers != nil {
+		value := *req.MaxMembers
+		org.MaxMembers = &value
+	}
+	return org, nil
+}
+
+func (r authResolver) CreateUserDatabase(ctx context.Context, req auth.CreateUserDatabaseParams) (*auth.UserDatabase, error) {
+	if r.platform == nil {
+		return nil, fmt.Errorf("platform api not initialized")
+	}
+	databaseID := "userdb-" + strings.ToLower(strings.ReplaceAll(auth.ID128(), "_", "a"))
+	record, err := r.platform.CreateDatabase(ctx, platform.CreateDatabaseRequest{
+		ID:         databaseID,
+		Definition: req.Definition,
+		UserID:     req.UserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &auth.UserDatabase{
+		ID:                record.ID,
+		DefinitionID:      record.DefinitionID,
+		DefinitionName:    record.DefinitionName,
+		DefinitionType:    record.DefinitionType,
+		DefinitionVersion: record.DefinitionVersion,
+	}, nil
 }
 
 func (r authResolver) LookupOrganizationTenant(ctx context.Context, organizationID string) (string, string, error) {

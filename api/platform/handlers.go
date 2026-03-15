@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 
+	"github.com/atombasedev/atombase/definitions"
 	"github.com/atombasedev/atombase/tools"
 )
 
@@ -167,6 +168,15 @@ func (api *API) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Definition == "" {
 		tools.RespErr(w, tools.InvalidRequestErr("definition is required"))
+		return
+	}
+	def, err := api.getDefinition(r.Context(), req.Definition)
+	if err != nil {
+		tools.RespErr(w, err)
+		return
+	}
+	if def.Type == definitions.DefinitionTypeOrganization {
+		tools.RespErr(w, tools.InvalidRequestErr("organization databases must be managed through the auth API"))
 		return
 	}
 	item, err := api.createDatabase(r.Context(), req)
