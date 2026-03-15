@@ -236,7 +236,14 @@ func TestCreateDatabase_AttachesUserAndOrgMetadata(t *testing.T) {
 	tursoCreateDatabaseFn = func(ctx context.Context, name string) error { return nil }
 	tursoDeleteDatabaseFn = func(ctx context.Context, name string) error { return nil }
 	tursoCreateTokenFn = func(ctx context.Context, name string) (string, error) { return "token", nil }
-	batchExecuteWithTokenFn = func(ctx context.Context, dbName, token string, statements []string) error { return nil }
+	var executed map[string][]string
+	batchExecuteWithTokenFn = func(ctx context.Context, dbName, token string, statements []string) error {
+		if executed == nil {
+			executed = map[string][]string{}
+		}
+		executed[dbName] = append([]string{}, statements...)
+		return nil
+	}
 
 	userDB, err := api.createDatabase(context.Background(), CreateDatabaseRequest{
 		ID:         "notes-db",
@@ -262,6 +269,16 @@ func TestCreateDatabase_AttachesUserAndOrgMetadata(t *testing.T) {
 	}
 	if orgDB.OrganizationID != "org-1" {
 		t.Fatalf("expected org id org-1, got %s", orgDB.OrganizationID)
+	}
+	foundOwnerSeed := false
+	for _, stmt := range executed["workspace-db"] {
+		if strings.Contains(stmt, "INSERT OR IGNORE INTO atombase_membership") && strings.Contains(stmt, "'user-1'") && strings.Contains(stmt, "'owner'") {
+			foundOwnerSeed = true
+			break
+		}
+	}
+	if !foundOwnerSeed {
+		t.Fatal("expected org database initialization to seed owner membership")
 	}
 }
 

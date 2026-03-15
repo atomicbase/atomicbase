@@ -101,6 +101,45 @@ func (s *Store) LookupDatabaseByName(name string) (DatabaseMeta, error) {
 	return s.LookupDatabaseByID(name)
 }
 
+func (s *Store) LookupOrganizationDatabase(ctx context.Context, organizationID string) (DatabaseMeta, error) {
+	if s == nil || s.conn == nil {
+		return DatabaseMeta{}, errors.New("primary store not initialized")
+	}
+
+	row := s.conn.QueryRowContext(ctx, `
+		SELECT d.id, d.definition_id, def.definition_type, d.definition_version, d.auth_token_encrypted
+		FROM atombase_organizations o
+		JOIN atombase_databases d ON d.id = o.database_id
+		JOIN atombase_definitions def ON def.id = d.definition_id
+		WHERE o.id = ? AND def.definition_type = 'organization'
+	`, organizationID)
+
+	var meta DatabaseMeta
+	var defType string
+	var encrypted []byte
+	if err := row.Scan(&meta.ID, &meta.DefinitionID, &defType, &meta.DefinitionVersion, &encrypted); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DatabaseMeta{}, tools.ErrDatabaseNotFound
+		}
+		return DatabaseMeta{}, err
+	}
+	meta.DefinitionType = definitions.DefinitionType(defType)
+	token, err := decodeStoredDatabaseToken(encrypted)
+	if err != nil {
+		return DatabaseMeta{}, err
+	}
+	meta.AuthToken = token
+	return meta, nil
+}
+
+func (s *Store) LookupOrganizationTenant(ctx context.Context, organizationID string) (string, string, error) {
+	meta, err := s.LookupOrganizationDatabase(ctx, organizationID)
+	if err != nil {
+		return "", "", err
+	}
+	return meta.ID, meta.AuthToken, nil
+}
+
 func decodeStoredDatabaseToken(storedToken []byte) (string, error) {
 	if len(storedToken) == 0 {
 		return "", nil

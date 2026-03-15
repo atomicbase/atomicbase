@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/atombasedev/atombase/definitions"
@@ -218,6 +219,10 @@ func (api *API) createDatabase(ctx context.Context, req CreateDatabaseRequest) (
 				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY(user_id)
 			);`,
+			fmt.Sprintf(
+				"INSERT OR IGNORE INTO atombase_membership (user_id, role, status) VALUES ('%s', 'owner', 'active');",
+				strings.ReplaceAll(req.OwnerID, "'", "''"),
+			),
 		}
 		if err := batchExecuteWithTokenFn(ctx, req.ID, token, membershipSQL); err != nil {
 			return nil, fmt.Errorf("failed to initialize organization membership table: %w", err)

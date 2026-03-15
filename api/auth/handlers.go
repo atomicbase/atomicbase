@@ -1,20 +1,28 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 
-	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/tools"
 )
 
-type API struct {
-	db *sql.DB
+type organizationStore interface {
+	DB() *sql.DB
+	LookupOrganizationTenant(ctx context.Context, organizationID string) (string, string, error)
 }
 
-func NewAPI(db *sql.DB) *API {
-	return &API{db: db}
+type API struct {
+	db    *sql.DB
+	store organizationStore
+}
+
+func NewAPI(store organizationStore) *API {
+	if store == nil {
+		return &API{}
+	}
+	return &API{db: store.DB(), store: store}
 }
 
 func (api *API) RegisterRoutes(mux *http.ServeMux) {
@@ -22,11 +30,15 @@ func (api *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/magic-link/complete", api.handleMagicLinkComplete)
 	mux.HandleFunc("POST /auth/signout", api.handleSignout)
 	mux.HandleFunc("GET /auth/me", api.handleMe)
+	mux.HandleFunc("GET /auth/orgs/{orgID}/members", api.handleListOrganizationMembers)
+	mux.HandleFunc("POST /auth/orgs/{orgID}/members", api.withBody(api.handleCreateOrganizationMember))
+	mux.HandleFunc("PATCH /auth/orgs/{orgID}/members/{userID}", api.withBody(api.handleUpdateOrganizationMember))
+	mux.HandleFunc("DELETE /auth/orgs/{orgID}/members/{userID}", api.handleDeleteOrganizationMember)
 }
 
 func (api *API) withBody(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, config.Cfg.MaxRequestBody)
+		tools.LimitBody(w, r)
 		defer r.Body.Close()
 		handler(w, r)
 	}
@@ -37,7 +49,7 @@ func (api *API) handleMagicLinkStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := tools.DecodeJSON(r.Body, &req); err != nil {
 		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
@@ -51,7 +63,7 @@ func (api *API) handleMagicLinkStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{
+	tools.RespondJSON(w, http.StatusOK, map[string]string{
 		"message": "magic link sent",
 	})
 }
@@ -74,7 +86,7 @@ func (api *API) handleMagicLinkComplete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{
+	tools.RespondJSON(w, http.StatusOK, map[string]any{
 		"user":       user,
 		"token":      session.Token(),
 		"expires_at": session.ExpiresAt,
@@ -112,7 +124,7 @@ func (api *API) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, user)
+	tools.RespondJSON(w, http.StatusOK, user)
 }
 
 // Extract and validate session from auth context
@@ -122,10 +134,4 @@ func (api *API) getSession(r *http.Request) (*Session, error) {
 		return nil, ErrInvalidSession
 	}
 	return ValidateSession(SessionToken(auth.Token), api.db, r.Context())
-}
-
-func respondJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
 }

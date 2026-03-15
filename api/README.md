@@ -407,7 +407,7 @@ api/
 
 - batch support still exists but is not the long-term preferred API
 - migration validation does not yet seed local probe databases with representative data
-- organization membership management APIs are not built yet
+- auth API endpoints manage tenant-local organization membership at `/auth/orgs/{orgID}/members`
 - SQLite constraints still apply for write concurrency and some schema changes
 
 ## Operational Notes

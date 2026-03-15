@@ -219,7 +219,7 @@ func main() {
 		log.Fatalf("Failed to initialize platform database: %v", err)
 	}
 
-	authAPI := auth.NewAPI(primaryDB)
+	authAPI := auth.NewAPI(primaryStore)
 
 	app := http.NewServeMux()
 
