@@ -164,7 +164,7 @@ func TestLimitBody_EnforcesMaxRequestBody(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/platform/templates", strings.NewReader("123456789"))
+	req := httptest.NewRequest(http.MethodPost, "/platform/definitions", strings.NewReader("123456789"))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

@@ -17,7 +17,7 @@ func TestDetectAPIType(t *testing.T) {
 		path string
 		want string
 	}{
-		{path: "/platform/templates", want: "platform"},
+		{path: "/platform/definitions", want: "platform"},
 		{path: "/data/query/users", want: "data"},
 		{path: "/docs", want: "other"},
 	}
@@ -174,27 +174,27 @@ func TestAuthMiddleware(t *testing.T) {
 	}{
 		{
 			name:         "platform requires auth",
-			path:         "/platform/templates",
+			path:         "/platform/definitions",
 			wantStatus:   http.StatusUnauthorized,
 			wantBodyCode: "UNAUTHORIZED",
 		},
 		{
 			name:         "platform invalid format",
-			path:         "/platform/templates",
+			path:         "/platform/definitions",
 			authHeader:   "Token abc",
 			wantStatus:   http.StatusUnauthorized,
 			wantBodyCode: "UNAUTHORIZED",
 		},
 		{
 			name:         "platform wrong service key",
-			path:         "/platform/templates",
+			path:         "/platform/definitions",
 			authHeader:   "Bearer service.wrong",
 			wantStatus:   http.StatusUnauthorized,
 			wantBodyCode: "UNAUTHORIZED",
 		},
 		{
 			name:       "platform valid service key",
-			path:       "/platform/templates",
+			path:       "/platform/definitions",
 			authHeader: "Bearer service.secret-key",
 			wantStatus: http.StatusNoContent,
 			wantRole:   RoleService,
