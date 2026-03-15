@@ -9,6 +9,7 @@ import (
 
 	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/primarystore"
+	"github.com/atombasedev/atombase/tools"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
@@ -77,94 +78,20 @@ func (api *API) connTurso(dbName string) (TenantConnection, error) {
 }
 
 // QueryMap executes a query and returns results as a slice of maps.
-func (dao *TenantConnection) QueryMap(ctx context.Context, query string, args ...any) ([]interface{}, error) {
+func (dao *TenantConnection) QueryMap(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
 	rows, err := dao.Client.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	columnTypes, err := rows.ColumnTypes()
-
-	if err != nil {
-		return nil, err
-	}
-
 	// Build column type lookup from schema template (for tenant databases with typeless columns).
 	// Falls back to DatabaseTypeName() for primary database or unknown columns.
 	schemaTypes := dao.Schema.BuildColumnTypeMap()
 
-	count := len(columnTypes)
-	finalRows := []interface{}{}
-
-	for rows.Next() {
-
-		scanArgs := make([]interface{}, count)
-
-		for i, v := range columnTypes {
-			// Try schema type first (for typeless tenant columns), fall back to database type
-			colType := schemaTypes[v.Name()]
-			if colType == "" {
-				colType = v.DatabaseTypeName()
-			}
-
-			switch colType {
-			case "TEXT":
-				scanArgs[i] = new(sql.NullString)
-			case "INTEGER":
-				scanArgs[i] = new(sql.NullInt64)
-			case "REAL":
-				scanArgs[i] = new(sql.NullFloat64)
-			case "BLOB":
-				scanArgs[i] = new(sql.RawBytes)
-			default:
-				scanArgs[i] = new(sql.NullString)
-			}
-		}
-
-		err := rows.Scan(scanArgs...)
-
-		if err != nil {
-			return nil, err
-		}
-
-		masterData := map[string]interface{}{}
-
-		for i, v := range columnTypes {
-			if z, ok := (scanArgs[i]).(*sql.NullString); ok {
-				if z.Valid {
-					masterData[v.Name()] = z.String
-				} else {
-					masterData[v.Name()] = nil
-				}
-				continue
-			}
-
-			if z, ok := (scanArgs[i]).(*sql.NullInt64); ok {
-				if z.Valid {
-					masterData[v.Name()] = z.Int64
-				} else {
-					masterData[v.Name()] = nil
-				}
-				continue
-			}
-
-			if z, ok := (scanArgs[i]).(*sql.NullFloat64); ok {
-				if z.Valid {
-					masterData[v.Name()] = z.Float64
-				} else {
-					masterData[v.Name()] = nil
-				}
-				continue
-			}
-
-			masterData[v.Name()] = scanArgs[i]
-		}
-
-		finalRows = append(finalRows, masterData)
-	}
-
-	return finalRows, nil
+	return tools.ScanRowsTyped(rows, func(columnType *sql.ColumnType) string {
+		return schemaTypes[columnType.Name()]
+	})
 }
 
 // QueryJSON executes a query and returns results as JSON bytes.
@@ -174,5 +101,5 @@ func (dao *TenantConnection) QueryJSON(ctx context.Context, query string, args .
 		return nil, err
 	}
 
-	return json.Marshal(&m)
+	return json.Marshal(m)
 }

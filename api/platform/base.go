@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/atombasedev/atombase/primarystore"
+	"github.com/atombasedev/atombase/tools"
 )
 
 // API is the Platform API module with injected dependencies.
@@ -51,31 +52,8 @@ func (api *API) queryJSON(ctx context.Context, query string, args ...any) ([]byt
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
+	results, err := tools.ScanRows(rows)
 	if err != nil {
-		return nil, err
-	}
-
-	var results []map[string]any
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, err
-		}
-
-		row := make(map[string]any)
-		for i, col := range columns {
-			row[col] = values[i]
-		}
-		results = append(results, row)
-	}
-
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 

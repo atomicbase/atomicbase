@@ -477,32 +477,8 @@ func (dao *TenantConnection) queryJSONWithExec(ctx context.Context, exec Executo
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
+	results, err := tools.ScanRows(rows)
 	if err != nil {
-		return nil, err
-	}
-
-	var results []map[string]any
-
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, err
-		}
-
-		row := make(map[string]any)
-		for i, col := range columns {
-			row[col] = values[i]
-		}
-		results = append(results, row)
-	}
-
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
