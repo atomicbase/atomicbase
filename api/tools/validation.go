@@ -9,6 +9,7 @@ import (
 // Constants for identifier validation.
 const (
 	MaxIdentifierLength = 128
+	MaxResourceNameLen  = 64
 )
 
 // ValidateIdentifier validates a table or column name.
@@ -50,6 +51,26 @@ func ValidateColumnName(name string) error {
 		return fmt.Errorf("invalid column name %q: %w", name, err)
 	}
 	return nil
+}
+
+// ValidateResourceName validates platform resource names such as template and database names.
+// Valid names are 1-64 chars and may contain only lowercase letters, numbers, and dashes.
+func ValidateResourceName(name string) (code, message, hint string) {
+	const baseHint = "Names must be 1-64 characters, containing only lowercase letters, numbers, and dashes."
+
+	if len(name) == 0 {
+		return CodeInvalidName, "name cannot be empty", baseHint
+	}
+	if len(name) > MaxResourceNameLen {
+		return CodeInvalidName, "name exceeds maximum length of 64 characters", baseHint
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return CodeInvalidName, "name contains invalid characters",
+				"Names must contain only lowercase letters, numbers, and dashes."
+		}
+	}
+	return "", "", ""
 }
 
 // ValidateDDLQuery validates that a SQL query is a DDL statement.

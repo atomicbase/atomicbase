@@ -12,24 +12,6 @@ import (
 	"github.com/atombasedev/atombase/tools"
 )
 
-func validateResourceName(name string) (code, message, hint string) {
-	if len(name) == 0 {
-		return tools.CodeInvalidName, "name cannot be empty",
-			"Names must be 1-64 characters, containing only lowercase letters, numbers, and dashes."
-	}
-	if len(name) > 64 {
-		return tools.CodeInvalidName, "name exceeds maximum length of 64 characters",
-			"Names must be 1-64 characters, containing only lowercase letters, numbers, and dashes."
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
-			return tools.CodeInvalidName, "name contains invalid characters",
-				"Names must contain only lowercase letters, numbers, and dashes."
-		}
-	}
-	return "", "", ""
-}
-
 // encodeSchemaForStorage encodes schema for database storage.
 func encodeSchemaForStorage(schema Schema) ([]byte, error) {
 	return tools.EncodeSchema(schema)
@@ -99,7 +81,7 @@ func (api *API) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if code, msg, _ := validateResourceName(req.Name); code != "" {
+	if code, msg, _ := tools.ValidateResourceName(req.Name); code != "" {
 		tools.RespErr(w, tools.InvalidRequestErr(msg))
 		return
 	}
@@ -372,7 +354,7 @@ func (api *API) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if code, msg, _ := validateResourceName(req.Name); code != "" {
+	if code, msg, _ := tools.ValidateResourceName(req.Name); code != "" {
 		tools.RespErr(w, tools.InvalidRequestErr(msg))
 		return
 	}

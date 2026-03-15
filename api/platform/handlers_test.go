@@ -50,20 +50,20 @@ func TestValidateResourceName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			code, msg, hint := validateResourceName(tt.input)
+			code, msg, hint := tools.ValidateResourceName(tt.input)
 			if tt.wantValid {
 				if code != "" {
-					t.Errorf("validateResourceName(%q) = (%q, %q, %q), want valid", tt.input, code, msg, hint)
+					t.Errorf("ValidateResourceName(%q) = (%q, %q, %q), want valid", tt.input, code, msg, hint)
 				}
 			} else {
 				if code != tt.wantCode {
-					t.Errorf("validateResourceName(%q) code = %q, want %q", tt.input, code, tt.wantCode)
+					t.Errorf("ValidateResourceName(%q) code = %q, want %q", tt.input, code, tt.wantCode)
 				}
 				if msg == "" {
-					t.Errorf("validateResourceName(%q) message should not be empty for invalid input", tt.input)
+					t.Errorf("ValidateResourceName(%q) message should not be empty for invalid input", tt.input)
 				}
 				if hint == "" {
-					t.Errorf("validateResourceName(%q) hint should not be empty for invalid input", tt.input)
+					t.Errorf("ValidateResourceName(%q) hint should not be empty for invalid input", tt.input)
 				}
 			}
 		})
