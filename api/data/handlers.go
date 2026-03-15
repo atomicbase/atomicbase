@@ -3,7 +3,6 @@ package data
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,10 +14,10 @@ import (
 // var openapiSpec []byte
 
 // DbHandler is a handler that operates on a tenant connection.
-type DbHandler func(ctx context.Context, db *TenantConnection, req *http.Request) ([]byte, error)
+type DbHandler func(ctx context.Context, db *TenantConnection, req *http.Request) (any, error)
 
 // DbResponseHandler is a handler that needs access to the ResponseWriter.
-type DbResponseHandler func(ctx context.Context, db *TenantConnection, req *http.Request, w http.ResponseWriter) ([]byte, error)
+type DbResponseHandler func(ctx context.Context, db *TenantConnection, req *http.Request, w http.ResponseWriter) (any, error)
 
 // RegisterRoutes registers all Data API routes on the provided ServeMux.
 // All routes are prefixed with /data.
@@ -61,9 +60,9 @@ func (api *API) withDB(handler DbHandler) http.HandlerFunc {
 		}
 
 		if data != nil {
-			wr.Header().Set("Content-Type", "application/json")
+			tools.RespondJSON(wr, http.StatusOK, data)
+			return
 		}
-		wr.Write(data)
 	}
 }
 
@@ -96,9 +95,9 @@ func (api *API) withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 		}
 
 		if data != nil {
-			wr.Header().Set("Content-Type", "application/json")
+			tools.RespondJSON(wr, http.StatusOK, data)
+			return
 		}
-		wr.Write(data)
 	}
 }
 
@@ -121,7 +120,7 @@ func (api *API) connDb(req *http.Request) (TenantConnection, bool, error) {
 
 // handleBatch handles POST /data/batch for atomic multi-operation requests.
 func (api *API) handleBatch() http.HandlerFunc {
-	return api.withDB(func(ctx context.Context, dao *TenantConnection, req *http.Request) ([]byte, error) {
+	return api.withDB(func(ctx context.Context, dao *TenantConnection, req *http.Request) (any, error) {
 		var batchReq BatchRequest
 		if err := tools.DecodeJSON(req.Body, &batchReq); err != nil {
 			return nil, err
@@ -130,13 +129,13 @@ func (api *API) handleBatch() http.HandlerFunc {
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(result)
+		return result, nil
 	})
 }
 
 // handleQueryRows handles POST /data/query/{table} for SELECT, INSERT, UPDATE, and DELETE operations.
 func (api *API) handleQueryRows() http.HandlerFunc {
-	return api.withDBResponse(func(ctx context.Context, dao *TenantConnection, req *http.Request, w http.ResponseWriter) ([]byte, error) {
+	return api.withDBResponse(func(ctx context.Context, dao *TenantConnection, req *http.Request, w http.ResponseWriter) (any, error) {
 		table := req.PathValue("table")
 
 		operation, onConflict, countExact := parsePreferHeaders(req)
@@ -158,7 +157,11 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 					w.Header().Set("X-Total-Count", strconv.FormatInt(result.Count, 10))
 				}
 
-				return result.Data, nil
+				var payload any
+				if err := decodeJSONPayload(result.Data, &payload); err != nil {
+					return nil, err
+				}
+				return payload, nil
 			}
 		case "insert":
 			{
@@ -167,21 +170,21 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 					if err := tools.DecodeJSON(req.Body, &insertReq); err != nil {
 						return nil, err
 					}
-					return dao.InsertJSON(ctx, table, insertReq)
+					return decodeResultPayload(dao.InsertJSON(ctx, table, insertReq))
 				}
 				if onConflict == "replace" {
 					var upsertReq UpsertRequest
 					if err := tools.DecodeJSON(req.Body, &upsertReq); err != nil {
 						return nil, err
 					}
-					return dao.UpsertJSON(ctx, table, upsertReq)
+					return decodeResultPayload(dao.UpsertJSON(ctx, table, upsertReq))
 				}
 				if onConflict == "ignore" {
 					var ignoreReq InsertRequest
 					if err := tools.DecodeJSON(req.Body, &ignoreReq); err != nil {
 						return nil, err
 					}
-					return dao.InsertIgnoreJSON(ctx, table, ignoreReq)
+					return decodeResultPayload(dao.InsertIgnoreJSON(ctx, table, ignoreReq))
 				}
 				return nil, tools.ErrInvalidOnConflict
 			}
@@ -191,7 +194,7 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 				if err := tools.DecodeJSON(req.Body, &updateReq); err != nil {
 					return nil, err
 				}
-				return dao.UpdateJSON(ctx, table, updateReq)
+				return decodeResultPayload(dao.UpdateJSON(ctx, table, updateReq))
 			}
 		case "delete":
 			{
@@ -199,12 +202,27 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 				if err := tools.DecodeJSON(req.Body, &deleteReq); err != nil {
 					return nil, err
 				}
-				return dao.DeleteJSON(ctx, table, deleteReq)
+				return decodeResultPayload(dao.DeleteJSON(ctx, table, deleteReq))
 			}
 		}
 
 		return nil, tools.ErrMissingOperation
 	})
+}
+
+func decodeResultPayload(data []byte, err error) (any, error) {
+	if err != nil {
+		return nil, err
+	}
+	var payload any
+	if err := decodeJSONPayload(data, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func decodeJSONPayload(data []byte, target any) error {
+	return tools.DecodeJSON(strings.NewReader(string(data)), target)
 }
 
 // func handleOpenAPISpec() http.HandlerFunc {
