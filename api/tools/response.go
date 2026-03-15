@@ -14,10 +14,14 @@ const MaxBatchOperations = 100
 // RespErr writes a structured error response to the ResponseWriter.
 func RespErr(w http.ResponseWriter, err error) {
 	status, apiErr := BuildAPIError(err)
+	RespondJSON(w, status, apiErr)
+}
 
+// RespondJSON writes a JSON response with the given status code.
+func RespondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(apiErr)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 // BuildAPIError maps an error to an HTTP status code and structured APIError.

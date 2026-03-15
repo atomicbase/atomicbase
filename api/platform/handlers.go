@@ -9,18 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/tools"
 )
-
-// withBody wraps handlers that read request bodies to enforce size limits.
-func withBody(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, config.Cfg.MaxRequestBody)
-		defer r.Body.Close()
-		handler(w, r)
-	}
-}
 
 func validateResourceName(name string) (code, message, hint string) {
 	if len(name) == 0 {
@@ -50,16 +40,16 @@ func (api *API) RegisterRoutes(mux *http.ServeMux) {
 	// Templates
 	mux.HandleFunc("GET /platform/templates", api.handleListTemplates)
 	mux.HandleFunc("GET /platform/templates/{name}", api.handleGetTemplate)
-	mux.HandleFunc("POST /platform/templates", withBody(api.handleCreateTemplate))
+	mux.HandleFunc("POST /platform/templates", api.handleCreateTemplate)
 	mux.HandleFunc("DELETE /platform/templates/{name}", api.handleDeleteTemplate)
-	mux.HandleFunc("POST /platform/templates/{name}/diff", withBody(api.handleDiffTemplate))
-	mux.HandleFunc("POST /platform/templates/{name}/migrate", withBody(api.handleMigrateTemplate))
+	mux.HandleFunc("POST /platform/templates/{name}/diff", api.handleDiffTemplate)
+	mux.HandleFunc("POST /platform/templates/{name}/migrate", api.handleMigrateTemplate)
 	mux.HandleFunc("GET /platform/templates/{name}/history", api.handleGetTemplateHistory)
 
 	// Databases
 	mux.HandleFunc("GET /platform/databases", api.handleListDatabases)
 	mux.HandleFunc("GET /platform/databases/{name}", api.handleGetDatabase)
-	mux.HandleFunc("POST /platform/databases", withBody(api.handleCreateDatabase))
+	mux.HandleFunc("POST /platform/databases", api.handleCreateDatabase)
 	mux.HandleFunc("DELETE /platform/databases/{name}", api.handleDeleteDatabase)
 	mux.HandleFunc("POST /platform/databases/{name}/sync", api.handleSyncDatabase)
 
@@ -76,7 +66,7 @@ func (api *API) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, templates)
+	tools.RespondJSON(w, http.StatusOK, templates)
 }
 
 func (api *API) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
@@ -92,12 +82,14 @@ func (api *API) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, template)
+	tools.RespondJSON(w, http.StatusOK, template)
 }
 
 func (api *API) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	var req CreateTemplateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	tools.LimitBody(w, r)
+	defer r.Body.Close()
+	if err := tools.DecodeJSON(r.Body, &req); err != nil {
 		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
@@ -123,7 +115,7 @@ func (api *API) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusCreated, template)
+	tools.RespondJSON(w, http.StatusCreated, template)
 }
 
 func (api *API) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +142,9 @@ func (api *API) handleDiffTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req DiffRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	tools.LimitBody(w, r)
+	defer r.Body.Close()
+	if err := tools.DecodeJSON(r.Body, &req); err != nil {
 		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
@@ -161,7 +155,7 @@ func (api *API) handleDiffTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, result)
+	tools.RespondJSON(w, http.StatusOK, result)
 }
 
 func (api *API) handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +166,9 @@ func (api *API) handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req MigrateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	tools.LimitBody(w, r)
+	defer r.Body.Close()
+	if err := tools.DecodeJSON(r.Body, &req); err != nil {
 		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
@@ -248,7 +244,7 @@ func (api *API) handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 		err = BatchExecuteWithToken(execCtx, databases[0].Name, token, plan.SQL)
 		cancel()
 		if err != nil {
-			respondJSON(w, http.StatusBadRequest, tools.APIError{
+			tools.RespondJSON(w, http.StatusBadRequest, tools.APIError{
 				Code:    "MIGRATION_FAILED",
 				Message: fmt.Sprintf("Migration failed on test database '%s': %v", databases[0].Name, err),
 				Hint:    "Fix the schema and try again. No databases were modified.",
@@ -308,7 +304,7 @@ func (api *API) handleMigrateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	tools.InvalidateTemplate(template.ID)
 
-	respondJSON(w, http.StatusOK, MigrateResponse{
+	tools.RespondJSON(w, http.StatusOK, MigrateResponse{
 		TemplateID:     template.ID,
 		CurrentVersion: newVersion,
 		DatabasesTotal: len(databases),
@@ -329,7 +325,7 @@ func (api *API) handleGetTemplateHistory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, history)
+	tools.RespondJSON(w, http.StatusOK, history)
 }
 
 // =============================================================================
@@ -343,7 +339,7 @@ func (api *API) handleListDatabases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, databases)
+	tools.RespondJSON(w, http.StatusOK, databases)
 }
 
 func (api *API) handleGetDatabase(w http.ResponseWriter, r *http.Request) {
@@ -359,12 +355,14 @@ func (api *API) handleGetDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, database)
+	tools.RespondJSON(w, http.StatusOK, database)
 }
 
 func (api *API) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 	var req CreateDatabaseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	tools.LimitBody(w, r)
+	defer r.Body.Close()
+	if err := tools.DecodeJSON(r.Body, &req); err != nil {
 		tools.RespErr(w, tools.ErrInvalidJSON)
 		return
 	}
@@ -390,7 +388,7 @@ func (api *API) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusCreated, database)
+	tools.RespondJSON(w, http.StatusCreated, database)
 }
 
 func (api *API) handleDeleteDatabase(w http.ResponseWriter, r *http.Request) {
@@ -422,15 +420,5 @@ func (api *API) handleSyncDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, result)
-}
-
-// =============================================================================
-// Response Helpers
-// =============================================================================
-
-func respondJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	tools.RespondJSON(w, http.StatusOK, result)
 }

@@ -2,14 +2,12 @@ package platform
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/tools"
 )
 
@@ -159,39 +157,10 @@ func TestHandleDiffTemplate_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestWithBody_EnforcesMaxRequestBody(t *testing.T) {
-	originalLimit := config.Cfg.MaxRequestBody
-	config.Cfg.MaxRequestBody = 8
-	defer func() {
-		config.Cfg.MaxRequestBody = originalLimit
-	}()
-
-	handler := withBody(func(w http.ResponseWriter, r *http.Request) {
-		_, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/platform/templates", strings.NewReader("123456789"))
+func TestSharedRespondJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 
-	handler(rec, req)
-
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "request body too large") {
-		t.Fatalf("expected body too large error, got %q", rec.Body.String())
-	}
-}
-
-func TestRespondJSON(t *testing.T) {
-	rec := httptest.NewRecorder()
-
-	respondJSON(rec, http.StatusCreated, map[string]any{
+	tools.RespondJSON(rec, http.StatusCreated, map[string]any{
 		"ok":   true,
 		"name": "template-a",
 	})

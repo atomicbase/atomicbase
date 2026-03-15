@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/atombasedev/atombase/config"
 	"github.com/atombasedev/atombase/tools"
 )
 
@@ -37,7 +36,7 @@ func (api *API) RegisterRoutes(app *http.ServeMux) {
 func (api *API) withDB(handler DbHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
-		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
+		tools.LimitBody(wr, req)
 		defer req.Body.Close()
 
 		dao, isExternal, err := api.connDb(req)
@@ -72,7 +71,7 @@ func (api *API) withDB(handler DbHandler) http.HandlerFunc {
 func (api *API) withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
-		req.Body = http.MaxBytesReader(wr, req.Body, config.Cfg.MaxRequestBody)
+		tools.LimitBody(wr, req)
 		defer req.Body.Close()
 
 		dao, isExternal, err := api.connDb(req)
@@ -124,7 +123,7 @@ func (api *API) connDb(req *http.Request) (TenantConnection, bool, error) {
 func (api *API) handleBatch() http.HandlerFunc {
 	return api.withDB(func(ctx context.Context, dao *TenantConnection, req *http.Request) ([]byte, error) {
 		var batchReq BatchRequest
-		if err := json.NewDecoder(req.Body).Decode(&batchReq); err != nil {
+		if err := tools.DecodeJSON(req.Body, &batchReq); err != nil {
 			return nil, err
 		}
 		result, err := dao.Batch(ctx, batchReq)
@@ -146,7 +145,7 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 		case "select":
 			{
 				var query SelectQuery
-				if err := json.NewDecoder(req.Body).Decode(&query); err != nil {
+				if err := tools.DecodeJSON(req.Body, &query); err != nil {
 					return nil, err
 				}
 
@@ -165,21 +164,21 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 			{
 				if onConflict == "" {
 					var insertReq InsertRequest
-					if err := json.NewDecoder(req.Body).Decode(&insertReq); err != nil {
+					if err := tools.DecodeJSON(req.Body, &insertReq); err != nil {
 						return nil, err
 					}
 					return dao.InsertJSON(ctx, table, insertReq)
 				}
 				if onConflict == "replace" {
 					var upsertReq UpsertRequest
-					if err := json.NewDecoder(req.Body).Decode(&upsertReq); err != nil {
+					if err := tools.DecodeJSON(req.Body, &upsertReq); err != nil {
 						return nil, err
 					}
 					return dao.UpsertJSON(ctx, table, upsertReq)
 				}
 				if onConflict == "ignore" {
 					var ignoreReq InsertRequest
-					if err := json.NewDecoder(req.Body).Decode(&ignoreReq); err != nil {
+					if err := tools.DecodeJSON(req.Body, &ignoreReq); err != nil {
 						return nil, err
 					}
 					return dao.InsertIgnoreJSON(ctx, table, ignoreReq)
@@ -189,7 +188,7 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 		case "update":
 			{
 				var updateReq UpdateRequest
-				if err := json.NewDecoder(req.Body).Decode(&updateReq); err != nil {
+				if err := tools.DecodeJSON(req.Body, &updateReq); err != nil {
 					return nil, err
 				}
 				return dao.UpdateJSON(ctx, table, updateReq)
@@ -197,7 +196,7 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 		case "delete":
 			{
 				var deleteReq DeleteRequest
-				if err := json.NewDecoder(req.Body).Decode(&deleteReq); err != nil {
+				if err := tools.DecodeJSON(req.Body, &deleteReq); err != nil {
 					return nil, err
 				}
 				return dao.DeleteJSON(ctx, table, deleteReq)
@@ -263,9 +262,7 @@ func parsePreferHeaders(req *http.Request) (operation string, onConflict string,
 }
 
 func respondMigrationFailed(w http.ResponseWriter, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	_ = json.NewEncoder(w).Encode(tools.APIError{
+	tools.RespondJSON(w, http.StatusServiceUnavailable, tools.APIError{
 		Code:    "MIGRATION_FAILED",
 		Message: "Database migration failed. Please try again.",
 		Hint:    "If this persists, contact support. Error: " + err.Error(),

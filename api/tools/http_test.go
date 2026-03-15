@@ -5,7 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/atombasedev/atombase/config"
 )
 
 func TestParseHeaderCommas(t *testing.T) {
@@ -141,5 +144,53 @@ func TestRequest_Non200ReturnsBodyError(t *testing.T) {
 	}
 	if err.Error() != "bad request body" {
 		t.Fatalf("expected body-backed error, got %q", err.Error())
+	}
+}
+
+func TestLimitBody_EnforcesMaxRequestBody(t *testing.T) {
+	originalLimit := config.Cfg.MaxRequestBody
+	config.Cfg.MaxRequestBody = 8
+	defer func() {
+		config.Cfg.MaxRequestBody = originalLimit
+	}()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		LimitBody(w, r)
+		_, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/platform/templates", strings.NewReader("123456789"))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "request body too large") {
+		t.Fatalf("expected body too large error, got %q", rec.Body.String())
+	}
+}
+
+func TestDecodeJSON(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+	}
+
+	var got payload
+	if err := DecodeJSON(strings.NewReader(`{"name":"alice"}`), &got); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got.Name != "alice" {
+		t.Fatalf("expected name alice, got %q", got.Name)
+	}
+
+	if err := DecodeJSON(strings.NewReader(`{"name":`), &got); err == nil {
+		t.Fatal("expected decode error")
 	}
 }
