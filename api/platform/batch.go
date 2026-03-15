@@ -47,6 +47,8 @@ type pipelineError struct {
 	Code    string `json:"code,omitempty"`
 }
 
+var batchExecuteWithTokenFn = BatchExecuteWithToken
+
 // BatchExecuteWithToken sends multiple SQL statements to a Turso database using a per-database token.
 // Turso automatically executes all statements as a single transaction - if any statement
 // fails, the entire batch is rolled back.

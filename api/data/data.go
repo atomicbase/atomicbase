@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/atombasedev/atombase/config"
+	"github.com/atombasedev/atombase/definitions"
 	"github.com/atombasedev/atombase/primarystore"
 	"github.com/atombasedev/atombase/tools"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,14 +21,17 @@ func NewAPI(primaryStore *primarystore.Store) (*API, error) {
 		return nil, errors.New("nil primary store")
 	}
 
-	// Schema cache is populated lazily via GetCachedTemplate.
+	// Schema cache is populated lazily via GetCachedDefinition.
 	// No preloading needed - external cache (Redis) persists across restarts.
 
-	return &API{store: primaryStore}, nil
+	return &API{
+		store:       primaryStore,
+		definitions: definitions.NewService(primaryStore),
+	}, nil
 }
 
-// connTurso opens a connection to an external Turso database by name.
-func (api *API) connTurso(dbName string) (TenantConnection, error) {
+// connTurso opens a connection to an external Turso database by resolved target.
+func (api *API) connTurso(principal definitions.Principal, target definitions.DatabaseTarget) (TenantConnection, error) {
 	org := config.Cfg.TursoOrganization
 
 	if org == "" {
@@ -38,22 +42,17 @@ func (api *API) connTurso(dbName string) (TenantConnection, error) {
 		return TenantConnection{}, errors.New("primary store not initialized")
 	}
 
-	meta, err := api.store.LookupDatabaseByName(dbName)
-	if err != nil {
-		return TenantConnection{}, err
-	}
-
-	if meta.AuthToken == "" {
+	if target.AuthToken == "" {
 		return TenantConnection{}, errors.New("database has no auth token configured")
 	}
 
-	// Get cached template (schema + current version).
-	schema, currentVersion, err := GetCachedTemplate(api.store.DB(), meta.TemplateID)
+	// Get cached definition (schema + current version).
+	schema, currentVersion, err := GetCachedDefinition(api.store.DB(), target.DefinitionID)
 	if err != nil {
 		return TenantConnection{}, fmt.Errorf("failed to load schema: %w", err)
 	}
 
-	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", dbName, org, meta.AuthToken))
+	client, err := sql.Open("libsql", fmt.Sprintf("libsql://%s-%s.turso.io?authToken=%s", target.DatabaseID, org, target.AuthToken))
 	if err != nil {
 		return TenantConnection{}, err
 	}
@@ -67,12 +66,14 @@ func (api *API) connTurso(dbName string) (TenantConnection, error) {
 	return TenantConnection{
 		Client:          client,
 		Schema:          schema,
-		Token:           meta.AuthToken,
-		Name:            dbName,
-		ID:              meta.ID,
-		TemplateID:      meta.TemplateID,
+		Token:           target.AuthToken,
+		Name:            target.DatabaseID,
+		ID:              target.DatabaseID,
+		DefinitionID:    target.DefinitionID,
+		DefinitionType:  target.DefinitionType,
 		SchemaVersion:   currentVersion,
-		DatabaseVersion: meta.DatabaseVersion,
+		DatabaseVersion: target.DefinitionVersion,
+		Principal:       principal,
 		primaryStore:    api.store,
 	}, nil
 }

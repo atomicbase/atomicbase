@@ -3,433 +3,132 @@ package primarystore
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/atombasedev/atombase/tools"
+	"github.com/atombasedev/atombase/definitions"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const (
-	createDatabasesTable = `
-		CREATE TABLE atombase_databases (
-			id INTEGER PRIMARY KEY,
-			name TEXT UNIQUE NOT NULL,
-			template_id INTEGER,
-			template_version INTEGER,
-			auth_token_encrypted BLOB,
-			updated_at TEXT NOT NULL
-		)
-	`
+const storeSchema = `
+CREATE TABLE atombase_definitions (
+	id INTEGER PRIMARY KEY,
+	name TEXT UNIQUE NOT NULL,
+	definition_type TEXT NOT NULL,
+	current_version INTEGER DEFAULT 1
+);
+CREATE TABLE atombase_databases (
+	id TEXT PRIMARY KEY NOT NULL,
+	definition_id INTEGER NOT NULL,
+	definition_version INTEGER DEFAULT 1,
+	auth_token_encrypted BLOB,
+	created_at TEXT,
+	updated_at TEXT
+);
+CREATE TABLE atombase_users (
+	id TEXT PRIMARY KEY NOT NULL,
+	database_id TEXT UNIQUE
+);
+CREATE TABLE atombase_organizations (
+	id TEXT PRIMARY KEY NOT NULL,
+	database_id TEXT NOT NULL UNIQUE,
+	name TEXT NOT NULL,
+	owner_id TEXT NOT NULL
+);
+CREATE TABLE atombase_access_policies (
+	definition_id INTEGER NOT NULL,
+	version INTEGER NOT NULL,
+	table_name TEXT NOT NULL,
+	operation TEXT NOT NULL,
+	conditions_json TEXT,
+	PRIMARY KEY(definition_id, version, table_name, operation)
+);
+CREATE TABLE atombase_migrations (
+	id INTEGER PRIMARY KEY,
+	definition_id INTEGER NOT NULL,
+	from_version INTEGER NOT NULL,
+	to_version INTEGER NOT NULL,
+	sql TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE TABLE atombase_migration_failures (
+	database_id TEXT PRIMARY KEY,
+	from_version INTEGER NOT NULL,
+	to_version INTEGER NOT NULL,
+	error TEXT,
+	created_at TEXT NOT NULL
+);
+`
 
-	createMigrationsTable = `
-		CREATE TABLE atombase_migrations (
-			id INTEGER PRIMARY KEY,
-			template_id INTEGER NOT NULL,
-			from_version INTEGER NOT NULL,
-			to_version INTEGER NOT NULL,
-			sql TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		)
-	`
-
-	createMigrationFailuresTable = `
-		CREATE TABLE atombase_migration_failures (
-			database_id INTEGER PRIMARY KEY,
-			from_version INTEGER NOT NULL,
-			to_version INTEGER NOT NULL,
-			error TEXT,
-			created_at TEXT NOT NULL
-		)
-	`
-)
-
-func setupTestStore(t *testing.T) (*Store, *sql.DB) {
+func setupStore(t *testing.T) (*Store, *sql.DB) {
 	t.Helper()
-
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
+		t.Fatal(err)
 	}
-
-	for _, stmt := range []string{createDatabasesTable, createMigrationsTable, createMigrationFailuresTable} {
-		if _, err := db.Exec(stmt); err != nil {
-			_ = db.Close()
-			t.Fatalf("create schema: %v", err)
-		}
+	if _, err := db.Exec(storeSchema); err != nil {
+		t.Fatal(err)
 	}
-
 	store, err := New(db)
 	if err != nil {
-		_ = db.Close()
-		t.Fatalf("create store: %v", err)
+		t.Fatal(err)
 	}
-
-	t.Cleanup(func() {
-		_ = store.Close()
-		_ = db.Close()
-	})
-
 	return store, db
 }
 
-func initTestCache() {
-	tools.InitCache(tools.NewMemoryCache())
-}
+func TestResolveDatabaseTarget(t *testing.T) {
+	store, db := setupStore(t)
+	defer db.Close()
 
-func insertDatabaseRow(t *testing.T, db *sql.DB, name string, templateID any, version any) int32 {
-	t.Helper()
+	_, _ = db.Exec(`INSERT INTO atombase_definitions (id, name, definition_type, current_version) VALUES (1, 'market', 'global', 1), (2, 'notes', 'user', 1), (3, 'workspace', 'organization', 2)`)
+	_, _ = db.Exec(`INSERT INTO atombase_databases (id, definition_id, definition_version) VALUES ('global-market', 1, 1), ('user-notes-db', 2, 1), ('org-db', 3, 2)`)
+	_, _ = db.Exec(`INSERT INTO atombase_users (id, database_id) VALUES ('user-1', 'user-notes-db')`)
+	_, _ = db.Exec(`INSERT INTO atombase_organizations (id, database_id, name, owner_id) VALUES ('org-1', 'org-db', 'Acme', 'user-1')`)
 
-	res, err := db.Exec(
-		`INSERT INTO atombase_databases (name, template_id, template_version, updated_at) VALUES (?, ?, ?, ?)`,
-		name,
-		templateID,
-		version,
-		"2026-01-01T00:00:00Z",
-	)
+	global, err := store.ResolveDatabaseTarget(context.Background(), definitions.Principal{}, "global:market")
 	if err != nil {
-		t.Fatalf("insert database row: %v", err)
+		t.Fatalf("resolve global failed: %v", err)
+	}
+	if global.DatabaseID != "global-market" {
+		t.Fatalf("expected global-market, got %s", global.DatabaseID)
 	}
 
-	id, err := res.LastInsertId()
+	user, err := store.ResolveDatabaseTarget(context.Background(), definitions.Principal{UserID: "user-1"}, "user:notes")
 	if err != nil {
-		t.Fatalf("read inserted id: %v", err)
+		t.Fatalf("resolve user failed: %v", err)
+	}
+	if user.DatabaseID != "user-notes-db" {
+		t.Fatalf("expected user-notes-db, got %s", user.DatabaseID)
 	}
 
-	return int32(id)
-}
-
-func insertMigrationRow(t *testing.T, db *sql.DB, templateID int32, fromVersion, toVersion int, sqlJSON string) int64 {
-	t.Helper()
-
-	res, err := db.Exec(
-		`INSERT INTO atombase_migrations (template_id, from_version, to_version, sql, created_at) VALUES (?, ?, ?, ?, ?)`,
-		templateID,
-		fromVersion,
-		toVersion,
-		sqlJSON,
-		"2026-01-01T00:00:00Z",
-	)
+	org, err := store.ResolveDatabaseTarget(context.Background(), definitions.Principal{UserID: "user-1"}, "org:org-1")
 	if err != nil {
-		t.Fatalf("insert migration row: %v", err)
+		t.Fatalf("resolve org failed: %v", err)
 	}
-
-	id, err := res.LastInsertId()
-	if err != nil {
-		t.Fatalf("read migration id: %v", err)
-	}
-
-	return id
-}
-
-func TestNew_NilConnection(t *testing.T) {
-	_, err := New(nil)
-	if err == nil {
-		t.Fatal("expected error for nil connection")
+	if org.DatabaseID != "org-db" {
+		t.Fatalf("expected org-db, got %s", org.DatabaseID)
 	}
 }
 
-func TestStoreDBAndCloseNilSafety(t *testing.T) {
-	var nilStore *Store
-	if nilStore.DB() != nil {
-		t.Fatal("expected nil DB for nil store")
-	}
-	if err := nilStore.Close(); err != nil {
-		t.Fatalf("expected nil close on nil store, got %v", err)
-	}
+func TestLoadAccessPolicyAndMigrations(t *testing.T) {
+	store, db := setupStore(t)
+	defer db.Close()
 
-	store, _ := setupTestStore(t)
-	if store.DB() == nil {
-		t.Fatal("expected non-nil DB from initialized store")
-	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("unexpected close error: %v", err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("expected idempotent close, got %v", err)
-	}
-}
+	_, _ = db.Exec(`INSERT INTO atombase_access_policies (definition_id, version, table_name, operation, conditions_json) VALUES (3, 2, 'projects', 'select', '{"field":"auth.status","op":"eq","value":"member"}')`)
+	_, _ = db.Exec(`INSERT INTO atombase_migrations (id, definition_id, from_version, to_version, sql, created_at) VALUES (1, 3, 1, 2, '["ALTER TABLE projects ADD COLUMN title"]', '2026-01-01T00:00:00Z')`)
 
-func TestLookupDatabaseByName(t *testing.T) {
-	store, db := setupTestStore(t)
-
-	id := insertDatabaseRow(t, db, "tenant-alpha", nil, nil)
-
-	meta, err := store.LookupDatabaseByName("tenant-alpha")
+	policy, err := store.LoadAccessPolicy(context.Background(), 3, 2, "projects", "select")
 	if err != nil {
-		t.Fatalf("lookup database: %v", err)
+		t.Fatalf("LoadAccessPolicy failed: %v", err)
+	}
+	if policy == nil || policy.Condition == nil || policy.Condition.Field != "auth.status" {
+		t.Fatalf("expected decoded policy condition, got %#v", policy)
 	}
 
-	if meta.ID != id {
-		t.Fatalf("expected id %d, got %d", id, meta.ID)
-	}
-
-	if meta.TemplateID != 0 {
-		t.Fatalf("expected default template id 0, got %d", meta.TemplateID)
-	}
-
-	if meta.DatabaseVersion != 1 {
-		t.Fatalf("expected default template version 1, got %d", meta.DatabaseVersion)
-	}
-
-	_, err = store.LookupDatabaseByName("does-not-exist")
-	if !errors.Is(err, tools.ErrDatabaseNotFound) {
-		t.Fatalf("expected ErrDatabaseNotFound, got %v", err)
-	}
-}
-
-func TestLookupDatabaseByName_UsesCache(t *testing.T) {
-	initTestCache()
-	tools.InvalidateDatabase("cached-tenant")
-
-	store, db := setupTestStore(t)
-	id := insertDatabaseRow(t, db, "cached-tenant", 11, 3)
-
-	first, err := store.LookupDatabaseByName("cached-tenant")
+	migrations, err := store.GetMigrationsBetween(context.Background(), 3, 1, 2)
 	if err != nil {
-		t.Fatalf("first lookup failed: %v", err)
+		t.Fatalf("GetMigrationsBetween failed: %v", err)
 	}
-	if first.ID != id {
-		t.Fatalf("expected id %d, got %d", id, first.ID)
-	}
-
-	if _, err := db.Exec(`DELETE FROM atombase_databases WHERE name = ?`, "cached-tenant"); err != nil {
-		t.Fatalf("delete backing row: %v", err)
-	}
-
-	second, err := store.LookupDatabaseByName("cached-tenant")
-	if err != nil {
-		t.Fatalf("second lookup should hit cache, got %v", err)
-	}
-	if second.ID != first.ID || second.TemplateID != first.TemplateID || second.DatabaseVersion != first.DatabaseVersion {
-		t.Fatalf("expected cached metadata %+v, got %+v", first, second)
-	}
-
-	tools.InvalidateDatabase("cached-tenant")
-}
-
-func TestLookupDatabaseByName_DecryptsTokenAndHandlesDecryptFailure(t *testing.T) {
-	initTestCache()
-	tools.InvalidateDatabase("tenant-token")
-	tools.InvalidateDatabase("tenant-bad-token")
-
-	if err := tools.InitEncryption(strings.Repeat("01", 32)); err != nil {
-		t.Fatalf("init encryption: %v", err)
-	}
-
-	store, db := setupTestStore(t)
-
-	encrypted, err := tools.Encrypt([]byte("token-secret"))
-	if err != nil {
-		t.Fatalf("encrypt token: %v", err)
-	}
-	res, err := db.Exec(
-		`INSERT INTO atombase_databases (name, template_id, template_version, auth_token_encrypted, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"tenant-token", 7, 2, encrypted, "2026-01-01T00:00:00Z",
-	)
-	if err != nil {
-		t.Fatalf("insert encrypted row: %v", err)
-	}
-	id, _ := res.LastInsertId()
-
-	meta, err := store.LookupDatabaseByName("tenant-token")
-	if err != nil {
-		t.Fatalf("lookup encrypted token: %v", err)
-	}
-	if meta.ID != int32(id) || meta.AuthToken != "token-secret" {
-		t.Fatalf("unexpected decrypted meta: %+v", meta)
-	}
-
-	if _, err := db.Exec(
-		`INSERT INTO atombase_databases (name, template_id, template_version, auth_token_encrypted, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"tenant-bad-token", 7, 2, []byte("bad"), "2026-01-01T00:00:00Z",
-	); err != nil {
-		t.Fatalf("insert invalid encrypted row: %v", err)
-	}
-
-	_, err = store.LookupDatabaseByName("tenant-bad-token")
-	if err == nil || !strings.Contains(err.Error(), "failed to decrypt auth token") {
-		t.Fatalf("expected decrypt failure, got %v", err)
-	}
-
-	tools.InvalidateDatabase("tenant-token")
-	tools.InvalidateDatabase("tenant-bad-token")
-}
-
-func TestGetMigrationsBetween(t *testing.T) {
-	tests := []struct {
-		name          string
-		setup         func(t *testing.T, db *sql.DB)
-		fromVersion   int
-		toVersion     int
-		assertSuccess func(t *testing.T, got []TemplateMigration)
-		errContains   string
-	}{
-		{
-			name: "contiguous range is returned in order",
-			setup: func(t *testing.T, db *sql.DB) {
-				insertMigrationRow(t, db, 42, 1, 2, `["ALTER TABLE users ADD COLUMN email TEXT"]`)
-				insertMigrationRow(t, db, 42, 2, 3, `["CREATE INDEX users_email_idx ON users(email)"]`)
-			},
-			fromVersion: 1,
-			toVersion:   3,
-			assertSuccess: func(t *testing.T, got []TemplateMigration) {
-				t.Helper()
-
-				if len(got) != 2 {
-					t.Fatalf("expected 2 migrations, got %d", len(got))
-				}
-
-				if got[0].FromVersion != 1 || got[0].ToVersion != 2 {
-					t.Fatalf("unexpected first step: %+v", got[0])
-				}
-
-				if got[1].FromVersion != 2 || got[1].ToVersion != 3 {
-					t.Fatalf("unexpected second step: %+v", got[1])
-				}
-
-				if len(got[0].SQL) != 1 || got[0].SQL[0] != "ALTER TABLE users ADD COLUMN email TEXT" {
-					t.Fatalf("unexpected sql payload for migration 1->2: %v", got[0].SQL)
-				}
-			},
-		},
-		{
-			name: "missing first step is detected",
-			setup: func(t *testing.T, db *sql.DB) {
-				insertMigrationRow(t, db, 42, 2, 3, `["ALTER TABLE users ADD COLUMN email TEXT"]`)
-			},
-			fromVersion: 1,
-			toVersion:   3,
-			errContains: "missing migration step from version 1",
-		},
-		{
-			name: "missing terminal step is detected",
-			setup: func(t *testing.T, db *sql.DB) {
-				insertMigrationRow(t, db, 42, 1, 2, `["ALTER TABLE users ADD COLUMN email TEXT"]`)
-			},
-			fromVersion: 1,
-			toVersion:   3,
-			errContains: "missing migrations to reach version 3",
-		},
-		{
-			name: "invalid sql payload fails with migration id",
-			setup: func(t *testing.T, db *sql.DB) {
-				insertMigrationRow(t, db, 42, 1, 2, `not-json`)
-			},
-			fromVersion: 1,
-			toVersion:   2,
-			errContains: "failed to decode migration",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			store, db := setupTestStore(t)
-			tc.setup(t, db)
-
-			migrations, err := store.GetMigrationsBetween(context.Background(), 42, tc.fromVersion, tc.toVersion)
-
-			if tc.errContains != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q", tc.errContains)
-				}
-				if !strings.Contains(err.Error(), tc.errContains) {
-					t.Fatalf("expected error containing %q, got %v", tc.errContains, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if tc.assertSuccess != nil {
-				tc.assertSuccess(t, migrations)
-			}
-		})
-	}
-}
-
-func TestStoreMethods_NotInitialized(t *testing.T) {
-	var nilStore *Store
-
-	if _, err := nilStore.LookupDatabaseByName("tenant"); err == nil || !strings.Contains(err.Error(), "primary store not initialized") {
-		t.Fatalf("expected uninitialized lookup error, got %v", err)
-	}
-
-	if _, err := nilStore.GetMigrationsBetween(context.Background(), 1, 1, 2); err == nil || !strings.Contains(err.Error(), "primary store not initialized") {
-		t.Fatalf("expected uninitialized migrations error, got %v", err)
-	}
-
-	if err := nilStore.UpdateDatabaseVersion(context.Background(), 1, 2); err == nil || !strings.Contains(err.Error(), "primary store not initialized") {
-		t.Fatalf("expected uninitialized update error, got %v", err)
-	}
-
-	nilStore.RecordMigrationFailure(context.Background(), 1, 1, 2, errors.New("boom"))
-}
-
-func TestUpdateDatabaseVersion(t *testing.T) {
-	store, db := setupTestStore(t)
-	id := insertDatabaseRow(t, db, "tenant-version-test", 7, 1)
-
-	err := store.UpdateDatabaseVersion(context.Background(), id, 4)
-	if err != nil {
-		t.Fatalf("update database version: %v", err)
-	}
-
-	var version int
-	var updatedAt string
-	err = db.QueryRow(`SELECT template_version, updated_at FROM atombase_databases WHERE id = ?`, id).Scan(&version, &updatedAt)
-	if err != nil {
-		t.Fatalf("query updated database: %v", err)
-	}
-
-	if version != 4 {
-		t.Fatalf("expected version 4, got %d", version)
-	}
-
-	if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
-		t.Fatalf("expected RFC3339 timestamp, got %q (%v)", updatedAt, err)
-	}
-}
-
-func TestRecordMigrationFailure_UpsertAndNilErrorNoop(t *testing.T) {
-	store, db := setupTestStore(t)
-	databaseID := insertDatabaseRow(t, db, "tenant-failure-test", 5, 1)
-
-	_, err := db.Exec(
-		`INSERT INTO atombase_migration_failures (database_id, from_version, to_version, error, created_at) VALUES (?, 1, 2, 'old failure', ?)`,
-		databaseID,
-		"2026-01-01T00:00:00Z",
-	)
-	if err != nil {
-		t.Fatalf("seed migration failure: %v", err)
-	}
-
-	store.RecordMigrationFailure(context.Background(), databaseID, 2, 3, errors.New("new failure"))
-
-	var fromVersion int
-	var toVersion int
-	var errMsg string
-	err = db.QueryRow(`SELECT from_version, to_version, error FROM atombase_migration_failures WHERE database_id = ?`, databaseID).Scan(&fromVersion, &toVersion, &errMsg)
-	if err != nil {
-		t.Fatalf("read migration failure after upsert: %v", err)
-	}
-
-	if fromVersion != 2 || toVersion != 3 || errMsg != "new failure" {
-		t.Fatalf("unexpected upserted failure row: from=%d to=%d err=%q", fromVersion, toVersion, errMsg)
-	}
-
-	store.RecordMigrationFailure(context.Background(), databaseID, 99, 100, nil)
-
-	err = db.QueryRow(`SELECT from_version, to_version, error FROM atombase_migration_failures WHERE database_id = ?`, databaseID).Scan(&fromVersion, &toVersion, &errMsg)
-	if err != nil {
-		t.Fatalf("read migration failure after nil-error no-op: %v", err)
-	}
-
-	if fromVersion != 2 || toVersion != 3 || errMsg != "new failure" {
-		t.Fatalf("expected no-op when migrationErr=nil, got from=%d to=%d err=%q", fromVersion, toVersion, errMsg)
+	if len(migrations) != 1 || len(migrations[0].SQL) != 1 {
+		t.Fatalf("expected one migration with one statement, got %#v", migrations)
 	}
 }

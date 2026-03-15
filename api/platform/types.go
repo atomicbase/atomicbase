@@ -2,6 +2,7 @@ package platform
 
 import "time"
 
+import "github.com/atombasedev/atombase/definitions"
 import sharedschema "github.com/atombasedev/atombase/schema"
 
 type Schema = sharedschema.Schema
@@ -9,6 +10,33 @@ type Table = sharedschema.Table
 type Index = sharedschema.Index
 type Col = sharedschema.Col
 type Generated = sharedschema.Generated
+
+type DefinitionType = definitions.DefinitionType
+type Definition = definitions.Definition
+type Condition = definitions.Condition
+type AccessMap = definitions.AccessMap
+type OperationPolicy = definitions.OperationPolicy
+type DefinitionVersion struct {
+	ID           int32     `json:"id"`
+	DefinitionID int32     `json:"definitionId"`
+	Version      int       `json:"version"`
+	Schema       Schema    `json:"schema"`
+	Checksum     string    `json:"checksum"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type CreateDefinitionRequest struct {
+	Name   string                     `json:"name"`
+	Type   definitions.DefinitionType `json:"type"`
+	Roles  []string                   `json:"roles,omitempty"`
+	Schema Schema                     `json:"schema"`
+	Access definitions.AccessMap      `json:"access"`
+}
+
+type PushDefinitionRequest struct {
+	Schema Schema                `json:"schema"`
+	Access definitions.AccessMap `json:"access"`
+}
 
 // SchemaDiff represents a single schema modification.
 type SchemaDiff struct {
@@ -111,13 +139,17 @@ type TemplateVersion struct {
 
 // DatabaseRecord represents a provisioned database row returned by the Platform API.
 type DatabaseRecord struct {
-	ID              int32     `json:"id"`
-	Name            string    `json:"name"`
-	Token           string    `json:"token"`
-	TemplateID      int32     `json:"templateId"`
-	TemplateVersion int       `json:"templateVersion"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID                string    `json:"id"`
+	Token             string    `json:"token"`
+	DefinitionID      int32     `json:"definitionId"`
+	DefinitionName    string    `json:"definitionName,omitempty"`
+	DefinitionType    string    `json:"definitionType,omitempty"`
+	DefinitionVersion int       `json:"definitionVersion"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	OwnerID           string    `json:"ownerId,omitempty"`
+	OrganizationID    string    `json:"organizationId,omitempty"`
+	OrganizationName  string    `json:"organizationName,omitempty"`
 }
 
 // Request/Response types for API endpoints.
@@ -155,8 +187,13 @@ type RetryMigrationResponse struct {
 
 // CreateDatabaseRequest is the request body for POST /platform/databases.
 type CreateDatabaseRequest struct {
-	Name     string `json:"name"`
-	Template string `json:"template"`
+	ID               string `json:"id"`
+	Definition       string `json:"definition"`
+	UserID           string `json:"userId,omitempty"`
+	OrganizationID   string `json:"organizationId,omitempty"`
+	OrganizationName string `json:"organizationName,omitempty"`
+	OwnerID          string `json:"ownerId,omitempty"`
+	MaxMembers       *int   `json:"maxMembers,omitempty"`
 }
 
 // SyncDatabaseResponse is the response for POST /platform/databases/{name}/sync.

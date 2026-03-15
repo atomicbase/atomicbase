@@ -8,10 +8,10 @@ import (
 	"github.com/atombasedev/atombase/tools"
 )
 
-// GetCachedTemplate retrieves the current schema and version for a template.
-func GetCachedTemplate(db *sql.DB, templateID int32) (SchemaCache, int, error) {
+// GetCachedDefinition retrieves the current schema and version for a definition.
+func GetCachedDefinition(db *sql.DB, definitionID int32) (SchemaCache, int, error) {
 	// Check cache first
-	if cached, ok := tools.GetTemplate(templateID); ok {
+	if cached, ok := tools.GetTemplate(definitionID); ok {
 		// Fast path: in-memory cache stores struct directly
 		if cached.Schema != nil {
 			if schema, ok := cached.Schema.(SchemaCache); ok {
@@ -29,33 +29,38 @@ func GetCachedTemplate(db *sql.DB, templateID int32) (SchemaCache, int, error) {
 	}
 
 	// Load from database and cache
-	schema, version, err := loadCurrentSchemaFromDB(db, templateID)
+	schema, version, err := loadCurrentSchemaFromDB(db, definitionID)
 	if err != nil {
 		return SchemaCache{}, 0, err
 	}
 
-	tools.SetTemplate(templateID, version, schema)
+	tools.SetTemplate(definitionID, version, schema)
 	return schema, version, nil
 }
 
-// loadCurrentSchemaFromDB loads the current schema version for a template.
-func loadCurrentSchemaFromDB(db *sql.DB, templateID int32) (SchemaCache, int, error) {
+// GetCachedTemplate is retained temporarily while tests and helpers move to definition naming.
+func GetCachedTemplate(db *sql.DB, definitionID int32) (SchemaCache, int, error) {
+	return GetCachedDefinition(db, definitionID)
+}
+
+// loadCurrentSchemaFromDB loads the current schema version for a definition.
+func loadCurrentSchemaFromDB(db *sql.DB, definitionID int32) (SchemaCache, int, error) {
 	if db == nil {
 		return SchemaCache{}, 0, fmt.Errorf("cannot load schema from nil database")
 	}
 
 	row := db.QueryRow(fmt.Sprintf(`
-		SELECT h.version, h.schema
-		FROM %s h
-		JOIN %s t ON h.template_id = t.id AND h.version = t.current_version
-		WHERE h.template_id = ?
-	`, ReservedTableTemplatesHistory, ReservedTableTemplates), templateID)
+		SELECT h.version, h.schema_json
+		FROM atombase_definitions_history h
+		JOIN atombase_definitions d ON h.definition_id = d.id AND h.version = d.current_version
+		WHERE h.definition_id = ?
+	`), definitionID)
 
 	var version int
 	var tablesData []byte
 	if err := row.Scan(&version, &tablesData); err != nil {
 		if err == sql.ErrNoRows {
-			return SchemaCache{}, 0, fmt.Errorf("schema not found for template %d", templateID)
+			return SchemaCache{}, 0, fmt.Errorf("schema not found for definition %d", definitionID)
 		}
 		return SchemaCache{}, 0, err
 	}

@@ -61,6 +61,12 @@ func (dao *TenantConnection) selectJSON(ctx context.Context, exec Executor, rela
 		return SelectResult{}, err
 	}
 
+	policy, err := dao.compilePolicy(ctx, relation, "select", nil)
+	if err != nil {
+		return SelectResult{}, err
+	}
+	where, args = appendPolicyWhere(where, args, policy)
+
 	// Build query in correct SQL order: SELECT...FROM...JOIN + WHERE + GROUP BY
 	baseQuery := sqlQuery + where + groupBy
 
@@ -414,6 +420,11 @@ func (dao *TenantConnection) updateJSON(ctx context.Context, exec Executor, rela
 	if where == "" {
 		return nil, tools.ErrMissingWhereClause
 	}
+	policy, err := dao.compilePolicy(ctx, relation, "update", req.Data)
+	if err != nil {
+		return nil, err
+	}
+	where, whereArgs = appendPolicyWhere(where, whereArgs, policy)
 	query += where
 	args = append(args, whereArgs...)
 
@@ -455,6 +466,11 @@ func (dao *TenantConnection) deleteJSON(ctx context.Context, exec Executor, rela
 	if where == "" {
 		return nil, tools.ErrMissingWhereClause
 	}
+	policy, err := dao.compilePolicy(ctx, relation, "delete", nil)
+	if err != nil {
+		return nil, err
+	}
+	where, args = appendPolicyWhere(where, args, policy)
 	query += where
 
 	result, err := ExecContextWithRetry(ctx, exec, query, args...)

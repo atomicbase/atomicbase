@@ -6,13 +6,15 @@ import (
 	"database/sql"
 	"encoding/json"
 
+	"github.com/atombasedev/atombase/definitions"
 	"github.com/atombasedev/atombase/primarystore"
 	sharedschema "github.com/atombasedev/atombase/schema"
 )
 
 // API is the Data API module with injected dependencies.
 type API struct {
-	store *primarystore.Store
+	store       *primarystore.Store
+	definitions *definitions.Service
 }
 
 // TenantConnection represents an external tenant database connection with cached schema.
@@ -21,10 +23,12 @@ type TenantConnection struct {
 	Token           string      // authentication token
 	Schema          SchemaCache // Cached schema for validation
 	Name            string      // Database name (for cache updates)
-	ID              int32       // Internal tenant database ID
-	TemplateID      int32       // Template ID used by this tenant
-	SchemaVersion   int         // Current template version from schema cache
-	DatabaseVersion int         // Database's applied template_version
+	ID              string      // Internal database ID / physical database name
+	DefinitionID    int32       // Definition backing this database
+	DefinitionType  definitions.DefinitionType
+	SchemaVersion   int // Current definition version from schema cache
+	DatabaseVersion int // Database's applied definition_version
+	Principal       definitions.Principal
 	primaryStore    *primarystore.Store
 }
 

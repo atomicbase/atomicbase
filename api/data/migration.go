@@ -14,12 +14,12 @@ import (
 
 var (
 	ErrMigrationFailed      = errors.New("migration failed")
-	ErrDatabaseVersionAhead = errors.New("database version ahead of template version")
+	ErrDatabaseVersionAhead = errors.New("database version ahead of definition version")
 	retryBackoff            = []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second}
 )
 
 func MigrateIfNeeded(ctx context.Context, dao *TenantConnection) error {
-	if dao.TemplateID == 0 {
+	if dao.DefinitionID == 0 {
 		return nil
 	}
 
@@ -28,7 +28,7 @@ func MigrateIfNeeded(ctx context.Context, dao *TenantConnection) error {
 	}
 
 	if dao.DatabaseVersion > dao.SchemaVersion {
-		return fmt.Errorf("%w: database_id=%d database_version=%d template_version=%d",
+		return fmt.Errorf("%w: database_id=%s database_version=%d definition_version=%d",
 			ErrDatabaseVersionAhead, dao.ID, dao.DatabaseVersion, dao.SchemaVersion)
 	}
 
@@ -36,7 +36,7 @@ func MigrateIfNeeded(ctx context.Context, dao *TenantConnection) error {
 		return errors.New("failed to access primary store: primary store not initialized")
 	}
 
-	migrations, err := dao.primaryStore.GetMigrationsBetween(ctx, dao.TemplateID, dao.DatabaseVersion, dao.SchemaVersion)
+	migrations, err := dao.primaryStore.GetMigrationsBetween(ctx, dao.DefinitionID, dao.DatabaseVersion, dao.SchemaVersion)
 	if err != nil {
 		return fmt.Errorf("failed to load migrations: %w", err)
 	}
@@ -58,7 +58,7 @@ func MigrateIfNeeded(ctx context.Context, dao *TenantConnection) error {
 
 		if err == nil {
 			if err := dao.primaryStore.UpdateDatabaseVersion(ctx, dao.ID, dao.SchemaVersion); err != nil {
-				log.Printf("migration version update failed for database_id=%d: %v", dao.ID, err)
+				log.Printf("migration version update failed for database_id=%s: %v", dao.ID, err)
 			}
 			// Update cache with new version
 			if dao.Name != "" {
@@ -74,8 +74,8 @@ func MigrateIfNeeded(ctx context.Context, dao *TenantConnection) error {
 		}
 	}
 
-	log.Printf("CRITICAL: lazy migration failed database_id=%d template_id=%d from=%d to=%d err=%v",
-		dao.ID, dao.TemplateID, dao.DatabaseVersion, dao.SchemaVersion, lastErr)
+	log.Printf("CRITICAL: lazy migration failed database_id=%s definition_id=%d from=%d to=%d err=%v",
+		dao.ID, dao.DefinitionID, dao.DatabaseVersion, dao.SchemaVersion, lastErr)
 
 	dao.primaryStore.RecordMigrationFailure(ctx, dao.ID, dao.DatabaseVersion, dao.SchemaVersion, lastErr)
 

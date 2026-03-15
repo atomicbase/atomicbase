@@ -29,8 +29,8 @@ func (dao *TenantConnection) InvalidateSchema(_ context.Context) error {
 		return errors.New("primary store not initialized")
 	}
 
-	// Database instances: reload from template cache.
-	schema, version, err := GetCachedTemplate(dao.primaryStore.DB(), dao.TemplateID)
+	// Database instances: reload from definition cache.
+	schema, version, err := GetCachedDefinition(dao.primaryStore.DB(), dao.DefinitionID)
 	if err != nil {
 		return err
 	}

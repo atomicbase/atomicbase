@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/atombasedev/atombase/definitions"
 	"github.com/atombasedev/atombase/tools"
 )
 
@@ -105,12 +106,22 @@ func (api *API) withDBResponse(handler DbResponseHandler) http.HandlerFunc {
 // The internal primary metadata database is never queryable through Data API routes.
 // Returns the connection and a boolean indicating if it should be closed after use.
 func (api *API) connDb(req *http.Request) (TenantConnection, bool, error) {
-	dbName := req.Header.Get("Database")
-	if dbName == "" {
+	dbHeader := req.Header.Get("Database")
+	if dbHeader == "" {
 		return TenantConnection{}, false, tools.ErrMissingDatabase
 	}
 
-	db, err := api.connTurso(dbName)
+	principal, err := api.definitions.ResolvePrincipal(req.Context(), tools.GetAuthContext(req.Context()))
+	if err != nil {
+		return TenantConnection{}, false, err
+	}
+
+	target, err := api.definitions.ResolveTarget(req.Context(), principal, dbHeader)
+	if err != nil {
+		return TenantConnection{}, false, err
+	}
+
+	db, err := api.connTurso(principal, target)
 	if err != nil {
 		return TenantConnection{}, false, err
 	}
@@ -147,6 +158,14 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 				if err := tools.DecodeJSON(req.Body, &query); err != nil {
 					return nil, err
 				}
+				if _, err := api.definitions.CompilePolicy(ctx, dao.Principal, definitions.DatabaseTarget{
+					DatabaseID:        dao.ID,
+					DefinitionID:      dao.DefinitionID,
+					DefinitionType:    dao.DefinitionType,
+					DefinitionVersion: dao.DatabaseVersion,
+				}, table, "select", nil); err != nil {
+					return nil, err
+				}
 
 				result, err := dao.SelectJSON(ctx, table, query, countExact)
 				if err != nil {
@@ -170,6 +189,16 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 					if err := tools.DecodeJSON(req.Body, &insertReq); err != nil {
 						return nil, err
 					}
+					if len(insertReq.Data) > 0 {
+						if _, err := api.definitions.CompilePolicy(ctx, dao.Principal, definitions.DatabaseTarget{
+							DatabaseID:        dao.ID,
+							DefinitionID:      dao.DefinitionID,
+							DefinitionType:    dao.DefinitionType,
+							DefinitionVersion: dao.DatabaseVersion,
+						}, table, "insert", insertReq.Data[0]); err != nil {
+							return nil, err
+						}
+					}
 					return decodeResultPayload(dao.InsertJSON(ctx, table, insertReq))
 				}
 				if onConflict == "replace" {
@@ -177,12 +206,32 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 					if err := tools.DecodeJSON(req.Body, &upsertReq); err != nil {
 						return nil, err
 					}
+					if len(upsertReq.Data) > 0 {
+						if _, err := api.definitions.CompilePolicy(ctx, dao.Principal, definitions.DatabaseTarget{
+							DatabaseID:        dao.ID,
+							DefinitionID:      dao.DefinitionID,
+							DefinitionType:    dao.DefinitionType,
+							DefinitionVersion: dao.DatabaseVersion,
+						}, table, "insert", upsertReq.Data[0]); err != nil {
+							return nil, err
+						}
+					}
 					return decodeResultPayload(dao.UpsertJSON(ctx, table, upsertReq))
 				}
 				if onConflict == "ignore" {
 					var ignoreReq InsertRequest
 					if err := tools.DecodeJSON(req.Body, &ignoreReq); err != nil {
 						return nil, err
+					}
+					if len(ignoreReq.Data) > 0 {
+						if _, err := api.definitions.CompilePolicy(ctx, dao.Principal, definitions.DatabaseTarget{
+							DatabaseID:        dao.ID,
+							DefinitionID:      dao.DefinitionID,
+							DefinitionType:    dao.DefinitionType,
+							DefinitionVersion: dao.DatabaseVersion,
+						}, table, "insert", ignoreReq.Data[0]); err != nil {
+							return nil, err
+						}
 					}
 					return decodeResultPayload(dao.InsertIgnoreJSON(ctx, table, ignoreReq))
 				}
@@ -194,12 +243,28 @@ func (api *API) handleQueryRows() http.HandlerFunc {
 				if err := tools.DecodeJSON(req.Body, &updateReq); err != nil {
 					return nil, err
 				}
+				if _, err := api.definitions.CompilePolicy(ctx, dao.Principal, definitions.DatabaseTarget{
+					DatabaseID:        dao.ID,
+					DefinitionID:      dao.DefinitionID,
+					DefinitionType:    dao.DefinitionType,
+					DefinitionVersion: dao.DatabaseVersion,
+				}, table, "update", updateReq.Data); err != nil {
+					return nil, err
+				}
 				return decodeResultPayload(dao.UpdateJSON(ctx, table, updateReq))
 			}
 		case "delete":
 			{
 				var deleteReq DeleteRequest
 				if err := tools.DecodeJSON(req.Body, &deleteReq); err != nil {
+					return nil, err
+				}
+				if _, err := api.definitions.CompilePolicy(ctx, dao.Principal, definitions.DatabaseTarget{
+					DatabaseID:        dao.ID,
+					DefinitionID:      dao.DefinitionID,
+					DefinitionType:    dao.DefinitionType,
+					DefinitionVersion: dao.DatabaseVersion,
+				}, table, "delete", nil); err != nil {
 					return nil, err
 				}
 				return decodeResultPayload(dao.DeleteJSON(ctx, table, deleteReq))
